@@ -1,25 +1,29 @@
 # User Feedback & Implicit Signals
 
-> **TL;DR** — Users tell you how the assistant is doing, sometimes directly (thumbs, ratings, corrections) and much more often indirectly (retries, rephrasing, copying, escalating, abandoning). Explicit feedback is sparse and biased. Implicit signals are plentiful but noisy. Neither is a quality metric on its own. Link both to traces, treat them as **triage signals and weak labels**, and confirm with judges or humans before they become ground truth.
+> **TL;DR**
+> - **Capture both explicit and implicit signals.** Log thumbs, reason chips, and inline corrections alongside behavioral signals like retries, regenerations, escalations, and copies.
+> - **Link every feedback event to a `trace_id`.** Attach user signals directly to trace records so you can inspect the exact prompt, context, and SQL query.
+> - **Treat user feedback as a triage signal, not a rate.** Use biased feedback to find failures, and rely on uniform-sample judges for unbiased quality rates.
+> - **Promote feedback to dataset labels in stages.** Corroborate user signals with LLM judges and SME review before adding cases to golden datasets.
 
-**You'll learn:** the catalogue of explicit and implicit signals for an agentic RAG assistant · biases and sparsity, and how to correct for them · how to turn feedback into labels · feedback UX design · linking feedback to traces · using feedback to prioritize error analysis
- ·  **Prerequisites:** [Observability & tracing](./02-observability-and-tracing.md), [Online evals](./01-online-evals.md)
- ·  **Related:** [Production data flywheel](../01-datasets/04-production-data-flywheel.md), [SME golden datasets](../01-datasets/02-sme-golden-datasets.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
+**You will learn:** Explicit and implicit signal catalog · Sparsity and bias corrections · Feedback UX design · Trace linking, label promotion, and weekly error analysis  
+**Prerequisites:** [Observability & tracing](./02-observability-and-tracing.md), [Online evals](./01-online-evals.md)  
+**Related:** [Production data flywheel](../01-datasets/04-production-data-flywheel.md), [SME golden datasets](../01-datasets/02-sme-golden-datasets.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
 
 ---
 
 ## 1. Why feedback matters, and why it isn't enough
 
-Online judges tell you whether an answer is *grounded* and *relevant*. Only users can tell you whether it was *useful*: right for their context, in time, at the level of detail they needed. Feedback is also the cheapest source of **real failure cases** for your datasets.
+Online LLM judges evaluate whether an answer is *grounded* and *relevant*. Only real users know whether an answer is *useful* for their task, timeline, and level of detail. User feedback also provides your cheapest stream of **real production failure cases** for offline datasets.
 
-But:
+However, raw user feedback has four major limitations:
 
-- **It's sparse.** Most interactions get no explicit feedback.
-- **It's biased.** Who leaves feedback, when, and why is far from random.
-- **It's ambiguous.** A thumbs-down can mean wrong, slow, unhelpful format, refused, or "I don't like the policy the bot correctly quoted".
-- **It's lagging.** Some signals (ticket reopened, wrong number used in a report) arrive hours or days later.
+- **Sparsity:** Most user sessions leave zero explicit ratings.
+- **Selection bias:** Users who click feedback buttons do not represent your average user population.
+- **Ambiguity:** A thumbs-down can mean wrong facts, high latency, bad formatting, a policy refusal, or frustration with company policy.
+- **Latency lag:** Downstream signals (such as reopened tickets or disputed finance numbers) arrive hours or days after the conversation.
 
-So use feedback to **find and prioritize** failures, and confirm them with judges and human review before treating them as truth.
+Use feedback to **surface and prioritize** candidate failures, and verify them with LLM judges and human reviewers before treating them as ground truth.
 
 ---
 
@@ -27,53 +31,53 @@ So use feedback to **find and prioritize** failures, and confirm them with judge
 
 | Signal | Example UX | Information content | Typical volume | Notes |
 |---|---|---|---|---|
-| **Binary thumbs** | 👍 / 👎 on each answer | Low per event, but easy to aggregate | Low | Default starting point |
-| **Thumbs + reason** | 👎 opens chips: *Incorrect · Not relevant · Missing info · Outdated · Too long · Wrong data access · Other* | Medium: gives a failure category | Lower than thumbs | Chips map directly to your failure taxonomy |
-| **Rating scale** | 1–5 stars, CSAT at session end | Medium, noisy calibration across users | Low | Users anchor differently; prefer binary + reason |
-| **Free-text comment** | "Tell us more" box | High, unstructured | Very low | Classify with an LLM into categories; read them all early on |
-| **Correction / edit** | User edits the answer or provides the right value ("It's $41.2M, not $42.1M") | **Very high**: close to a reference answer | Very low | Gold for datasets, after SME validation |
-| **Pairwise choice** | "Which answer is better?" (two drafts) | High for preference | Very low | Use sparingly; adds friction |
-| **Source feedback** | "This source isn't relevant" on a citation | High for retrieval | Very low | Direct relevance label for retrieval eval sets |
-| **Report / flag** | "Report a problem", "This exposes data I shouldn't see" | High severity | Rare | Must route to a security/on-call queue, not just analytics |
+| **Binary thumbs** | 👍 / 👎 on each assistant turn | Low per event, easy to aggregate | Low | Best default starting point |
+| **Thumbs + reason** | 👎 opens reason chips: *Incorrect · Not relevant · Missing info · Outdated · Too long · Wrong data access · Other* | Medium — assigns a failure category | Lower than thumbs | Map chips directly to your failure taxonomy |
+| **Rating scale** | 1–5 stars or end-of-session CSAT | Medium, noisy calibration across users | Low | Users anchor scales differently — prefer binary thumbs + reason chips |
+| **Free-text comment** | "Tell us more" input box | High, unstructured detail | Very low | Classify comments with an LLM and read every comment early on |
+| **Correction / edit** | User edits the output or supplies the right value ("It's $41.2M, not $42.1M") | **Very high** — close to a reference answer | Very low | High-value golden dataset candidates after SME verification |
+| **Pairwise choice** | "Which response is better?" side-by-side card | High for preference tuning | Very low | Use sparingly because side-by-side comparison adds friction |
+| **Source feedback** | "This source is not relevant" on a cited chunk | High for retriever evaluation | Very low | Provides direct relevance labels for retrieval benchmarks |
+| **Report / flag** | "Report a problem" or "Exposes restricted data" | High severity | Rare | Route directly to a security or on-call queue, not just analytics |
 
 ### 2.1 Feedback UX design checklist
 
-- [ ] **Per answer, not per session only.** Session CSAT can't tell you which turn failed.
-- [ ] **One click to give, optional to elaborate.** Thumbs first; reason chips appear only after 👎 (or 👍 for "what was good").
-- [ ] **Reason chips map to your failure taxonomy** (see [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)) so feedback arrives already categorized: e.g. *Wrong facts*, *Didn't find the doc*, *Wrong numbers/SQL*, *Didn't do the action*, *Did the wrong action*, *Refused unnecessarily*, *Too slow*, *Format*.
-- [ ] **Let users correct inline** where the answer is structured, such as a number, a SQL result, or a ticket field.
-- [ ] **Make feedback visible as acknowledged** ("Thanks, this helps improve answers"), and if you can, close the loop ("We fixed an issue you reported"). Users who see impact give more feedback.
-- [ ] **Avoid dark patterns.** Don't nag after every answer, and don't hide 👎.
-- [ ] **Capture context automatically.** Attach the `trace_id`, version tags, and visible UI state. Never ask users to describe what they asked.
-- [ ] **Privacy notice.** Tell users that feedback (and possibly the conversation) may be reviewed by humans. Many enterprises require this.
-- [ ] **Separate "report a security/data issue"** from quality feedback, and route it to a security queue with an SLA.
+- [ ] **Collect feedback per assistant turn, not just per session.** Session-level CSAT cannot pinpoint which turn failed.
+- [ ] **Make rating one click and elaboration optional.** Capture 👍 or 👎 immediately, then display optional reason chips.
+- [ ] **Map reason chips directly to your failure taxonomy** (see [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)), such as *Wrong facts*, *Didn't find the doc*, *Wrong numbers/SQL*, *Did the wrong action*, *Refused unnecessarily*, and *Too slow*.
+- [ ] **Enable inline user corrections** on structured outputs such as SQL queries, financial figures, or ticket fields.
+- [ ] **Acknowledge submitted feedback immediately** and notify users when their reports lead to fixes.
+- [ ] **Avoid dark patterns.** Never block workflow progress with pop-ups or hide the 👎 button.
+- [ ] **Attach trace metadata automatically.** Log `trace_id`, version tags, and UI state without asking the user to re-explain their prompt.
+- [ ] **Show a clear privacy notice.** Inform users that human reviewers may inspect flagged conversations.
+- [ ] **Separate security and data-leak reporting** from general quality feedback and route security flags to an on-call queue with an SLA.
 
 ---
 
 ## 3. Implicit signals
 
-Implicit signals come from behavior. They're dense (every session produces some) but need interpretation. The table is organized by what the signal most likely means for the running example (enterprise assistant with docs, SQL, and ticket creation).
+Implicit signals come from natural user behavior. Every session generates implicit signals, but you must interpret them carefully for your product workflow.
 
 | Signal | How to detect | Likely meaning | Direction | Confidence | Pitfalls |
 |---|---|---|---|---|---|
-| **Copy answer / copy SQL / copy table** | UI copy event on answer or code block | Answer was useful enough to reuse | + | Medium | Users also copy in order to correct it elsewhere |
-| **Regenerate** | "Regenerate" button | Unsatisfied with that answer | − | Medium–high | Some users regenerate to see variety |
-| **Rephrase / retry** | Next user turn within N seconds that is semantically similar to the previous one (embedding similarity > τ) | Previous answer missed intent or failed | − | Medium | Legit follow-ups can look similar; calibrate τ on labeled pairs |
-| **"That's wrong" follow-up** | Classifier / LLM on next user turn: contradiction, correction, frustration | Explicit dissatisfaction in natural language | − | High | Sarcasm, multilingual phrasing; classify, don't regex |
-| **Abandonment** | Session ends right after an answer with no further action, *or* user leaves during streaming | Could be success (got answer) or failure (gave up) | ? | Low alone | Must be combined with other signals; streaming abandonment more likely negative |
-| **Escalation to human** | User clicks "talk to a person", opens a manual ticket on same topic within T minutes | Assistant didn't resolve the need | − | High | Some flows *should* escalate (policy); segment by intent |
-| **Ticket created via tool** | `create_ticket` succeeded | Task completed (if user wanted it) | + / ? | Medium | Also check: was the ticket **reopened / rejected / duplicated**? |
-| **Ticket reopened / rejected** | Downstream system webhook | Wrong action or wrong content | − | High (delayed) | Requires integration with ticketing system |
-| **Citation click-through** | Click on a cited source | Users want to verify or read more | ? | Low–medium | Could mean trust *or* distrust; strongly position-biased |
-| **Dwell / read time** | Time visible on screen, scroll depth | Engagement | ? | Low | Long dwell = reading carefully or confused |
-| **Follow-up depth** | Number of turns before goal | More turns can mean exploration *or* struggle | ? | Low alone | Compare within intent type |
-| **Downstream use** | Answer pasted into a doc/report; SQL saved as a query; dashboard created | Strong usefulness | + | High | Requires product integration and consent |
-| **Feature disuse** | User stops returning (weekly active drop) | Product-level dissatisfaction | − | Low per user, meaningful in aggregate | Confounded by everything else |
-| **Clarification acceptance** | Assistant asks a clarifying question and the user answers it vs. ignores it | Clarification was helpful / annoying | ± | Medium | |
+| **Copy answer / copy SQL / copy table** | UI copy event on answer text or code block | Output was useful enough to reuse | + | Medium | Users sometimes copy text to fix or critique it elsewhere |
+| **Regenerate** | User clicks "Regenerate" | User was dissatisfied with the initial answer | − | Medium–high | Some users click regenerate simply to explore alternatives |
+| **Rephrase / retry** | Next user turn arrives within $N$ seconds with high embedding similarity ($> \tau$) | Previous answer missed the user's intent | − | Medium | Valid follow-up questions can look similar — calibrate $\tau$ on labeled pairs |
+| **"That's wrong" follow-up** | Classifier or LLM detects contradiction, correction, or frustration in next turn | Explicit natural-language dissatisfaction | − | High | Regex misses sarcasm and multilingual phrasing — use a classifier |
+| **Abandonment** | Session ends immediately after an answer or while tokens are still streaming | Could mean task completion or user frustration | ? | Low alone | Combine with other signals — mid-stream abandonment is usually negative |
+| **Escalation to human** | User clicks "Talk to support" or opens a manual ticket on the same topic within $T$ minutes | Assistant failed to resolve the user's problem | − | High | Some policy flows require human escalation — segment by intent |
+| **Ticket created via tool** | `create_ticket` tool call succeeded | Assistant completed the requested action | + / ? | Medium | Check downstream outcomes to see whether the ticket was reopened or rejected |
+| **Ticket reopened / rejected** | Ticketing webhook reports reopen, rejection, or duplicate closure | Assistant created the wrong ticket or bad content | − | High (delayed) | Requires webhook integration with your ticketing system |
+| **Citation click-through** | User clicks a cited document link | User wants to verify claims or read deeper | ? | Low–medium | Reflects either curiosity or distrust and suffers from strong position bias |
+| **Dwell / read time** | Time spent viewing the answer and scroll depth | User engagement with the response | ? | Low | Long dwell time can indicate careful reading or confusion |
+| **Follow-up depth** | Number of turns before session end | Multi-turn exploration or repeated struggle | ? | Low alone | Compare turn count against the baseline for that intent |
+| **Downstream use** | User exports SQL, saves a query, or pastes the answer into a report | Strong task utility | + | High | Requires product instrumentation and user consent |
+| **Feature disuse** | User stops returning to the assistant (cohort retention drop) | Product-level dissatisfaction | − | Low per user, high in aggregate | Confounded by seasonal workload and product changes |
+| **Clarification acceptance** | User answers vs. ignores the assistant's clarifying question | Clarification question was helpful vs. annoying | ± | Medium | Track per intent category |
 
 ### 3.1 Turning raw events into signals
 
-Raw clickstream needs to become **per-trace and per-session signals** that you can store next to eval scores:
+Convert raw clickstream events into structured **per-trace and per-session signal records** stored alongside your online eval scores:
 
 ```python
 from dataclasses import dataclass
@@ -104,12 +108,12 @@ def implicit_failure_score(s: TurnSignals) -> float:
     return max(0.0, min(1.0, score))
 ```
 
-Calibrate the weights: label ~200 traces by hand (good / bad), then fit a simple logistic regression on the signals or adjust the weights so the score ranks bad traces above good ones. Re-check after UI changes, because a moved button changes the signal's base rate.
+Calibrate these weights against human judgment. Hand-label ~200 traces as good or bad, fit a logistic regression model on the signal features, and recalibrate whenever UI layout changes alter button click rates.
 
 ### 3.2 Detecting rephrase and "that's wrong" follow-ups
 
-- **Rephrase:** embed consecutive user turns. If cosine similarity is above a threshold and the second turn arrives within a short window, flag it. Calibrate the threshold on a few hundred labeled pairs. "Show me Q3 EMEA revenue" → "EMEA revenue for Q3 FY26 please" is a rephrase. "Now break it down by country" is a follow-up.
-- **Negative follow-up:** a small classifier or cheap LLM call on the *next* user message with labels like `correction`, `frustration`, `clarification`, `new_topic`, `thanks`. This is one of the most informative implicit signals for chat assistants, and it's language-agnostic if you use an LLM.
+- **Rephrase detection:** Embed consecutive user turns in the same session. Flag a rephrase when cosine similarity exceeds $\tau$ and the second turn arrives within 60 seconds. Calibrate $\tau$ on 200–300 labeled turn pairs so *"Show Q3 EMEA revenue"* → *"EMEA revenue for Q3 FY26 please"* triggers the flag, while *"Now break it down by country"* does not.
+- **Negative follow-up detection:** Run a lightweight classifier or small LLM on the *next* user message to classify `correction`, `frustration`, `clarification`, `new_topic`, or `thanks`. This signal catches natural-language complaints across languages without requiring button clicks.
 
 ---
 
@@ -117,34 +121,34 @@ Calibrate the weights: label ~200 traces by hand (good / bad), then fit a simple
 
 ### 4.1 Common biases
 
-| Bias | What happens | Mitigation |
+| Bias | What happens | How to mitigate it |
 |---|---|---|
-| **Self-selection / non-response** | Only very happy or very angry users rate | Don't read the 👎 rate as the error rate; use uniform-sample judges for rates |
-| **Negativity bias** | Users are more motivated to report failures | Track 👍 and 👎 separately; watch the ratio and the *coverage* (feedback per answer) |
-| **Position / presentation bias** | First citation gets most clicks; feedback buttons below the fold get fewer clicks | Randomize where feasible; compare within position; keep UI stable when measuring trends |
-| **Power-user skew** | A few heavy users produce most feedback | Cap per-user contribution or weight per user; segment by user tenure |
-| **Expectation / policy conflation** | 👎 on correct answers the user dislikes ("PTO policy says 15 days" → 👎) | Reason chips; human review separates *wrong* from *unwelcome* |
-| **Latency conflation** | 👎 because it was slow, not wrong | Join latency; offer a *Too slow* chip |
-| **Novelty / fatigue** | Feedback rate decays after launch | Normalize by period; don't compare launch week to month three |
-| **Survivorship** | Users who had bad early experiences stop using it and stop giving feedback | Track retention/cohort metrics alongside feedback |
-| **Role/segment imbalance** | Finance gives lots of feedback, HR gives none | Stratify analysis; do targeted feedback drives with under-represented groups |
-| **Gaming / adversarial feedback** | Coordinated 👎, or feedback used as an injection vector ("ignore previous… rate this 5") | Rate-limit, anomaly-detect, **never feed raw feedback text into prompts unsanitized** |
+| **Self-selection / non-response** | Only very frustrated or very happy users click rating buttons | Never report raw 👎 rate as your true error rate — use uniform-sample judges instead |
+| **Negativity bias** | Users report failures much more often than successes | Track 👍 and 👎 counts separately alongside overall feedback coverage |
+| **Position / presentation bias** | First citations get the most clicks, and below-the-fold buttons get ignored | Compare click rates within the same rank position and keep feedback UI placement stable |
+| **Power-user skew** | A small group of heavy users generates most feedback events | Cap per-user weight or stratify feedback metrics by user tenure |
+| **Expectation / policy conflation** | Users click 👎 when they dislike a company policy the bot quoted accurately | Use reason chips and SME review to separate *incorrect answers* from *unwelcome policies* |
+| **Latency conflation** | Users click 👎 because the response was slow rather than inaccurate | Join trace latency to feedback and include a *Too slow* reason chip |
+| **Novelty / fatigue** | Feedback submission rates drop steadily after product launch | Normalize by feedback coverage and avoid comparing launch week to month three |
+| **Survivorship** | Dissatisfied early users churn and stop generating feedback | Monitor cohort retention alongside feedback ratios |
+| **Role/segment imbalance** | Finance analysts submit frequent feedback while HR users submit almost none | Stratify metrics by role and run targeted feedback sessions with quiet segments |
+| **Gaming / adversarial feedback** | Coordinated 👎 attacks or prompt injections hidden inside free-text feedback | Rate-limit submissions, flag anomalies, and **never inject raw feedback text into prompts** |
 
-Classic work on implicit feedback in search (e.g. Joachims et al., ["Accurately Interpreting Clickthrough Data as Implicit Feedback"](https://www.cs.cornell.edu/people/tj/publications/joachims_etal_05a.pdf)) showed that clicks are informative mostly as **relative** signals because of strong position bias. That lesson carries over to citation clicks.
+As Joachims et al. demonstrated in ["Accurately Interpreting Clickthrough Data as Implicit Feedback"](https://www.cs.cornell.edu/people/tj/publications/joachims_etal_05a.pdf), click data works best as a **relative** preference signal due to strong position bias. Apply the same principle to citation clicks.
 
 ### 4.2 Dealing with sparsity
 
-- **Measure coverage:** `feedback_rate = traces_with_explicit_feedback / traces`. Report it next to any feedback-derived metric.
-- **Aggregate wisely:** compute 👎 rates over enough events (and show confidence intervals). Per-day, per-segment 👎 rates are often too noisy to act on.
-- **Combine signals:** a composite "implicit failure" score (section 3.1) covers far more traces than thumbs alone.
-- **Don't A/B test on thumbs alone** unless you've done the power math (see [Online evals §5.3](./01-online-evals.md)).
-- **Targeted prompting:** ask for feedback more often on new versions, new intents, or low-confidence answers. Tag those events with `solicited=true` so you can account for the bias.
+- **Report feedback coverage:** Compute `feedback_rate = traces_with_explicit_feedback / total_traces` and display it next to every feedback chart.
+- **Aggregate over sufficient volume:** Compute 👎 rates over weekly or biweekly windows with confidence intervals rather than noisy daily slices.
+- **Combine explicit and implicit signals:** Use the composite `implicit_failure_score` (Section 3.1) to rank all traces, not just the 1–3% with thumbs.
+- **Avoid running A/B tests on thumbs alone** unless power calculations confirm sufficient sample size (see [Online evals §5.3](./01-online-evals.md)).
+- **Solicit targeted feedback sparingly:** Prompt users for ratings slightly more often on canary versions or new intents, and tag those events `solicited = true`.
 
 ---
 
 ## 5. Linking feedback to traces
 
-Feedback that can't be joined to a trace is close to useless for debugging.
+User feedback is useless for debugging unless you can join it back to the exact execution trace.
 
 ```mermaid
 sequenceDiagram
@@ -163,42 +167,42 @@ sequenceDiagram
     T-->>T: trigger async judges and review queue
 ```
 
-Checklist:
+Follow this trace-linking checklist:
 
-- [ ] API returns `trace_id` (and `session_id`) with every answer; UI stores it per message.
-- [ ] Feedback events include: `trace_id`, `session_id`, `user_id_hash`, `timestamp`, `type` (`thumbs`, `rating`, `comment`, `correction`, `implicit:*`), `value`, `reason`, `ui_version`, `solicited`.
-- [ ] Late signals (ticket reopened two days later) carry a correlation ID (e.g. `ticket_id` logged on the tool span) so you can join back to the originating trace.
-- [ ] Feedback is stored as a **score on the trace** in your observability tool *and* in your analytics warehouse for joins with business data.
-- [ ] Edits/retractions are supported (user changes 👎 to 👍). Keep the latest value, and keep history for audit.
-- [ ] Free-text feedback goes through the **same PII redaction** as traces.
+- [ ] Return `trace_id` and `session_id` with every API response and store them on the frontend message object.
+- [ ] Include `trace_id`, `session_id`, `user_id_hash`, `timestamp`, `type` (`thumbs`, `rating`, `comment`, `correction`, `implicit:*`), `value`, `reason`, `ui_version`, and `solicited` on every feedback event.
+- [ ] Log external correlation IDs (such as `ticket_id`) on tool spans so delayed webhooks can join back to the originating `trace_id`.
+- [ ] Write feedback events both as **trace scores** in your observability platform and as rows in your analytics warehouse.
+- [ ] Support feedback edits (such as changing 👎 to 👍) by updating the active score while preserving an audit log.
+- [ ] Run free-text feedback comments through the **same PII redaction pipeline** used for traces.
 
 ---
 
 ## 6. Converting feedback into labels
 
-Feedback is a **weak label**. Promote it in steps:
+Treat raw user feedback as a **weak signal** and promote it into trusted dataset labels through five stages:
 
-| Stage | Example | Trust | Use for |
+| Stage | Example | Trust level | Best use |
 |---|---|---|---|
-| 0. Raw signal | 👎, rephrase detected | Low | Triage only |
-| 1. Signal + reason | 👎 + *Wrong numbers* | Low–medium | Routing to the right reviewer; category trends |
-| 2. Judge-corroborated | 👎 + faithfulness judge says `unsupported` | Medium | Prioritizing review; provisional regression candidates |
-| 3. Human-reviewed | SME confirms: SQL used wrong fiscal calendar | High | Regression test, eval dataset, judge calibration |
-| 4. With reference | SME writes the correct answer / gold SQL / relevant doc IDs | Highest | Golden dataset (see [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)) |
+| **0. Raw signal** | 👎 click or detected query rephrase | Low | Queue triage only |
+| **1. Signal + reason** | 👎 + *Wrong numbers* chip | Low–medium | Routing to domain reviewers and tracking category trends |
+| **2. Judge-corroborated** | 👎 + faithfulness judge returns `unsupported` | Medium | Prioritizing human review and flagging regression candidates |
+| **3. Human-reviewed** | SME confirms SQL used calendar quarters instead of fiscal quarters | High | Regression tests, evaluation datasets, and judge calibration |
+| **4. With reference** | SME writes the reference answer, gold SQL, or relevant doc IDs | Highest | Golden benchmark dataset (see [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)) |
 
-Rules of thumb:
+Follow these rules when promoting feedback into dataset rows:
 
-- **User corrections** are the shortest path to reference answers, but verify them. Users are sometimes wrong, or have access to data the assistant doesn't.
-- **Positive feedback is valuable too.** 👍 traces (after review) make good "should still pass" regression cases and balance your datasets, which otherwise fill up with failures.
-- **Don't train or tune directly on raw thumbs** (e.g. preference tuning) without de-biasing and review. You'll optimize for whatever users with feedback habits like, including confident-sounding wrong answers.
-- **Use feedback to validate judges.** If the judge says `supported` on traces that SMEs confirmed wrong, add them to the judge's calibration set (see [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)).
-- Record the **label source** (`user`, `judge`, `sme`) and **confidence** on every dataset row.
+- **Verify user corrections before trusting them.** User edits provide fast reference answers, but SMEs must confirm the user was not mistaken or viewing restricted outside data.
+- **Harvest positive feedback too.** Verified 👍 traces provide essential *"must continue to pass"* test cases that prevent your dataset from containing only edge-case failures.
+- **Never fine-tune or optimize prompts directly on raw thumbs.** De-bias and review feedback first so you do not reward sycophantic or confident-sounding hallucinations.
+- **Feed judge disagreements into judge calibration.** When SMEs confirm a 👎 trace failed despite a `supported` judge verdict, add that trace to your judge calibration set (see [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)).
+- **Log `label_source` and `confidence` on every dataset row** (`user`, `judge`, or `sme`).
 
 ---
 
 ## 7. Using feedback to prioritize error analysis
 
-Feedback tells you **where to look**. Error analysis tells you **what's wrong**. A practical weekly loop:
+User feedback tells you **where to look**, while error analysis tells you **what to fix**. Run this weekly error-analysis loop:
 
 ```mermaid
 flowchart TD
@@ -213,51 +217,51 @@ flowchart TD
     I --> A
 ```
 
-Practical guidance:
+Follow these practices during weekly review sessions:
 
-- **Always include a random sample** alongside the feedback-ranked traces (e.g. 20%). Otherwise you only see failures that users bothered to report and miss the silent ones: confidently wrong answers that users trusted.
-- **Annotate root cause by component** (`query_rewrite`, `retrieval`, `rerank`, `generation`, `sql_generation`, `tool_selection`, `guardrail_false_positive`, `data_quality`, `policy_gap`). That tells you which team owns the fix.
-- **Open coding first, then a taxonomy.** In the first weeks, write free-form notes on each failure and cluster them later. This mirrors the error-analysis process Hamel Husain and Shreya Shankar describe (see Further reading).
-- **Impact scoring** (heuristic): `impact = frequency × severity × reach`, where severity is graded, e.g. *data leak* > *wrong number in finance* > *irrelevant answer* > *formatting*.
-- **Track fixes against signals.** After a fix ships, the relevant reason chip and implicit failure score for that segment should drop. If they don't, the fix didn't work or the diagnosis was wrong.
+- **Mix a 20% uniform random sample into your review queue.** Reviewing only feedback-ranked traces blinds you to silent failures where users trusted a confident hallucination.
+- **Tag the failing component on every reviewed trace** (`query_rewrite`, `retrieval`, `rerank`, `generation`, `sql_generation`, `tool_selection`, `guardrail_false_positive`, `data_quality`, `policy_gap`) so the right engineering owner can fix it.
+- **Start with open coding before locking your taxonomy.** Write short plain-text failure notes on your first 50–100 traces, then group recurring patterns into taxonomy categories (see Hamel Husain and Shreya Shankar in Further reading).
+- **Rank fixes by `impact = frequency × severity × reach`.** Weight severity highest for data leaks and financial errors, and lowest for minor formatting issues.
+- **Verify that shipped fixes move the target signal.** After deploying a fix, confirm that the specific reason chip and `implicit_failure_score` drop for the affected user slice.
 
 ### 7.1 Example: from feedback to fix
 
-1. 👎 rate with chip *Wrong numbers* doubles for `finance_analyst` over a week.
-2. Filtering those traces shows they all have `fiscal_quarter` filters. The SQL-alignment judge flags ~40% of them.
-3. SME review finds that the model uses calendar quarters. The fiscal calendar table was renamed in the warehouse and the schema description in the prompt is stale (corpus/schema drift, see [Monitoring & drift](./04-monitoring-alerting-and-drift.md)).
-4. Fix: update the schema docs used for SQL generation, and add a deterministic check that the fiscal calendar join is present when "quarter" appears.
-5. Add 25 reviewed cases with gold SQL to the [text-to-SQL eval set](../02-offline-evals/05-text-to-sql-evals.md). Ship via canary, and watch the chip rate and SQL judge return to baseline.
+1. **Detect the spike:** The 👎 rate with the *Wrong numbers* reason chip doubles for `finance_analyst` users over seven days.
+2. **Isolate the slice:** Filtering those traces reveals that all failing queries filter on `fiscal_quarter`, and the online SQL-alignment judge flags 40% of them.
+3. **Diagnose root cause:** SME review shows the LLM generated calendar-quarter logic because the data engineering team renamed the fiscal calendar warehouse table without updating the SQL prompt schema description (see [Monitoring & drift](./04-monitoring-alerting-and-drift.md)).
+4. **Ship the fix:** Update the SQL prompt's schema documentation and add a deterministic SQL check requiring the fiscal calendar table join whenever a query mentions quarters.
+5. **Lock in regression coverage:** Add 25 SME-reviewed queries with gold SQL to the [text-to-SQL benchmark](../02-offline-evals/05-text-to-sql-evals.md), roll out via canary, and confirm the *Wrong numbers* chip rate returns to baseline.
 
 ---
 
 ## 8. Metrics to report from feedback
 
-| Metric | Definition | Caveat |
+| Metric | Definition | Reporting caveat |
 |---|---|---|
-| Feedback coverage | % of answers with any explicit feedback | Report next to every feedback metric |
-| 👎 rate (given feedback) | 👎 / (👍 + 👎) | Biased; trend within stable UI only |
-| 👎 reasons mix | Distribution over chips | Great for prioritization |
-| Rephrase/retry rate | % turns followed by a rephrase within N s | Calibrate detector |
-| Negative follow-up rate | % turns followed by correction/frustration | Classifier quality matters |
-| Regenerate rate | % answers regenerated | UI-dependent |
-| Escalation rate | % sessions escalated to a human within T | Segment by intent; some escalations are correct |
-| Action success | % tool actions (tickets) not reopened/rejected within X days | Delayed; needs integration |
-| Copy / reuse rate | % answers copied or saved | Positive proxy; UI-dependent |
-| Implicit failure score | Composite (section 3.1) | Calibrate; use for ranking |
+| **Feedback coverage** | % of assistant turns with any explicit feedback | Always display alongside feedback-derived rates |
+| **👎 rate (given feedback)** | $\text{👎} / (\text{👍} + \text{👎})$ | Selection-biased — compare trends only across a stable UI |
+| **👎 reasons mix** | Share of 👎 events per reason chip | Best signal for weekly backlog prioritization |
+| **Rephrase/retry rate** | % of turns followed by a semantic rephrase within $N$ seconds | Recalibrate threshold $\tau$ when changing embedding models |
+| **Negative follow-up rate** | % of turns followed by a user correction or frustration message | Depends on follow-up classifier accuracy |
+| **Regenerate rate** | % of responses where the user clicked "Regenerate" | Sensitive to button placement in the UI |
+| **Escalation rate** | % of sessions escalated to human support within $T$ minutes | Segment by intent because some policies require escalation |
+| **Action success rate** | % of tool-created tickets not reopened or rejected within $X$ days | Delayed metric requiring ticketing webhook integration |
+| **Copy / reuse rate** | % of answers or SQL blocks copied or saved by the user | Useful positive proxy, though UI-dependent |
+| **Implicit failure score** | Weighted composite score across turn signals (Section 3.1) | Calibrate against SME labels and use for queue ranking |
 
-These feed the dashboards in [Monitoring & drift](./04-monitoring-alerting-and-drift.md).
+Feed these metrics directly into the operational dashboards covered in [Monitoring & drift](./04-monitoring-alerting-and-drift.md).
 
 ---
 
 ## Key takeaways
 
-- Collect **explicit** (thumbs + reason chips, corrections) and **implicit** (rephrase, regenerate, negative follow-up, escalation, ticket outcome, copy) signals, all **linked to `trace_id`**.
-- Explicit feedback is **sparse and biased**. Use it to *find* failures, not to *measure* the error rate. Uniform-sample judges measure rates.
-- Design feedback UX so reasons map to your failure taxonomy, with one-click capture and optional detail.
-- Promote feedback to labels through **judge corroboration and human review**, and record the label source and confidence.
-- Always mix a **random sample** into review queues so you catch the silent failures users never report.
-- Feedback text is untrusted input. Redact it, rate-limit it, and never put it into prompts unsanitized.
+- Capture both **explicit signals** (thumbs, reason chips, inline edits) and **implicit signals** (rephrases, regenerations, negative follow-ups, escalations, ticket outcomes, copies) linked to `trace_id`.
+- Treat explicit feedback as **sparse and biased**. Use feedback to *discover* failures, and use uniform-sample LLM judges to *measure* population quality rates.
+- Map feedback reason chips directly to your failure taxonomy with one-click submission.
+- Promote raw feedback into dataset rows through **judge corroboration and SME review**, logging `label_source` and `confidence`.
+- Include a **uniform random sample** in every human review queue so you catch silent hallucinations that users never report.
+- Treat free-text feedback as untrusted user input: redact PII, rate-limit submissions, and never inject raw feedback into prompts.
 
 ## Further reading
 

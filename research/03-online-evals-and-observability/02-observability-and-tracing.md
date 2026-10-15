@@ -1,36 +1,40 @@
 # Observability & Tracing for Agentic RAG
 
-> **TL;DR** — A trace is the full record of one agent run: every retrieval, rerank, LLM call, tool call, SQL query and guardrail decision, with inputs, outputs, versions, tokens, latency and cost. Without traces you can't debug, run online evals, collect feedback, or build datasets from production. Instrument with OpenTelemetry-compatible conventions (OTel GenAI semantic conventions or OpenInference), group traces into sessions, tag every prompt/model version, and redact PII before it reaches long-term storage.
+> **TL;DR**
+> - **Emit one complete trace per user turn.** Record every retrieval, rerank, LLM call, tool execution, SQL query, and guardrail check with child spans.
+> - **Tag every version and group into sessions.** Log prompt, model, index, and config versions plus `session_id` to isolate regressions fast.
+> - **Adopt OpenTelemetry conventions.** Use OTel GenAI semantic conventions or OpenInference and add application attributes under `app.*`.
+> - **Scrub PII before export and enforce ACLs.** Redact sensitive payloads at the source, restrict trace viewing by document permissions, and tier retention.
 
-**You'll learn:** the span model for an agentic RAG request · exactly what to log per span type · OTel GenAI semantic conventions and OpenInference at a high level · session/thread grouping and version tagging · privacy, redaction and retention · the tool landscape · a full example trace for the running example
- ·  **Prerequisites:** [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Online evals](./01-online-evals.md)
- ·  **Related:** [User feedback](./03-user-feedback-and-implicit-signals.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)
+**You will learn:** Agentic RAG span hierarchy · Per-span logging specifications · OTel GenAI and OpenInference standards · Session grouping, version tagging, PII redaction, and tool selection  
+**Prerequisites:** [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Online evals](./01-online-evals.md)  
+**Related:** [User feedback](./03-user-feedback-and-implicit-signals.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)
 
 ---
 
 ## 1. Why tracing is the foundation
 
-Logs say *that* something happened. A **trace** shows *why*: the causal chain from user question → query rewrite → retrieval → rerank → LLM plan → SQL → tool call → final answer, with the guardrail decisions interleaved.
+Standard application logs tell you *that* an event occurred. A **trace** shows *why* it occurred by recording the causal chain from user query to final answer, including query rewrites, retrieval, reranking, planning, SQL execution, tool calls, and guardrail decisions.
 
-For agentic RAG, traces are the raw material for almost everything else in this repo:
+For agentic RAG, traces supply the raw data for every other practice in this guide:
 
-| Need | Needs from the trace |
+| Engineering need | Required trace data |
 |---|---|
-| Debugging a bad answer | Retrieved doc IDs and scores, the exact prompt sent, model output, tool results |
-| [Online evals](./01-online-evals.md) | Question, contexts, answer, tool/SQL results, so judges can run reference-free |
-| [User feedback](./03-user-feedback-and-implicit-signals.md) | A `trace_id` to attach thumbs/corrections to |
-| [Monitoring](./04-monitoring-alerting-and-drift.md) | Latency, tokens, cost, error and guardrail attributes to aggregate |
-| [Datasets](../01-datasets/04-production-data-flywheel.md) | Real inputs plus provenance for golden/regression sets |
-| Security & audit | Who asked what, which data they could access, which actions were taken |
-| Cost attribution | Tokens per model per feature per team |
+| Debugging a bad answer | Retrieved doc IDs and scores, exact rendered prompt, model output, and tool results |
+| [Online evals](./01-online-evals.md) | Query, retrieved contexts, answer, and tool/SQL results for reference-free judges |
+| [User feedback](./03-user-feedback-and-implicit-signals.md) | A stable `trace_id` returned to the client so thumbs and corrections link back |
+| [Monitoring](./04-monitoring-alerting-and-drift.md) | Latency, token counts, cost, error classes, and guardrail attributes for aggregation |
+| [Datasets](../01-datasets/04-production-data-flywheel.md) | Real user inputs and provenance metadata for golden and regression sets |
+| Security & audit | User identity, role permissions, accessed documents, and executed write actions |
+| Cost attribution | Input, output, and cached token counts per model, feature, and team |
 
-> **Default:** instrument tracing **before** you build your first online eval or dashboard. Retrofitting it later costs much more.
+> **Default rule:** Instrument tracing **before** you build your first online eval or dashboard. Retrofitting trace context later costs far more effort.
 
 ---
 
 ## 2. The span model for an agentic RAG request
 
-A **trace** is a tree of **spans**. Each span is a timed operation with attributes, events, and a status. A **session** (or thread/conversation) groups multiple traces from the same multi-turn interaction.
+A **trace** is a tree of **spans**. Each span represents one timed operation with structured attributes, events, and a status code. A **session** (or conversation thread) groups multiple traces from a multi-turn user interaction.
 
 ```mermaid
 flowchart TD
@@ -56,171 +60,171 @@ flowchart TD
 
 ### 2.1 Span types and what to log
 
-Use this as a logging spec. "**Must**" means you'll regret not having it; "**Should**" means high value; "**Could**" means nice to have.
+Use these tables as your engineering logging specification. **Must** denotes essential fields, **Should** denotes high-value diagnostic fields, and **Could** denotes optional fields.
 
 #### Root / agent span (one per user turn)
 
 | Attribute | Priority | Why |
 |---|---|---|
-| `trace_id`, `session_id` / `conversation_id`, `turn_index` | Must | Grouping, joining feedback |
-| `user_id` (pseudonymous), `user_role`, `tenant/org`, `department` | Must | RBAC analysis, segmentation |
-| `app_version`, `agent_version`, `prompt_bundle_version`, `config_hash` | Must | Attribute regressions to changes |
-| `environment` (`prod`, `canary`, `shadow`), `experiment_id`, `variant` | Must | A/B, canary, shadow comparisons |
-| Input: user message (redacted per policy) | Must | Debugging, evals, datasets |
-| Output: final answer, citations | Must | Same |
-| `status` (`ok`, `error`, `blocked`, `refused`, `timeout`), `refusal_reason` | Must | Monitoring |
-| Total latency, time-to-first-token | Must | SLOs |
-| Total tokens and **cost** (rolled up from children) | Must | Cost monitoring |
-| Number of LLM calls, tool calls, agent steps | Should | Loop detection, efficiency |
-| Channel (web, Slack, API), locale | Could | Segmentation |
+| `trace_id`, `session_id` / `conversation_id`, `turn_index` | Must | Groups multi-turn conversations and joins user feedback |
+| `user_id` (pseudonymous), `user_role`, `tenant/org`, `department` | Must | Enables RBAC audits and slice analysis |
+| `app_version`, `agent_version`, `prompt_bundle_version`, `config_hash` | Must | Attributes quality regressions to specific releases |
+| `environment` (`prod`, `canary`, `shadow`), `experiment_id`, `variant` | Must | Powers A/B, canary, and shadow comparisons |
+| Input: user message (redacted per policy) | Must | Required for debugging, online evals, and dataset creation |
+| Output: final answer and parsed citations | Must | Required for debugging, online evals, and dataset creation |
+| `status` (`ok`, `error`, `blocked`, `refused`, `timeout`), `refusal_reason` | Must | Drives reliability and refusal monitoring |
+| Total latency and time-to-first-token (TTFT) | Must | Measures latency SLO compliance |
+| Total tokens and **cost** (summed from child spans) | Must | Tracks per-turn and per-session cost |
+| Number of LLM calls, tool calls, and agent steps | Should | Detects runaway loops and measures efficiency |
+| Channel (web, Slack, API) and user locale | Could | Supports channel and language segmentation |
 
 #### Retrieval span
 
 | Attribute | Priority | Why |
 |---|---|---|
-| Query text sent to the retriever (after rewrite) | Must | Rewrite bugs are common |
-| Index/collection name and **index version / snapshot timestamp** | Must | Corpus drift, stale index |
-| `top_k`, filters applied (metadata, ACL), hybrid weights | Must | Reproducibility |
-| Returned **doc/chunk IDs, scores, ranks**, source URIs | Must | Retrieval debugging, online metrics |
-| Count before vs after ACL filtering | Should | Distinguish "nothing relevant" from "nothing permitted" |
-| Embedding model name/version | Should | Drift and recalibration |
-| Chunk text | Could (store by reference) | Volume and privacy; store IDs and resolve on demand |
+| Query text sent to the retriever (after query rewrite) | Must | Exposes query-rewrite bugs quickly |
+| Index/collection name and **index version / snapshot timestamp** | Must | Detects corpus drift and stale indexes |
+| `top_k`, applied filters (metadata, ACL), and hybrid weights | Must | Ensures retrieval reproducibility |
+| Returned **doc/chunk IDs, scores, ranks**, and source URIs | Must | Enables retrieval debugging and weak-retrieval checks |
+| Document count before vs. after ACL filtering | Should | Separates empty retrieval from RBAC permission denials |
+| Embedding model name and version | Should | Tracks embedding migrations and score recalibration |
+| Chunk text (or external storage pointer) | Could | Saves span storage volume and reduces privacy exposure |
 
 #### Rerank span
 
 | Attribute | Priority |
 |---|---|
-| Reranker model/version | Must |
-| Input doc IDs (ranked) and output doc IDs with new scores | Must |
-| Cutoff / threshold used, number dropped | Should |
+| Reranker model name and version | Must |
+| Input doc IDs (ranked) and output doc IDs with rerank scores | Must |
+| Score cutoff threshold and number of dropped chunks | Should |
 
 #### LLM call span (each call: rewrite, plan, answer, judge)
 
 | Attribute | Priority | Why |
 |---|---|---|
-| Provider, requested model, **response model** (exact version string returned) | Must | Silent provider updates (see [Monitoring & drift](./04-monitoring-alerting-and-drift.md)) |
-| Prompt template ID + **version**, template variables | Must | Prompt regressions |
-| Full input messages (system + user + context), or a reference to them | Must (redacted) | Debugging |
-| Output messages, `finish_reason`, tool calls requested | Must | Truncation, tool-use analysis |
-| Input/output tokens (incl. cached/reasoning tokens where reported) | Must | Cost |
-| Latency, TTFT for streaming | Must | SLOs |
-| Parameters: temperature, max tokens, seed, response format | Should | Reproducibility |
-| Retry count, error class (rate limit, timeout, content filter) | Should | Reliability |
-| Cost (computed from a versioned price table) | Should | Cost per feature |
+| Provider, requested model, and **response model** (exact snapshot string) | Must | Catches silent provider model updates (see [Monitoring & drift](./04-monitoring-alerting-and-drift.md)) |
+| Prompt template ID, **version**, and template variables | Must | Isolates prompt regressions |
+| Full input messages (system + user + context) or storage reference | Must (redacted) | Reconstructs exact model context during debugging |
+| Output messages, `finish_reason`, and requested tool calls | Must | Detects output truncation and bad tool calls |
+| Input and output tokens (including cached and reasoning tokens) | Must | Computes exact call cost |
+| Call latency and streaming TTFT | Must | Identifies slow model calls |
+| Generation parameters: temperature, max tokens, seed, response format | Should | Enables deterministic replay |
+| Retry count and error class (rate limit, timeout, content filter) | Should | Tracks provider reliability |
+| Call cost (calculated from a versioned price table) | Should | Attributes spend per prompt and feature |
 
 #### Tool call span
 
 | Attribute | Priority |
 |---|---|
-| Tool name, tool version, `tool_call_id` (links to LLM span that requested it) | Must |
-| Arguments (validated / redacted), schema-validation result | Must |
-| Result summary, status, error class, latency | Must |
-| **Side-effect flag** (read vs write), approval required/granted, approver | Must for write tools |
-| External IDs created (e.g. `ticket_id`) | Should |
+| Tool name, tool version, and `tool_call_id` (links to parent LLM span) | Must |
+| Validated/redacted arguments and schema-validation status | Must |
+| Result summary, execution status, error class, and latency | Must |
+| **Side-effect flag** (`read` vs `write`), approval status, and approver ID | Must for write tools |
+| External resource IDs created (such as `ticket_id`) | Should |
 
 #### SQL execution span
 
 | Attribute | Priority |
 |---|---|
-| Generated SQL (normalized), dialect | Must |
-| Parse OK, statement type, referenced tables/columns | Must |
-| Executing principal / role (the DB role used, which should be least-privilege) | Must |
-| Row count, truncated flag, execution time, error class | Must |
-| Result sample (first N rows, redacted) or a hash | Should |
-| Schema version / catalog snapshot | Should |
+| Generated SQL query (normalized) and SQL dialect | Must |
+| Parse status, statement type, and referenced tables/columns | Must |
+| Executing database principal or least-privilege role | Must |
+| Row count, truncation flag, execution duration, and error class | Must |
+| Redacted result sample (first $N$ rows) or result hash | Should |
+| Warehouse schema version or catalog snapshot ID | Should |
 
-OpenTelemetry's [database semantic conventions](https://opentelemetry.io/docs/specs/semconv/database/database-spans/) cover generic DB spans (`db.system.name`, `db.query.text`, `db.operation.name`, …). Reuse them for the SQL span instead of inventing new names.
+Reuse OpenTelemetry's [database semantic conventions](https://opentelemetry.io/docs/specs/semconv/database/database-spans/) (`db.system.name`, `db.query.text`, `db.operation.name`) for SQL spans rather than inventing custom attribute names.
 
 #### Guardrail span
 
 | Attribute | Priority |
 |---|---|
-| Guardrail name + version, stage (`input`, `context`, `tool`, `output`) | Must |
-| Decision (`allow`, `block`, `redact`, `rewrite`, `escalate`), blocking vs non-blocking | Must |
-| Score(s) and threshold, matched policy/rule ID, short reason | Must |
-| Latency, timeout → fail-open/closed outcome | Must |
-| What was redacted (entity types, counts — not the values) | Should |
+| Guardrail name, version, and stage (`input`, `context`, `tool`, `output`) | Must |
+| Decision (`allow`, `block`, `redact`, `rewrite`, `escalate`) and blocking mode | Must |
+| Detector score(s), threshold, matched policy ID, and short reason | Must |
+| Latency, timeout status, and fail-open/fail-closed outcome | Must |
+| Redacted entity types and counts (never log raw PII values) | Should |
 
 #### Eval / score records (attached after the fact)
 
 | Field | Priority |
 |---|---|
-| `trace_id` (and optionally `span_id`), `eval_name`, `eval_version` | Must |
-| Score / label, rationale, judge model + version | Must |
+| `trace_id` (plus optional `span_id`), `eval_name`, and `eval_version` | Must |
+| Score, categorical label, rationale, and judge model + version | Must |
 | `sample_reason` (`uniform`, `triggered`, `canary`) | Must |
-| Source (`llm_judge`, `heuristic`, `human`, `user_feedback`) | Must |
+| Score source (`llm_judge`, `heuristic`, `human`, `user_feedback`) | Must |
 
 ### 2.2 Version tagging: the most under-rated attributes
 
-Most "the bot got worse" investigations end at one question: **what changed?** Make it answerable from the trace alone.
+Most quality investigations boil down to one question: **what changed?** Tag every version on your spans so the trace alone answers that question.
 
-- [ ] **Prompt templates** live in a registry or in version control with immutable version IDs. Log the ID on every LLM span.
-- [ ] Log both **requested model** and **response model**. Providers may alias a model name to a new snapshot.
-- [ ] Log **index snapshot / ingestion run ID** on retrieval spans.
-- [ ] Log the **guardrail and judge versions** (model + prompt + threshold).
-- [ ] Compute a **config hash** of everything that affects behavior (prompts, models, top-k, thresholds, tool list) and log it on the root span. Two traces with the same hash ran the same system.
-- [ ] Tag **experiment/variant** and **deployment ring** (`shadow`, `canary`, `prod`).
+- [ ] Store prompt templates in version control or a registry and log the immutable prompt version ID on every LLM span.
+- [ ] Log both the **requested model** alias and the exact **response model** snapshot returned by the provider.
+- [ ] Log the **index snapshot or ingestion run ID** on every retrieval span.
+- [ ] Log the exact **guardrail and judge versions** (model, prompt, and threshold).
+- [ ] Compute a single **config hash** covering all behavioral settings (prompts, models, `top_k`, thresholds, tools) and log it on the root span.
+- [ ] Tag the **experiment variant** and **deployment ring** (`shadow`, `canary`, `prod`) on the root span.
 
 ### 2.3 Session / thread grouping
 
-Multi-turn conversations need a stable grouping key:
+Group multi-turn conversations with a consistent session identifier:
 
-- `session_id` / `conversation_id` on every trace in the conversation, plus `turn_index`.
-- Store a **summary of prior turns** or a pointer to them. Single-turn judges miss errors that depend on earlier context ("as I said, only for EMEA").
-- Session-level metrics need this grouping: turns per session, retry/rephrase detection, session-level outcome judges, escalation after N turns.
-- For long-running or async agents (e.g. a ticket follow-up hours later), propagate a **correlation ID** across processes. OTel context propagation and span links handle this.
+- Attach `session_id` (or `conversation_id`) and `turn_index` to every trace in the conversation.
+- Record a summary of prior turns or a pointer to earlier traces so multi-turn judges can verify context-dependent queries ("as I asked earlier, only for EMEA").
+- Use `session_id` to compute session-level metrics: turns per session, rephrase rate, escalation rate, and overall goal completion.
+- Propagate a **correlation ID** across async jobs and webhooks (using OTel context propagation or span links) when workflows span hours or days.
 
 ---
 
 ## 3. Standards: OpenTelemetry GenAI conventions and OpenInference
 
-Use a standard schema. Then you can switch vendors, combine app and LLM telemetry, and use off-the-shelf auto-instrumentation.
+Adopt a standard telemetry schema so you can switch observability vendors, combine infrastructure and LLM traces, and use open-source auto-instrumentation.
 
 ### 3.1 OpenTelemetry GenAI semantic conventions
 
-[OpenTelemetry](https://opentelemetry.io/) defines **semantic conventions**: standard attribute and span names for common operations. The **GenAI** conventions cover model inference, embeddings, retrieval, tool execution, and agent/workflow invocation. At the time of writing they're marked **Development** (not yet stable) and have moved to their own repository, [`open-telemetry/semantic-conventions-genai`](https://github.com/open-telemetry/semantic-conventions-genai). Expect attribute names to change and pin the version you implement.
+[OpenTelemetry](https://opentelemetry.io/) defines **semantic conventions** that standardize span and attribute names. The **GenAI** conventions cover LLM inference, embeddings, retrieval, tool calls, and agent workflows. These conventions are currently marked **Development** in [`open-telemetry/semantic-conventions-genai`](https://github.com/open-telemetry/semantic-conventions-genai), so pin the convention version your code emits.
 
-At a high level:
+Key GenAI convention elements include:
 
-- **Operation names** (`gen_ai.operation.name`) include values such as `chat`, `text_completion`, `generate_content`, `embeddings`, `retrieval`, `execute_tool`, `create_agent`, and `invoke_agent`. Span names follow patterns like `chat {model}` or `execute_tool {gen_ai.tool.name}`.
-- **Model/provider attributes**: `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, request params (`gen_ai.request.temperature`, `gen_ai.request.max_tokens`, …), `gen_ai.response.finish_reasons`, `gen_ai.response.id`.
-- **Usage**: `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` (with variants for cached tokens).
-- **Agent / conversation**: `gen_ai.agent.name`, `gen_ai.agent.id`, `gen_ai.conversation.id`.
-- **Tools**: `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type`, plus opt-in `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result`.
-- **Retrieval**: attributes such as `gen_ai.data_source.id` and retrieval query/document attributes.
-- **Content capture** (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`) is **opt-in** because it may contain sensitive data. The spec also describes uploading content to external storage and recording a reference instead.
-- **Metrics** such as `gen_ai.client.operation.duration` and token-usage metrics let you build dashboards without parsing spans.
+- **Operation names** (`gen_ai.operation.name`): Standard values include `chat`, `text_completion`, `generate_content`, `embeddings`, `retrieval`, `execute_tool`, `create_agent`, and `invoke_agent`. Span names follow patterns like `chat {model}` or `execute_tool {gen_ai.tool.name}`.
+- **Model and provider attributes**: `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, request settings (`gen_ai.request.temperature`, `gen_ai.request.max_tokens`), `gen_ai.response.finish_reasons`, and `gen_ai.response.id`.
+- **Token usage**: `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, plus cached token counters.
+- **Agent and conversation identifiers**: `gen_ai.agent.name`, `gen_ai.agent.id`, and `gen_ai.conversation.id`.
+- **Tool execution**: `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type`, and opt-in `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`.
+- **Retrieval**: `gen_ai.data_source.id` plus query and retrieved document attributes.
+- **Opt-in content capture**: `gen_ai.input.messages`, `gen_ai.output.messages`, and `gen_ai.system_instructions` are disabled by default to protect sensitive data, or stored externally via URI references.
+- **Standard metrics**: Histograms and counters like `gen_ai.client.operation.duration` and token usage metrics power dashboards without parsing raw spans.
 
-Start from the overview at [opentelemetry.io/docs/specs/semconv/gen-ai](https://opentelemetry.io/docs/specs/semconv/gen-ai/) and follow it to the current repository.
+Read the official specification at [opentelemetry.io/docs/specs/semconv/gen-ai](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
 
 ### 3.2 OpenInference (Arize)
 
-[OpenInference](https://github.com/Arize-ai/openinference) is a set of conventions and auto-instrumentation plugins, built on OpenTelemetry, from Arize (used by [Arize Phoenix](https://github.com/Arize-ai/phoenix) and others). Its distinguishing idea is an explicit **span kind** attribute, `openinference.span.kind`, with values including:
+[OpenInference](https://github.com/Arize-ai/openinference) is an OpenTelemetry-based convention and auto-instrumentation suite maintained by Arize and used by [Arize Phoenix](https://github.com/Arize-ai/phoenix). It centers on an explicit **span kind** attribute, `openinference.span.kind`, with domain-specific values:
 
-`LLM`, `EMBEDDING`, `CHAIN`, `RETRIEVER`, `RERANKER`, `TOOL`, `AGENT`, `GUARDRAIL`, `EVALUATOR` (plus a few others in recent spec versions).
+`LLM`, `EMBEDDING`, `CHAIN`, `RETRIEVER`, `RERANKER`, `TOOL`, `AGENT`, `GUARDRAIL`, `EVALUATOR`.
 
-Other attributes include `input.value` / `output.value`, `llm.model_name`, `llm.token_count.prompt|completion|total`, `llm.prompt_template.template|variables|version`, `retrieval.documents` (with `document.id`, `document.score`, `document.content`), `tool.name`, `session.id`, `user.id`, `metadata`, and `tag.tags`.
+OpenInference also standardizes attributes such as `input.value`, `output.value`, `llm.model_name`, `llm.token_count.prompt|completion|total`, `llm.prompt_template.template|variables|version`, `retrieval.documents` (`document.id`, `document.score`, `document.content`), `tool.name`, `session.id`, `user.id`, `metadata`, and `tag.tags`.
 
-`RERANKER` and `GUARDRAIL` are first-class span kinds, so OpenInference maps naturally onto the span model in section 2.
+Because `RERANKER` and `GUARDRAIL` are first-class span kinds, OpenInference maps directly onto the agentic RAG span tree in Section 2.
 
 ### 3.3 Which one?
 
-| Situation | Suggested choice |
+| Situation | Recommended convention |
 |---|---|
-| Your org already runs OTel collectors / an APM | OTel GenAI conventions, and export to your APM plus an LLM-focused backend |
-| You want rich RAG-specific views (retriever docs, rerankers, guardrails) out of the box | OpenInference instrumentation (works with any OTel-compatible backend that understands it) |
-| You use a framework (LangChain/LangGraph, LlamaIndex, …) | Use the framework's integration with your chosen backend, then check which convention it emits |
-| Unsure | Emit OTel spans; add custom attributes under your own namespace (e.g. `app.rbac.role`, `app.guardrail.decision`). Both conventions are OTel underneath |
+| Your organization already runs OTel Collectors and an enterprise APM | Emit OTel GenAI conventions and fan out to your APM plus an LLM observability backend |
+| You want dedicated RAG views (retrieved chunks, rerankers, guardrails) out of the box | Use OpenInference auto-instrumentation with any compatible OTel backend |
+| You build on an orchestration framework (LangChain, LangGraph, LlamaIndex) | Enable the framework's native OTel or backend integration and verify which schema it emits |
+| You are unsure which backend you will keep long-term | Emit standard OTel spans and namespace custom business fields under `app.*` |
 
-Whatever you choose, **add your own app-specific attributes** under a namespace you control (`app.*`). Neither convention knows about your RBAC roles, ticket IDs, or business outcomes.
+Regardless of which convention you pick, **log domain-specific attributes under your own `app.*` namespace** (such as `app.user.role`, `app.ticket_id`, and `app.config_hash`).
 
 ---
 
 ## 4. Example trace for the running example
 
-Scenario: a `finance_analyst` asks, *"What was EMEA revenue last quarter, and open a ticket if it's below plan?"* The agent retrieves the revenue-definition doc, runs SQL, compares to plan, creates a ticket, and answers with citations.
+In this scenario, a `finance_analyst` asks: *"What was EMEA revenue last quarter, and open a ticket if it's below plan?"* The assistant retrieves the revenue definition document, runs a SQL query, compares actuals against plan, opens a Jira ticket, and returns a cited answer.
 
-The JSON below is **illustrative**. It's a flattened, vendor-neutral view that mixes OTel GenAI-style attribute names with app-specific `app.*` attributes. Real exporters encode spans differently, e.g. OTLP protobuf with nanosecond timestamps.
+The JSON below shows a flattened, vendor-neutral representation combining OTel GenAI attributes with custom `app.*` fields. Production OTLP exporters serialize these spans as Protobuf or JSON with nanosecond timestamps.
 
 ```json
 {
@@ -336,64 +340,64 @@ The JSON below is **illustrative**. It's a flattened, vendor-neutral view that m
 }
 ```
 
-Things to notice:
+Notice five diagnostic details in this trace:
 
-- The **faithfulness judge** found a real issue: the plan figure is supported by a retrieved doc that wasn't cited. You can only diagnose this because retrieved IDs, cited IDs, and the SQL result all live in one trace.
-- `count_before_acl` vs `count_after_acl` shows RBAC filtering removed 3 docs. That matters when someone asks "why didn't it find X?".
-- The **response model** differs from the requested alias. If behavior changes overnight, this is the first field to check.
-- The write tool has explicit `side_effect`, `approval.*` and the created `ticket_id`, which you need for audit.
-- Model names here (`gpt-x`, `judge-large-…`) are placeholders.
+- **The faithfulness judge caught a citation omission:** The plan number came from retrieved document `fin-plan-fy26`, which the answer failed to cite. You can diagnose this only because retrieved IDs, cited IDs, and SQL results live in the same trace.
+- **Pre- and post-ACL counts isolate permission drops:** `count_before_acl: 20` vs `count_after_acl: 17` proves RBAC filtering removed 3 chunks.
+- **Exact response model tracking:** `gen_ai.response.model` records the dated snapshot `gpt-x-2026-09-15` rather than just the alias `gpt-x`.
+- **Write-tool audit trail:** Span `s6` records `side_effect: "write"`, the approval policy, and the created `ticket_id: "FIN-4821"`.
+- **Placeholder model names:** Names such as `gpt-x` and `judge-large-2026-07` represent your configured models.
 
 ---
 
 ## 5. Privacy, security and retention
 
-Traces are among the most sensitive data you hold. They contain user questions, retrieved internal documents, SQL results, and sometimes credentials pasted by users.
+Production traces contain some of your most sensitive enterprise data: user questions, confidential documents, warehouse query results, and accidentally pasted secrets.
 
 ### 5.1 Redaction strategy
 
-| Technique | Where | Trade-off |
+| Technique | Where it runs | Trade-off |
 |---|---|---|
-| **Don't capture content** (metadata only) | SDK config | Safest; kills debugging and judge evals |
-| **Redact at the source** (before export) with PII/secret detectors | App / SDK processor | Best default; detectors miss things and over-redact |
-| **Redact in the collector** (e.g. an OTel Collector processor) | Pipeline | Centralized policy; raw data still leaves the app process |
-| **Store content by reference** (blob store with stricter ACL + shorter TTL; span holds a pointer) | Storage | Separates hot metadata from sensitive payloads; supported by the OTel GenAI spec's "external storage" pattern |
-| **Tokenize / pseudonymize** user IDs and entities (reversible only by a privileged service) | App | Keeps joinability without exposing identity |
-| **Field-level encryption** for selected attributes | App / storage | Strong; complicates search |
+| **Drop content** (log metadata only) | SDK configuration | Maximizes privacy, but prevents debugging and reference-free judge evals |
+| **Redact at the source** (before export) using PII/secret detectors | Application / SDK span processor | Best default balance, though detectors can miss rare patterns or over-redact |
+| **Redact in the collector** (via an OTel Collector processor) | Telemetry pipeline | Centralizes redaction policy, but raw text still leaves the application process |
+| **Store content by reference** (encrypted blob store with strict ACL and short TTL) | Storage layer | Separates hot metadata from sensitive payloads (supported by OTel GenAI external storage) |
+| **Tokenize or pseudonymize** user IDs and named entities | Application | Preserves cross-trace joinability without exposing raw identities |
+| **Field-level encryption** on sensitive attributes | Application / storage | Strong protection, but restricts full-text search in the trace UI |
 
-Checklist:
+Follow this privacy and security checklist:
 
-- [ ] Classify trace fields: `metadata` (safe), `user_content`, `retrieved_content`, `tool_results`, `sql_results`. Apply policy per class.
-- [ ] Run PII/secret detection (e.g. [Microsoft Presidio](https://github.com/microsoft/presidio) or your DLP service) **before** export. Log entity *types and counts*, not values.
-- [ ] Never log raw credentials, auth headers, or connection strings. Add a test that fails if they appear.
-- [ ] **Respect source ACLs in the trace UI.** If a trace contains an HR document, only people allowed to see that doc should see the trace content. Otherwise observability becomes a data-exfiltration path.
-- [ ] Limit who can **export traces into datasets** (see [Production data flywheel](../01-datasets/04-production-data-flywheel.md)), and redact again at export time.
-- [ ] Honor **deletion requests** (right to erasure) by keying content on a pseudonymous user ID that you can purge.
-- [ ] Self-host or use a region/tenant-isolated deployment if your data-residency requirements demand it.
+- [ ] Classify every trace attribute into a data tier (`metadata`, `user_content`, `retrieved_content`, `tool_results`, `sql_results`) and enforce policy per tier.
+- [ ] Scrub PII and secrets **before** export using tools like [Microsoft Presidio](https://github.com/microsoft/presidio) or your enterprise DLP service, logging only entity types and counts.
+- [ ] Strip raw credentials, authorization headers, and database connection strings, and add a CI test that fails if secrets appear in spans.
+- [ ] **Enforce source document ACLs in your trace UI.** Engineers who lack permission to read an HR document must not see its chunks inside a trace.
+- [ ] Restrict who can **export traces into datasets** (see [Production data flywheel](../01-datasets/04-production-data-flywheel.md)) and run a second redaction pass on export.
+- [ ] Key user data by a pseudonymous ID so you can purge traces upon **right-to-erasure deletion requests**.
+- [ ] Deploy self-hosted or tenant-isolated observability backends when data-residency rules require it.
 
 ### 5.2 Retention tiers (heuristic starting point; confirm with legal/compliance)
 
 | Tier | Contents | Typical retention |
 |---|---|---|
-| Hot | Full traces incl. redacted content | Days to weeks (debugging, async evals) |
-| Warm | Metadata + scores + feedback, content by reference | Weeks to months (trend analysis) |
-| Cold / dataset | Curated, re-redacted examples promoted to datasets | As long as the dataset lives, under dataset governance |
-| Audit | Who-did-what for write tools and access decisions | Per compliance policy, often longest |
-| Aggregates | Metrics/time series | Long; no content |
+| Hot | Full traces including redacted message and chunk content | Days to weeks (supports live debugging and async judges) |
+| Warm | Span metadata, eval scores, and feedback, with content stored by reference | Weeks to months (supports trend and slice analysis) |
+| Cold / dataset | Curated, re-redacted cases promoted into evaluation datasets | Retained under dataset governance for regression testing |
+| Audit | Immutable logs of write-tool actions and access-control decisions | Retained per enterprise compliance and legal policy |
+| Aggregates | Pre-aggregated time-series metrics without payload content | Long-term retention for historical reporting |
 
 ### 5.3 Trace sampling
 
-Unlike online-eval sampling, **trace sampling** decides what you *store* at all.
+Unlike online-eval sampling, **trace sampling** decides which traces you *store* in your observability backend.
 
-- For most enterprise assistants, volume is low enough to **keep 100% of traces** (with redaction) for at least the hot tier. Debugging an incident without the trace is painful.
-- At high volume, use **tail-based sampling**: decide after the trace completes, and keep all errors, guardrail blocks, negative feedback, and high-latency/high-cost traces, plus a uniform sample of the rest. See [OTel sampling concepts](https://opentelemetry.io/docs/concepts/sampling/).
-- Feedback can arrive minutes after the trace. Either keep everything for a short window, or support late "promote this trace" decisions.
+- **Keep 100% of redacted traces in the hot tier** for most internal enterprise assistants, because debugging an incident without the trace is nearly impossible.
+- **Use tail-based sampling at high traffic volumes.** Decide after the turn finishes: keep 100% of errors, guardrail blocks, negative feedback, and high-latency/high-cost traces, plus a uniform random sample of healthy traffic (see [OTel sampling concepts](https://opentelemetry.io/docs/concepts/sampling/)).
+- **Buffer recent traces for delayed feedback.** Because users click thumbs-down or retry seconds after a response, buffer traces briefly so late signals can promote a trace to permanent storage.
 
 ---
 
 ## 6. Instrumentation patterns
 
-Framework-agnostic pseudo-instrumentation using the OpenTelemetry Python API. The `opentelemetry-api` tracer calls shown are standard; the attribute names follow the conventions above plus your own `app.*` namespace.
+The Python snippet below shows vendor-neutral instrumentation using the standard `opentelemetry-api` tracer, combining OTel GenAI attributes with custom `app.*` attributes:
 
 ```python
 from opentelemetry import trace
@@ -425,62 +429,62 @@ def guardrail(name: str, stage: str, fn, payload):
         return result
 ```
 
-Practical tips:
+Follow these instrumentation practices in production:
 
-- **Use auto-instrumentation** for LLM SDKs and frameworks (OpenInference, OpenLLMetry-style instrumentors, or vendor SDKs), and add **manual spans** for business logic they can't see: ACL filtering, guardrails, SQL validation, approvals.
-- **Propagate context** into async workers, tool services, and the SQL gateway so their spans join the same trace.
-- **Return the `trace_id` to the client** (e.g. in a response header or payload). Without it, the feedback widget can't link feedback to the trace (see [User feedback](./03-user-feedback-and-implicit-signals.md)).
-- **Don't block the request on telemetry export.** Use batch span processors, and make sure an exporter outage doesn't take down the app.
-- **Compute cost in one place**, using a versioned price table keyed by response model.
+- **Combine auto-instrumentation with manual business spans.** Use OpenInference or SDK auto-instrumentors for LLM and framework calls, and wrap ACL filtering, guardrails, SQL validation, and approvals in manual spans.
+- **Propagate trace context across service boundaries.** Pass W3C `traceparent` headers into async workers, tool microservices, and SQL gateways so all child spans attach to the root trace.
+- **Return `trace_id` to the client UI.** Include `trace_id` in the response payload or header so the frontend can attach user feedback directly to the trace (see [User feedback](./03-user-feedback-and-implicit-signals.md)).
+- **Export telemetry asynchronously.** Use batch span processors with bounded queues so a collector outage never blocks user requests or crashes the application.
+- **Calculate token cost in one central module.** Look up prices in a versioned table keyed by `gen_ai.response.model`.
 
 ---
 
 ## 7. Tool landscape (observability-focused)
 
-All of the following exist and offer LLM tracing. Feature sets change quickly, so check current docs for OTel ingestion, self-hosting, online evaluators, and pricing. For a broader comparison see [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md).
+The platforms below provide LLM tracing and online evaluation capabilities. Check current vendor documentation for OTel ingestion, self-hosting, and pricing details, and see [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md) for a full comparison.
 
 | Tool | Type | Notes (high level) |
 |---|---|---|
-| [Langfuse](https://langfuse.com/docs) | Open-source (self-hostable) + cloud | Traces/sessions, prompt management, scores, LLM-as-a-judge evaluators on production traces, datasets; accepts OpenTelemetry |
-| [LangSmith](https://docs.smith.langchain.com/) | Commercial (LangChain) | Deep LangChain/LangGraph integration but framework-agnostic SDK; tracing, online evaluators, annotation queues, datasets |
-| [Arize Phoenix](https://github.com/Arize-ai/phoenix) | Open-source (self-hostable); Arize AX is the commercial platform | Built on OpenTelemetry + OpenInference; tracing, evals, datasets/experiments |
-| [Braintrust](https://www.braintrust.dev/docs) | Commercial | Eval-first platform with logging/tracing of production, online scoring, datasets, prompt playground |
-| [Weights & Biases Weave](https://github.com/wandb/weave) | Open-source SDK + W&B platform | Tracing of LLM apps, evaluations, scorers |
-| [MLflow Tracing](https://mlflow.org/docs/latest/genai/tracing/) | Open-source (also managed offerings) | OpenTelemetry-compatible tracing and GenAI evaluation within MLflow |
-| [Datadog LLM Observability](https://docs.datadoghq.com/llm_observability/) | Commercial APM add-on | LLM traces alongside existing APM/infra monitoring; evaluations and security checks |
+| [Langfuse](https://langfuse.com/docs) | Open-source (self-hostable) + cloud | Traces, sessions, prompt registry, scores API, online LLM judges, datasets, and native OpenTelemetry ingestion |
+| [LangSmith](https://docs.smith.langchain.com/) | Commercial (LangChain) | Deep LangChain/LangGraph support plus framework-agnostic SDK, online evaluators, annotation queues, and datasets |
+| [Arize Phoenix](https://github.com/Arize-ai/phoenix) | Open-source (self-hostable) + Arize AX commercial platform | Built natively on OpenTelemetry and OpenInference with tracing, online evals, datasets, and experiments |
+| [Braintrust](https://www.braintrust.dev/docs) | Commercial | Eval-first platform offering production logging/tracing, online scoring, datasets, and prompt playground |
+| [Weights & Biases Weave](https://github.com/wandb/weave) | Open-source SDK + W&B platform | LLM application tracing, evaluation pipelines, and custom scorers |
+| [MLflow Tracing](https://mlflow.org/docs/latest/genai/tracing/) | Open-source + managed cloud offerings | OpenTelemetry-compatible tracing and GenAI evaluation integrated into MLflow |
+| [Datadog LLM Observability](https://docs.datadoghq.com/llm_observability/) | Commercial APM add-on | Combines LLM traces with enterprise APM/infrastructure monitoring, online evals, and security checks |
 
-Selection criteria (checklist):
+Evaluate observability tools against this checklist:
 
-- [ ] Ingests **OpenTelemetry** (avoid lock-in) and/or supports your framework.
-- [ ] **Self-hosting / data residency** options that match your data classification.
-- [ ] **Session/thread views** and custom attributes/filters (role, tenant, prompt version).
-- [ ] **Scores API**: attach heuristic, judge, human and user-feedback scores to traces.
-- [ ] **Online evaluators** with sampling controls, or easy export to your own eval workers.
-- [ ] **Annotation queues** for human review, and **trace → dataset** export.
-- [ ] Fine-grained **access control** on trace content (section 5).
-- [ ] Cost: priced per trace/span/seat? Agentic traces have many spans.
+- [ ] Verify native **OpenTelemetry ingestion** to avoid vendor lock-in.
+- [ ] Confirm **self-hosting or regional data residency** options that meet your compliance rules.
+- [ ] Check for **session/thread views** and fast filtering on custom attributes (`role`, `tenant`, `config_hash`).
+- [ ] Verify a flexible **Scores API** for attaching deterministic, judge, human, and feedback scores to traces.
+- [ ] Check for built-in **online evaluators** with sampling controls or webhook export to your own eval workers.
+- [ ] Look for **human annotation queues** and one-click **trace-to-dataset export**.
+- [ ] Verify **role-based access control** on trace payloads (Section 5).
+- [ ] Model total cost across spans, traces, and seats, since agentic runs emit many child spans per turn.
 
-> Many teams run **two** destinations: their existing APM (for latency/errors/infra, with on-call alerting) and an LLM-focused tool (for content inspection, evals, datasets). OTel lets you fan out from one instrumentation.
+> Many teams route telemetry to **two** backends: their existing enterprise APM for latency, errors, and paging, plus a specialized LLM observability tool for prompt inspection, online judges, and dataset curation. OpenTelemetry lets you fan out to both from a single instrumentation layer.
 
 ---
 
 ## 8. Using traces day to day
 
-- **Error analysis sessions.** Weekly, filter traces by low judge score / negative feedback / guardrail block, read 30–100 of them, and write failure notes. This is the highest-ROI activity in AI quality work (see [Hamel Husain's field guide](https://hamel.dev/blog/posts/field-guide/)).
-- **Saved views** per failure mode: "empty retrieval for finance_analyst", "SQL errors by table", "create_ticket with approval overridden".
-- **Diff two traces** (same question, different prompt version) when a regression is reported.
-- **Replay**: re-run a production trace's inputs against a new version offline, then compare. This needs a full input capture, including retrieved contexts if you want to isolate the generator (see [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md)).
+- **Run weekly error-analysis reviews.** Filter traces by low judge scores, thumbs-down feedback, or guardrail blocks, inspect 30–100 traces, and categorize root causes (see [Hamel Husain's field guide](https://hamel.dev/blog/posts/field-guide/)).
+- **Save filtered views per failure mode.** Create team bookmarks such as *"empty retrieval for finance_analyst"*, *"SQL errors by table"*, and *"create_ticket with approval overridden"*.
+- **Diff traces across versions.** Compare span trees for the same query across two `config_hash` versions when investigating a regression.
+- **Replay production traces offline.** Re-run captured queries and retrieved contexts against a candidate prompt or model offline to verify fixes before deployment (see [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md)).
 
 ---
 
 ## Key takeaways
 
-- Trace **every step**: retrieval, rerank, each LLM call, each tool call, SQL execution, and every guardrail decision. Group traces into sessions.
-- Logging spec essentials: inputs/outputs, **doc IDs + scores**, **prompt/model/index/guardrail versions**, requested vs **response model**, tokens, latency, cost, user role, guardrail decisions, side effects.
-- Prefer **OpenTelemetry** and a semantic convention (**OTel GenAI** or **OpenInference**). Add app-specific attributes under your own namespace. The GenAI conventions are still evolving, so pin a version.
-- Return the `trace_id` to the client so feedback and evals can attach to it.
-- Treat traces as sensitive data: **redact before export**, enforce source ACLs in the trace UI, tier retention, and support deletion.
-- Choose tools by OTel support, hosting/data-residency, session views, scores/online-eval support, and access control, not by feature lists.
+- Trace **every operation** in an agentic turn: retrieval, reranking, LLM calls, tool executions, SQL queries, and guardrail checks, grouped by `session_id`.
+- Log essential diagnostic fields on every trace: inputs/outputs, **doc IDs and scores**, **prompt/model/index/guardrail versions**, requested vs. **response model**, tokens, latency, cost, user role, and tool side effects.
+- Standardize on **OpenTelemetry** using **OTel GenAI conventions** or **OpenInference**, and add custom business attributes under `app.*`.
+- Return `trace_id` to the client application so user feedback and asynchronous eval scores attach cleanly.
+- Protect trace data: **redact PII before export**, enforce document ACLs in the trace viewer, tier storage retention, and support user deletion requests.
+- Select observability platforms based on OTel compatibility, data residency, session grouping, score APIs, and payload access control.
 
 ## Further reading
 
