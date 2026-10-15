@@ -2,3 +2,5 @@ site/
 .cache/
 __pycache__/
 .zensical.generated.toml
+venv/
+.venv/
