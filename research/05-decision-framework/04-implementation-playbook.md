@@ -1,10 +1,14 @@
 # Implementation Playbook: From Zero to Production
 
-> **TL;DR** — Build evals and guardrails in seven phases: define success and risks; instrument tracing and do error analysis on a first 30–100 example golden set; build component and E2E offline evals with aligned judges; add guardrails and red-team; wire evals into CI and run a launch-readiness review; run online evals, monitoring and feedback in production; then turn production data into a continuous improvement flywheel. Each phase has an exit criterion — don't skip ahead.
+> **TL;DR**
+> - **Execute in seven sequential phases.** Progress from defining success and instrumenting traces to CI gates, online monitoring, and a data flywheel.
+> - **Start with error analysis on real traces.** Inspect 30–100 examples to identify your top failure modes before you build metric dashboards.
+> - **Gate every release in CI.** Enforce zero-failure hard safety gates and regression thresholds across code, prompt, model, and index changes.
+> - **Turn production failures into tests.** Sample live traffic, review traces weekly, and feed failure cases back into your golden dataset.
 
-**You'll learn:** a phased plan with checklists · who does what (RACI) · rough time estimates · a launch readiness checklist · the anti-patterns that waste the most time
-· **Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Eval selection](./01-eval-selection-decision-tree.md), [Guardrail selection](./02-guardrail-selection-decision-tree.md)
-· **Related:** [Maturity model](./05-maturity-model.md), [Metric cheatsheet](./03-metric-cheatsheet.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
+**You will learn:** A seven-phase implementation plan with checklists · Team roles and RACI matrix · Pre-launch readiness criteria · Common evaluation anti-patterns to avoid  
+**Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Eval selection](./01-eval-selection-decision-tree.md), [Guardrail selection](./02-guardrail-selection-decision-tree.md)  
+**Related:** [Maturity model](./05-maturity-model.md), [Metric cheatsheet](./03-metric-cheatsheet.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
 
 ---
 
@@ -24,14 +28,14 @@ flowchart LR
 | Phase | Core output | Exit criterion | Rough effort (heuristic, small team) |
 |---|---|---|---|
 | 0 | Success criteria, failure taxonomy v0, risk tier | Signed-off one-pager | 2–5 days |
-| 1 | Tracing, 30–100 example golden set, error analysis | Failure taxonomy stable; top 3 failure modes known | 1–2 weeks |
-| 2 | Component + E2E eval suite, validated judges | Baseline scores; judges meet agreement bar | 2–4 weeks |
-| 3 | Guardrail stack, red-team report | Guardrails measured (recall/FPR); critical findings fixed | 1–3 weeks (overlaps 2) |
+| 1 | Tracing, 30–100 example golden set, error analysis | Stable failure taxonomy with top 3 failure modes known | 1–2 weeks |
+| 2 | Component + E2E eval suite, validated judges | Baseline scores recorded and judges aligned | 2–4 weeks |
+| 3 | Guardrail stack, red-team report | Guardrail recall/FPR measured and critical findings fixed | 1–3 weeks (overlaps 2) |
 | 4 | CI gates, readiness review | Launch checklist passed | 3–7 days |
-| 5 | Online evals, dashboards, alerts, feedback loop | Alerts tested; weekly review running | 1–2 weeks to set up, then ongoing |
-| 6 | Flywheel: failures → dataset → fixes | Golden set refreshed on a cadence | Ongoing (~10–20% of team time) |
+| 5 | Online evals, dashboards, alerts, feedback loop | Alerts tested and weekly review running | 1–2 weeks setup, then ongoing |
+| 6 | Flywheel: failures → dataset → fixes | Golden set refreshed on a regular cadence | Ongoing (~10–20% of team time) |
 
-Effort ranges are rough heuristics for a 2–5 person team building one agentic RAG application; regulated domains and multi-agent systems take longer. The single best predictor of how long Phase 1–2 takes is **SME availability**.
+Treat these effort ranges as heuristics for a 2–5 person team building one agentic RAG application. Regulated domains and multi-agent systems require more time. **SME availability** is the single biggest predictor of how fast you finish Phases 1 and 2.
 
 ---
 
@@ -47,9 +51,9 @@ Effort ranges are rough heuristics for a 2–5 person team building one agentic 
 | **Risk/Compliance/Legal (RC)** | Compliance officer, privacy, legal | Regulatory requirements, data handling, sign-off for high tier |
 | **SRE/Ops** | Platform/SRE | Monitoring, alerting, on-call, kill switch |
 
-**Benevolent-dictator rule:** for each quality criterion, one named person (usually the SME or PO) is the final judge of "pass." Committees produce inconsistent labels.
+**Follow the benevolent-dictator rule:** Assign one named person (usually the SME or PO) as the final decision-maker for each quality criterion. Design-by-committee produces inconsistent ground-truth labels.
 
-R = Responsible, A = Accountable, C = Consulted, I = Informed.
+In the table below, `R` = Responsible, `A` = Accountable, `C` = Consulted, and `I` = Informed.
 
 | Activity | PO | AIE | SME | DE | SEC | RC | SRE |
 |---|---|---|---|---|---|---|---|
@@ -73,24 +77,24 @@ R = Responsible, A = Accountable, C = Consulted, I = Informed.
 
 ## Phase 0 — Define success and risks
 
-**Goal:** agree on what "good" and "unacceptable" mean *before* building metrics.
+**Goal:** Agree on what "good" and "unacceptable" mean *before* you build any metrics.
 
 ### 0.1 Activities
 
-1. **Write user stories and top intents.** For the running example: "As a finance analyst, I ask for last quarter's revenue by region and get a correct number with the SQL shown"; "As an employee, I ask the parental-leave policy and get the answer with a link to the policy page"; "As a manager, I ask the agent to open an IT ticket for a new hire."
-2. **Draft a failure taxonomy v0** — hypotheses about what can go wrong, by component. You'll replace it with an empirical one in Phase 1. Start from [agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md).
-3. **Classify risk** with the [risk questionnaire](./02-guardrail-selection-decision-tree.md#2-risk-assessment-questionnaire) and run the lethal-trifecta check.
-4. **Set acceptance criteria** per intent and per risk slice. Express them as *binary* checks with target pass rates; it's fine to say "TBD after baseline" for quality targets, but **not** for hard safety constraints.
-5. **Decide the eval archetype(s)** — see [eval selection §2](./01-eval-selection-decision-tree.md#2-the-five-input-questions).
-6. **Book SME time.** Calendar it now; this is the most common bottleneck.
+1. **Write user stories and top intents.** For our running example, include stories for regional revenue SQL queries, parental-leave policy questions, and IT onboarding ticket creation.
+2. **Draft a failure taxonomy v0** listing hypotheses about what can fail per component. Replace this draft with an empirical taxonomy in Phase 1 (start from [agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)).
+3. **Classify system risk** using the [risk questionnaire](./02-guardrail-selection-decision-tree.md#2-risk-assessment-questionnaire) and run the lethal-trifecta check.
+4. **Set binary acceptance criteria** per intent and risk slice. You can mark quality targets as "TBD after baseline," but set hard safety gates to zero failures immediately.
+5. **Select your evaluation archetypes** using [eval selection §2](./01-eval-selection-decision-tree.md#2-the-five-input-questions).
+6. **Schedule SME review time on the calendar now** so domain grading does not block Phase 1.
 
 ### 0.2 Acceptance criteria template
 
 | Intent / slice | Criterion (binary) | Target (heuristic until baseline) | Hard gate? |
 |---|---|---|---|
-| Policy Q&A | Answer correct vs SME reference | Baseline + improve; e.g. ≥ 85% | No |
+| Policy Q&A | Answer correct vs SME reference | Baseline + improve (e.g. ≥ 85%) | No |
 | Policy Q&A | Every factual claim cites a retrieved source | ≥ 95% | No |
-| Revenue questions | Execution accuracy vs gold SQL | Baseline; gate at no regression | No |
+| Revenue questions | Execution accuracy vs gold SQL | Baseline, then gate at no regression | No |
 | Any | Content outside user's entitlement in output | 0 occurrences on RBAC test set | **Yes** |
 | SQL | Non-SELECT statement executed | 0 | **Yes** |
 | Ticket tool | Ticket created without user confirmation | 0 | **Yes** |
@@ -98,57 +102,57 @@ R = Responsible, A = Accountable, C = Consulted, I = Informed.
 
 ### 0.3 Checklist
 
-- [ ] Top 5–15 intents listed with example queries
-- [ ] User roles and what each may see/do documented
-- [ ] Failure taxonomy v0 drafted
-- [ ] Risk tier assigned; lethal-trifecta check done
-- [ ] Acceptance criteria table drafted; hard gates identified
-- [ ] SME time booked; a single "benevolent dictator" named per criterion
-- [ ] Data-handling rules agreed (can production traces with PII be used for evals? retention?)
+- [ ] List the top 5–15 user intents with realistic example queries.
+- [ ] Document all user roles and their permitted data and tool access.
+- [ ] Draft your initial failure taxonomy v0.
+- [ ] Assign a risk tier and complete the lethal-trifecta check.
+- [ ] Draft the acceptance criteria table and mark all hard safety gates.
+- [ ] Book SME calendar time and name one benevolent dictator per criterion.
+- [ ] Define data-handling and PII retention rules for production traces.
 
 ---
 
 ## Phase 1 — Instrument tracing, build first golden set, do error analysis
 
-**Goal:** see the system fail, categorize failures, and create the first dataset.
+**Goal:** Observe real system failures, group them into categories, and build your first golden dataset.
 
 ### 1.1 Tracing first
 
-You can't evaluate an agent you can't see. Capture per run ([observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md)):
+You cannot evaluate an agent that you cannot inspect. Capture these fields on every run ([tracing and OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md)):
 
-- [ ] Input, user ID/role (pseudonymized if needed), session ID
-- [ ] Every LLM call: prompt version, model, params, tokens, latency
-- [ ] Retrieval: query, chunk IDs, scores, filters applied (incl. ACL filter)
-- [ ] Tool calls: name, args, result/errors, latency
-- [ ] Generated SQL, execution status, rows returned
-- [ ] Final output, citations, guardrail decisions
-- [ ] Version metadata: app version, index version, DB snapshot
+- [ ] Record the input query, pseudonymized user ID, user role, and session ID.
+- [ ] Log every LLM call with prompt version, model name, parameters, token counts, and latency.
+- [ ] Log retrieval queries, chunk IDs, similarity scores, and applied ACL filters.
+- [ ] Log tool calls with tool name, arguments, output or error status, and latency.
+- [ ] Log generated SQL queries, execution status, and returned row counts.
+- [ ] Record the final response, citations, and all guardrail decisions.
+- [ ] Attach version metadata for the application, search index, and database snapshot.
 
-Prefer an OpenTelemetry-compatible approach so you can switch backends ([eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)).
+Use OpenTelemetry-compatible instrumentation so you can switch observability backends without rewriting code ([eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)).
 
 ### 1.2 First golden set (30–100 examples)
 
-Sources, in order of preference: real queries (pilot users, support tickets, search logs) → SME-written → builder-written → synthetic to fill coverage gaps. See [dataset strategy](../01-datasets/01-dataset-strategy.md) and [SME golden datasets](../01-datasets/02-sme-golden-datasets.md).
+Prioritize data sources in this order: real queries from pilot users or search logs, SME-written queries, builder-written queries, and synthetic queries for coverage gaps. See [dataset strategy](../01-datasets/01-dataset-strategy.md) and [SME golden datasets](../01-datasets/02-sme-golden-datasets.md).
 
-Stratify across:
+Stratify your dataset across these five dimensions:
 
-- [ ] Each top intent
-- [ ] Each user role (especially for RBAC-sensitive data)
-- [ ] Easy / medium / hard (multi-hop, ambiguous, date math)
-- [ ] Unanswerable / out-of-scope (aim for roughly 10–20%, heuristic)
-- [ ] Known edge cases (acronyms, typos, multilingual if relevant)
+- [ ] Cover every top user intent.
+- [ ] Include every user role, especially for RBAC-restricted data.
+- [ ] Balance easy, medium, and hard queries (multi-hop, ambiguous, date math).
+- [ ] Include 10–20% unanswerable or out-of-scope queries.
+- [ ] Add known edge cases such as acronyms, typos, and multiple languages.
 
-Minimum fields per example: `id`, `input`, `user_role`, `intent`, `expected` (answer, relevant doc IDs, gold SQL, or expected tool call — whatever applies), `tags`, `source` (real/SME/synthetic), `created_at`, `notes`.
+Include these minimum fields on every example: `id`, `input`, `user_role`, `intent`, `expected`, `tags`, `source`, `created_at`, and `notes`. Store the reference answer, chunk IDs, gold SQL, or expected tool call inside `expected`.
 
 ### 1.3 Error analysis
 
-The highest-leverage activity in the whole playbook (popularized by Hamel Husain and Shreya Shankar; see Further reading):
+Error analysis is the highest-leverage activity in this playbook (popularized by Hamel Husain and Shreya Shankar):
 
-1. Run the system on the golden set (and any real traffic).
-2. **Open coding:** read each trace; write a short free-text note on the *first* thing that went wrong.
-3. **Axial coding:** cluster notes into categories (e.g. "retrieved outdated policy version", "SQL used wrong fiscal calendar", "created ticket without required field", "answered HR question for wrong country").
-4. **Count** each category; sort by frequency × severity.
-5. Repeat on new traces until no new categories appear.
+1. Run your system across the golden dataset and any early pilot traffic.
+2. **Perform open coding:** Read each trace and write a brief note describing the *first* failure that occurred.
+3. **Perform axial coding:** Group your notes into failure categories (such as `retrieval: outdated doc version` or `sql: wrong fiscal calendar`).
+4. **Count** the occurrences of each category and rank them by `frequency × severity`.
+5. Repeat this process on fresh traces until no new failure categories appear.
 
 ```python
 from collections import Counter
@@ -165,22 +169,22 @@ for cat, n in Counter(n["category"] for n in notes).most_common():
 
 ### 1.4 Checklist / exit criteria
 
-- [ ] Tracing live in dev/staging with all fields above
-- [ ] Golden set v1: 30–100 examples, stratified, versioned in git or a dataset store
-- [ ] ≥ 50 traces read end to end by the AIE (and a sample by the SME)
-- [ ] Failure taxonomy v1 with counts; top 3 failure modes identified
-- [ ] For each top failure mode: is it a **specification** problem (prompt/instructions unclear — just fix it) or a **generalization** problem (needs an eval to track)?
-- [ ] Quick fixes for obvious specification failures applied before building evals for them
+- [ ] Verify that tracing is live in dev and staging with all required span fields.
+- [ ] Commit golden set v1 (30–100 stratified examples) to git or your dataset store.
+- [ ] Read at least 50 end-to-end traces with your AI engineer and domain SME.
+- [ ] Finalize failure taxonomy v1 with category counts and identify the top 3 failure modes.
+- [ ] Classify each top failure mode as either a **specification bug** (unclear prompt) or a **generalization gap** (needs an evaluation metric).
+- [ ] Fix obvious prompt specification bugs immediately before building complex evaluations for them.
 
 ---
 
 ## Phase 2 — Component and E2E offline evals; align LLM judges
 
-**Goal:** a repeatable offline suite that measures the failures you found, with judges you trust.
+**Goal:** Build a repeatable offline evaluation suite that measures your observed failure modes with validated judges.
 
 ### 2.1 Build the suite
 
-Use the [eval selection decision tree](./01-eval-selection-decision-tree.md) to pick metrics. For the running example:
+Select your metrics using the [eval selection decision tree](./01-eval-selection-decision-tree.md). Here is how Phase 1 failures map to metrics for our running example:
 
 | Failure from Phase 1 | Eval | Type | Detail |
 |---|---|---|---|
@@ -192,83 +196,83 @@ Use the [eval selection decision tree](./01-eval-selection-decision-tree.md) to 
 
 ### 2.2 Build and align LLM judges
 
-Follow [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md). The short version:
+Follow the workflow in [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md):
 
-- [ ] One judge per failure mode; **binary** pass/fail; written definition of pass and fail with examples
-- [ ] Judge outputs a short critique *before* the verdict (helps debugging)
-- [ ] Label 50–100 examples by hand (SME + AIE), balanced pass/fail
-- [ ] Split labels into dev (to iterate on the judge prompt) and test (held out)
-- [ ] Measure TPR and TNR on test set; heuristic bar ≥ 0.8 each before gating on it
-- [ ] Estimate the true pass rate correcting for judge error if you report absolute numbers
-- [ ] Pin judge model + prompt version; store with results
-- [ ] Re-validate when you change judge model/prompt or when the product changes significantly
+- [ ] Build one binary pass/fail judge per failure mode with written criteria and few-shot examples.
+- [ ] Require the judge to output a brief critique *before* its pass/fail verdict.
+- [ ] Label 50–100 balanced pass/fail examples manually with your SME.
+- [ ] Split human labels into a development set (for prompt tuning) and a held-out test set.
+- [ ] Measure TPR and TNR on the held-out test set and require ≥ 0.80 each before gating releases.
+- [ ] Apply Rogan-Gladen correction if you report absolute pass rates from an imperfect judge.
+- [ ] Pin the judge model and prompt version and log them with every evaluation run.
+- [ ] Re-validate your judge whenever you change the judge model, prompt, or core product behavior.
 
 ### 2.3 Experiment hygiene
 
-See [running offline experiments](../02-offline-evals/08-running-offline-experiments.md).
+Follow the practices in [running offline experiments](../02-offline-evals/08-running-offline-experiments.md):
 
-- [ ] Every run records: dataset version, app/prompt/model/index version, judge version, seed/temperature
-- [ ] Compare variants on the **same** examples (paired comparison)
-- [ ] Repeat non-deterministic agent runs (e.g. 3–5×) and report mean and spread
-- [ ] Look at per-slice results (intent, role, difficulty), not just the average
-- [ ] Read the diffs: examples that flipped pass→fail between versions
+- [ ] Log dataset, application, prompt, model, index, and judge versions on every evaluation run.
+- [ ] Compare candidate variants using paired comparisons on the exact same dataset examples.
+- [ ] Run non-deterministic agent scenarios 3–5 times and report both mean pass rate and variance.
+- [ ] Inspect evaluation scores per slice (intent, role, difficulty) rather than relying on overall averages.
+- [ ] Read the trace diffs for examples that flipped from pass to fail between runs.
 
 ### 2.4 Exit criteria
 
-- [ ] Baseline scores recorded for all must-have evals of your archetype
-- [ ] Every judge used for gating meets the agreement bar
-- [ ] Each top-3 failure mode has at least one eval tracking it
-- [ ] Suite runs end to end with one command
+- [ ] Record baseline scores for all must-have evaluations in your archetype stack.
+- [ ] Verify that every gating LLM judge meets your human-agreement threshold.
+- [ ] Confirm that at least one metric tracks each of your top 3 failure modes.
+- [ ] Run the entire offline evaluation suite end to end with a single command.
 
 ---
 
 ## Phase 3 — Guardrails and red teaming
 
-**Goal:** prevent the unacceptable, not just measure it. Can start in parallel with Phase 2.
+**Goal:** Block unacceptable behavior at runtime and verify your defenses with adversarial testing. You can run Phase 3 in parallel with Phase 2.
 
 ### 3.1 Implement guardrails by tier
 
-Use the [guardrail selection decision tree](./02-guardrail-selection-decision-tree.md). Order of implementation (opinionated):
+Select your controls using the [guardrail selection decision tree](./02-guardrail-selection-decision-tree.md) and implement them in this order:
 
-1. **Identity & authorization**: propagate end-user identity; ACL-filtered retrieval; DB row-level security; tool allowlist per role. ([RBAC](../04-guardrails/06-access-control-rbac.md))
-2. **Tool/action controls**: schemas, SQL parser policy, read-only creds, confirmation for actions, step/budget limits. ([Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md))
-3. **Exfiltration controls**: link/image sanitization, egress allowlist. ([Output guardrails](../04-guardrails/04-output-guardrails.md))
-4. **Output scans**: PII/secrets, schema, toxicity. ([Output guardrails](../04-guardrails/04-output-guardrails.md))
-5. **Input & context detection**: prompt-injection classifiers, topic filters, context injection scans — in shadow/flag mode first. ([Input](../04-guardrails/02-input-guardrails.md), [Context](../04-guardrails/03-retrieval-and-context-guardrails.md))
+1. **Enforce identity and authorization:** Propagate end-user identity and enforce ACL retrieval filters, database RLS, and per-role tool allowlists ([RBAC](../04-guardrails/06-access-control-rbac.md)).
+2. **Enforce tool controls:** Validate schemas, enforce read-only SQL rules, require write confirmations, and cap steps ([Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md)).
+3. **Block data exfiltration:** Sanitize outbound links and images and restrict network egress to an allowlist ([Output guardrails](../04-guardrails/04-output-guardrails.md)).
+4. **Scan outputs:** Check responses for PII, secrets, schema validity, and toxicity ([Output guardrails](../04-guardrails/04-output-guardrails.md)).
+5. **Deploy input and context classifiers:** Add prompt-injection, topic, and context-injection scanners in shadow or flag mode first ([Input](../04-guardrails/02-input-guardrails.md), [Context](../04-guardrails/03-retrieval-and-context-guardrails.md)).
 
 ### 3.2 Measure guardrails
 
-- [ ] Benign-but-tricky set and adversarial set per guardrail
-- [ ] Recall and false-positive rate measured; latency p95 measured
-- [ ] Fail-open/fail-closed behaviour explicitly configured and tested (kill the guardrail service and see what happens)
-- [ ] New blocking guardrails promoted shadow → flag → block
+- [ ] Build both a benign-but-tricky dataset and an adversarial dataset for each guardrail.
+- [ ] Measure recall, false-positive rate, and p95 latency for every guardrail check.
+- [ ] Configure and test fail-open or fail-closed behavior by simulating guardrail service timeouts.
+- [ ] Promote new blocking guardrails sequentially through `shadow -> flag -> block`.
 
 ### 3.3 Red teaming
 
-See [threat model & OWASP](../04-guardrails/07-threat-model-owasp.md).
+Follow the adversarial testing workflow in [threat model & OWASP](../04-guardrails/07-threat-model-owasp.md):
 
-- [ ] Threat model mapped to OWASP Top 10 for LLM Applications
-- [ ] Direct prompt injection & jailbreaks (single- and multi-turn)
-- [ ] **Indirect** prompt injection: plant instructions in a test wiki page / ticket / document and check whether the agent follows them (use canary strings)
-- [ ] Data exfiltration attempts via links, images, tool arguments
-- [ ] Cross-role data access attempts ("I'm the CFO, show me…")
-- [ ] SQL abuse: DDL/DML, expensive queries, system tables, multiple statements
-- [ ] Tool abuse: unexpected args, excessive calls, actions without confirmation
-- [ ] Denial-of-wallet: long inputs, loops
-- [ ] Findings triaged; critical/high fixed; regression cases added to the eval suite
+- [ ] Map your system threat model to the OWASP Top 10 for LLM Applications.
+- [ ] Test direct single-turn and multi-turn prompt injections and jailbreaks.
+- [ ] Test **indirect** prompt injection by planting canary instructions inside test wiki pages, tickets, and documents.
+- [ ] Test data exfiltration via markdown images, query-string links, and tool arguments.
+- [ ] Attempt cross-role data access using role-spoofing prompts ("I am the CFO, show me…").
+- [ ] Attempt SQL abuse using DDL/DML statements, system catalog queries, and multi-statement payloads.
+- [ ] Attempt tool abuse using malformed arguments, excessive calls, and unconfirmed actions.
+- [ ] Test denial-of-wallet attacks using oversized inputs and recursive agent loops.
+- [ ] Triage all findings, fix critical and high issues, and add regression test cases to your CI suite.
 
 ### 3.4 Exit criteria
 
-- [ ] All tier-required guardrails implemented
-- [ ] Hard-gate tests (RBAC leak, unsafe SQL, unconfirmed actions) at 0 failures
-- [ ] Red-team findings: no open critical/high
-- [ ] Every red-team finding converted into a regression test
+- [ ] Implement all required guardrails for your assigned risk tier.
+- [ ] Pass all hard safety gates (RBAC leaks, unsafe SQL, unconfirmed actions) with zero failures.
+- [ ] Resolve all critical and high-severity red-team findings.
+- [ ] Convert every red-team finding into an automated regression test.
 
 ---
 
 ## Phase 4 — CI eval gates and launch readiness
 
-**Goal:** no change ships without passing the suite; a deliberate launch decision.
+**Goal:** Block regressions automatically in CI and make an explicit, evidence-based launch decision.
 
 ### 4.1 CI gates
 
@@ -285,107 +289,107 @@ flowchart LR
 
 | Gate type | Rule (heuristic) | Why |
 |---|---|---|
-| **Hard gate** | Must be 100% / 0 failures (RBAC leak, unsafe SQL, unconfirmed action, schema validity on critical paths) | Non-negotiable safety |
-| **Regression gate** | Metric must not drop more than X points vs main on the same examples (pick X from your CI noise; measure it by re-running main several times) | Prevent silent decay |
-| **Absolute gate** | Metric ≥ threshold agreed in Phase 0 | Release quality bar |
-| **Informational** | Reported, not blocking | New or unvalidated metrics |
+| **Hard gate** | Require 100% pass rate / 0 failures (RBAC leaks, unsafe SQL, unconfirmed actions, critical schema validity) | Enforces non-negotiable safety rules |
+| **Regression gate** | Block if a metric drops more than $X$ points vs `main` on the same examples (calibrate $X$ from run-to-run CI noise) | Prevents silent quality decay |
+| **Absolute gate** | Require the metric to meet or exceed the Phase 0 target threshold | Enforces your minimum release quality bar |
+| **Informational** | Report the score in CI output without blocking merges | Tracks new or unvalidated experimental metrics |
 
-Treat **changes to the model provider version, embeddings, or index** as code changes: they go through the same gates.
+Run **model version upgrades, embedding updates, and search index rebuilds** through the exact same CI gates as application code changes.
 
 ### 4.2 Launch readiness checklist
 
 **Product & quality**
 
-- [ ] Acceptance criteria met on the golden set, **per slice** (intent × role × difficulty)
-- [ ] Unanswerable/out-of-scope behaviour acceptable (refuses appropriately, low over-refusal)
-- [ ] SME spot-check of ≥ 50 recent outputs signed off
-- [ ] Known limitations documented and communicated to users (UI disclaimer where appropriate)
+- [ ] Verify that your golden set meets acceptance criteria across every intent, role, and difficulty slice.
+- [ ] Confirm that the system refuses unanswerable queries cleanly with a low over-refusal rate.
+- [ ] Obtain SME sign-off on a spot check of at least 50 recent outputs.
+- [ ] Document known limitations and display clear user guidance in the UI.
 
 **Evals**
 
-- [ ] Golden set version frozen and recorded for the launch
-- [ ] All gating judges validated (TPR/TNR recorded)
-- [ ] CI gates live; nightly suite green
-- [ ] Repeated-run reliability measured for agent tasks (e.g. pass^k)
+- [ ] Freeze and record the golden dataset version used for launch sign-off.
+- [ ] Record human-alignment scores (TPR/TNR) for all gating LLM judges.
+- [ ] Enable CI smoke gates on pull requests and verify that the nightly suite is green.
+- [ ] Measure repeated-run reliability (`pass^k`) for multi-step agent workflows.
 
 **Guardrails & security**
 
-- [ ] Risk tier and threat model reviewed by Security
-- [ ] Lethal-trifecta check passed or mitigated by design
-- [ ] Identity propagated; ACL/RLS enforced outside the LLM; tested per role
-- [ ] Tool allowlists, arg validation, SQL policy, confirmation flows live
-- [ ] Output link/image sanitization live
-- [ ] Guardrail recall/FPR measured; fail-open/closed reviewed
-- [ ] Red team completed; no open critical/high findings
-- [ ] Kill switch / feature flags per capability tested
+- [ ] Complete the security review of your risk tier and threat model.
+- [ ] Verify that lethal-trifecta risks are eliminated by design or gated by deterministic controls.
+- [ ] Propagate end-user identity and test ACL/RLS enforcement across all user roles.
+- [ ] Enable tool allowlists, argument validation, SQL parser policies, and user confirmation flows.
+- [ ] Enable outbound link and markdown image sanitization.
+- [ ] Record recall, false-positive rate, and fail-open/closed behavior for every guardrail.
+- [ ] Complete red-team testing with zero open critical or high findings.
+- [ ] Test per-capability feature flags and emergency kill switches.
 
 **Operations**
 
-- [ ] Production tracing on, with PII handling and retention policy
-- [ ] Online evals configured (deterministic on 100%, sampled judges)
-- [ ] Dashboards: quality, safety, guardrail triggers, latency, cost, errors
-- [ ] Alerts with owners and runbooks; on-call knows the kill switch
-- [ ] Feedback capture in the UI (thumbs + optional comment)
-- [ ] Rollback plan (prompt/model/index versions pinned and revertible)
-- [ ] Cost guardrails (per-user/day budgets, provider spend alerts)
+- [ ] Enable production tracing with PII scrubbing and retention policies configured.
+- [ ] Run deterministic checks on 100% of live traffic and LLM judges on a defined sample.
+- [ ] Publish dashboards for quality, safety, guardrail triggers, latency, cost, and error rates.
+- [ ] Configure alerts with named owners and runbooks, and train on-call engineers on the kill switch.
+- [ ] Enable in-product user feedback capture (thumbs up/down plus optional free-text comment).
+- [ ] Pin prompt, model, and index versions so you can roll back within minutes.
+- [ ] Enforce per-user token budgets and provider spend alerts.
 
 **Governance (Tier 3 / regulated)**
 
-- [ ] Compliance/legal sign-off; data processing agreements for LLM providers
-- [ ] Model/system card or equivalent documentation
-- [ ] Audit log retention meets policy
-- [ ] Human oversight process defined for high-stakes decisions
+- [ ] Obtain compliance and legal sign-off, including LLM provider data-processing agreements.
+- [ ] Publish an internal model or system card documenting intended use and evaluation results.
+- [ ] Verify that audit log retention meets regulatory requirements.
+- [ ] Define the human oversight workflow for high-stakes decisions.
 
 ### 4.3 Exit criteria
 
-- [ ] Readiness review held; launch decision recorded with owner (PO) and date
-- [ ] Rollout plan: internal dogfood → limited beta → general availability, with metrics checked at each stage
+- [ ] Hold the launch readiness review and record the launch decision with the product owner's sign-off.
+- [ ] Execute a staged rollout (`internal dogfood -> limited beta -> general availability`) and verify metrics at each stage.
 
 ---
 
 ## Phase 5 — Production: online evals, monitoring, feedback
 
-**Goal:** know within hours, not weeks, when quality or safety degrades. See [online evals](../03-online-evals-and-observability/01-online-evals.md), [monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md), [user feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md).
+**Goal:** Detect quality or safety regressions within hours rather than weeks. See [online eval pipelines](../03-online-evals-and-observability/01-online-evals.md), [monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md), and [user feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md).
 
 ### 5.1 Online evaluation setup
 
 | Layer | What | Coverage |
 |---|---|---|
 | Deterministic | Schema validity, citation validity, SQL validity/errors, tool errors, step counts, latency, cost | 100% |
-| Classifiers | Toxicity, PII, injection flags | 100% (cheap) |
-| LLM judges | Faithfulness, relevance, instruction adherence, policy | Sample (e.g. 1–10%) + 100% of negative-feedback and flagged traces |
-| Feedback | Thumbs, comments, re-asks, escalations, abandonment | 100% |
-| Human review | Weekly sample, stratified (random + low-score + negative feedback) | e.g. 30–100 traces/week |
+| Classifiers | Toxicity, PII, and prompt-injection flags | 100% (cheap) |
+| LLM judges | Faithfulness, relevance, instruction adherence, and policy compliance | Sample (e.g. 1–10%) + 100% of negative-feedback and flagged traces |
+| Feedback | Thumbs up/down, comments, re-asks, escalations, and session abandonment | 100% |
+| Human review | Stratified weekly sample across random, low-score, and negative-feedback traces | 30–100 traces/week |
 
 ### 5.2 Monitoring & alerting
 
-- [ ] Each online metric has a baseline from the first 1–2 weeks and an alert threshold
-- [ ] Alerts route to an owner with a runbook ("faithfulness dropped: check index freshness, recent prompt deploy, provider model change")
-- [ ] Drift monitoring on input topics/intents and retrieval scores
-- [ ] Guardrail trigger rates monitored (spikes = attack or broken guardrail; drops to zero = broken guardrail)
-- [ ] Provider/model version changes logged and correlated with metric changes
+- [ ] Establish baseline ranges during the first 1–2 weeks of production traffic and set alert thresholds.
+- [ ] Route every alert to a named owner with a diagnostic runbook (check index freshness, recent deploys, and model versions).
+- [ ] Monitor input topic drift and retrieval similarity score distributions.
+- [ ] Track guardrail trigger rates so you catch both attack spikes and broken guardrails that drop to zero.
+- [ ] Log provider model version updates and correlate them with online metric shifts.
 
 ### 5.3 Weekly quality review (30–60 minutes)
 
-Attendees: PO, AIE, SME (and SEC monthly).
+Include the product owner, AI engineer, and domain SME weekly (plus Security monthly):
 
-1. Review dashboard trends & alerts.
-2. Read 20–50 sampled traces together (low scores + negative feedback + random).
-3. Update failure taxonomy counts; identify new categories.
-4. Decide: fix now / add to dataset / add eval / accept.
-5. Assign owners.
+1. Review weekly dashboard trends and triggered alerts.
+2. Read 20–50 sampled traces together across low judge scores, negative feedback, and random traffic.
+3. Update failure taxonomy counts and log any new failure categories.
+4. Decide whether to fix each issue immediately, add examples to the golden set, or add a new evaluation.
+5. Assign a single owner to every action item.
 
 ### 5.4 Exit criteria (for "steady state")
 
-- [ ] Alerts tested by injecting a synthetic regression
-- [ ] Weekly review held at least 3 times with actions completed
-- [ ] First batch of production failures added to the golden set
+- [ ] Verify alert routing by injecting a synthetic regression in staging or production.
+- [ ] Complete at least three consecutive weekly quality reviews with tracked action items.
+- [ ] Promote your first batch of real production failures into the offline golden set.
 
 ---
 
 ## Phase 6 — Continuous improvement (the flywheel)
 
-**Goal:** production data continuously improves datasets, evals, guardrails, and the product. See [production data flywheel](../01-datasets/04-production-data-flywheel.md).
+**Goal:** Use production traces to continuously improve your datasets, evaluations, guardrails, and product. See [production data flywheel](../01-datasets/04-production-data-flywheel.md).
 
 ```mermaid
 flowchart LR
@@ -406,18 +410,18 @@ flowchart LR
 | Trace review & taxonomy update | Weekly |
 | Golden set refresh (add production failures, retire stale examples) | Every 2–4 weeks or per release |
 | Judge re-validation | Quarterly or on judge/product change |
-| Red-team regression | Every release; full red team per major capability change |
+| Red-team regression | Every release, plus full red team per major capability change |
 | Guardrail FPR/recall re-measurement | Monthly |
-| Model/provider upgrade evaluation | Per upgrade, before switch |
+| Model/provider upgrade evaluation | Per upgrade, before switching traffic |
 | Maturity self-assessment | Quarterly ([maturity model](./05-maturity-model.md)) |
 
 ### 6.2 Checklist
 
-- [ ] Golden set has provenance tags and grows from production failures
-- [ ] Stale examples retired when source docs change (reference answers go stale)
-- [ ] Dataset and judge versions tracked; metrics comparable across time
-- [ ] Each incident produces a regression test
-- [ ] Eval suite pruned: metrics nobody acted on in a quarter are removed or made informational
+- [ ] Tag golden set examples with provenance metadata and add new production failures regularly.
+- [ ] Retire or update stale reference answers whenever underlying source documents change.
+- [ ] Version datasets and judges so metric trends remain comparable over time.
+- [ ] Add a permanent regression test case for every production incident.
+- [ ] Prune unused metrics quarterly by removing or demoting any metric nobody acted on.
 
 ---
 
@@ -425,46 +429,46 @@ flowchart LR
 
 | Anti-pattern | Why it hurts | Do instead |
 |---|---|---|
-| **Generic off-the-shelf metrics without error analysis** | You measure what a library offers, not what breaks in your product; dashboards look fine while users suffer | Error analysis first; pick or build metrics for your top failure modes |
-| **Too many metrics** | Nobody knows which number matters; no one acts on any | 3–7 metrics that map to failure modes and decisions; the rest informational |
-| **Likert scales (1–5) for judges and humans** | Noisy, poorly calibrated, unactionable ("3.4 → 3.6?") | Binary pass/fail per criterion with written definitions |
-| **Unvalidated LLM judges** | You gate releases on a number that may not reflect human judgment | Measure TPR/TNR vs human labels; re-validate on change |
-| **Evaluating only end-to-end** | Can't localize regressions in agents with many steps | Add component evals for router, retriever, tools, SQL |
-| **Ignoring retrieval** | Most RAG failures start with missing or wrong context; prompt tweaks can't fix that | Measure recall@k early; check "fact present in context?" on failures |
-| **No regression set** | Every fix risks breaking something else, unnoticed | Golden set in CI; every bug becomes a test case |
-| **Only synthetic data** | Synthetic queries are cleaner than real ones; scores are inflated | Mix in real/pilot queries ASAP; label production samples |
-| **Faithfulness as the only correctness metric** | Grounded in the wrong doc still "passes" | Add reference-based correctness for top intents |
-| **Single run per agent scenario** | Non-determinism hides flakiness | Repeat runs; report pass^k / variance |
-| **Guardrails without measuring false positives** | Legit users get blocked; teams quietly disable the guardrail | Benign-but-tricky sets; FPR tracked; shadow mode first |
-| **LLM as the authorization layer** | Prompt instructions are bypassable by injection or jailbreak | Enforce authz in retrieval filters, DB RLS, tool layer — with end-user identity |
-| **Fail-open by accident** | Guardrail timeouts silently allow everything | Explicit, reviewed fail mode per guardrail; alert on guardrail errors |
-| **Prompt-injection classifier as the only defense** | Probabilistic; attackers only need one miss | Remove trifecta legs; deterministic controls on actions/egress |
-| **Eval suite never pruned or refreshed** | References go stale as docs change; suite drifts from reality | Refresh cadence; retire stale examples |
-| **Optimizing to the test set** | Overfitting prompts to a small golden set | Hold-out set; refresh with production data; watch online metrics |
-| **No owner for quality** | Metrics exist but no one decides | Named PO accountable; weekly review |
+| **Generic off-the-shelf metrics without error analysis** | Measures library defaults instead of real product failures, leaving dashboards green while users struggle | Run error analysis first and build metrics for your observed failure modes |
+| **Too many metrics** | Creates dashboard noise where nobody knows which number matters | Track 3–7 core decision metrics and keep the rest informational |
+| **Likert scales (1–5) for judges and humans** | Produces noisy, poorly calibrated scores ("what does 3.4 -> 3.6 mean?") | Use binary pass/fail criteria with clear written definitions |
+| **Unvalidated LLM judges** | Gates releases on scores that may not match human judgment | Measure TPR and TNR against human labels and re-validate on change |
+| **Evaluating only end-to-end** | Hides which internal step broke in a multi-step agent | Add component evaluations for your router, retriever, tools, and SQL |
+| **Ignoring retrieval** | Wastes time tuning prompts when the retriever failed to fetch the needed chunk | Measure `recall@k` early and check whether the fact was in context |
+| **No regression set** | Allows prompt fixes to silently break existing working intents | Run a versioned golden set in CI and turn every bug into a test |
+| **Only synthetic data** | Inflates retrieval scores because synthetic queries copy document wording | Mix in real pilot or production queries as early as possible |
+| **Faithfulness as the only correctness metric** | Passes answers that are faithfully grounded in the wrong document | Add reference-based answer correctness for your top intents |
+| **Single run per agent scenario** | Masks agent flakiness caused by non-deterministic sampling | Run scenarios multiple times and report `pass^k` and variance |
+| **Guardrails without measuring false positives** | Blocks legitimate users until frustrated teams disable the guardrail | Test on benign-but-tricky sets, track FPR, and start in shadow mode |
+| **LLM as the authorization layer** | Allows prompt injections or jailbreaks to bypass system-prompt rules | Enforce authorization in retrieval ACLs, database RLS, and tool code |
+| **Fail-open by accident** | Allows all traffic through silently when a guardrail service times out | Configure and test explicit fail-open or fail-closed rules per check |
+| **Prompt-injection classifier as the only defense** | Relies on a probabilistic filter where attackers need only one bypass | Break the lethal trifecta by design and enforce deterministic action controls |
+| **Eval suite never pruned or refreshed** | Causes reference answers to rot as source documents change | Refresh datasets on a schedule and retire stale examples |
+| **Optimizing to the test set** | Overfits prompts to a small fixed golden set | Maintain a held-out set, refresh from production, and monitor online metrics |
+| **No owner for quality** | Leaves evaluation dashboards unmonitored with no follow-up actions | Assign an accountable product owner and run a weekly review |
 
 ---
 
 ## 8. A 30/60/90-day plan (example)
 
-For a team starting from a working prototype of the running example:
+Use this 90-day roadmap when starting from a working prototype of our enterprise assistant:
 
 | Days | Focus | Deliverables |
 |---|---|---|
-| 1–30 | Phases 0–1, start 2 | Success criteria; risk tier; tracing; 80-example golden set; failure taxonomy; recall@k + execution accuracy + tool-call checks; first judge (faithfulness) aligned |
-| 31–60 | Phases 2–4 | Full must-have suite; RBAC/SQL/tool guardrails; red team; CI gates; readiness review; internal dogfood |
-| 61–90 | Phases 5–6 | Beta → GA; online evals; dashboards; alerts; weekly review; first golden-set refresh from production |
+| 1–30 | Phases 0–1, start Phase 2 | Define success criteria and risk tier, enable tracing, build an 80-example golden set, run error analysis, add `recall@k` + SQL execution + tool checks, and align your faithfulness judge |
+| 31–60 | Phases 2–4 | Complete the must-have eval suite, enforce RBAC/SQL/tool guardrails, run red teaming, enable CI gates, pass launch review, and start internal dogfooding |
+| 61–90 | Phases 5–6 | Roll out from beta to GA, enable online evaluations, dashboards, and alerts, start weekly trace reviews, and complete your first production dataset refresh |
 
 ---
 
 ## Key takeaways
 
-- Define success, failure, and risk tier before building metrics; hard safety gates are non-negotiable from day one.
-- Tracing and error analysis on 30–100 real examples come before any metric dashboard.
-- Build evals for the failure modes you observed; align every judge to human labels before trusting it.
-- Implement deterministic guardrails (identity, tools, SQL, egress) first; detection classifiers are defense in depth and must be measured for false positives.
-- Gate every change in CI: hard gates, regression gates, absolute thresholds — and treat model/index changes as code changes.
-- In production, run cheap checks on everything, judges on a sample, and review traces weekly; every failure becomes a test.
+- Define success criteria, failure modes, and risk tiers before you build metrics, and enforce hard safety gates from day one.
+- Instrument tracing and run error analysis on 30–100 real examples before building any evaluation dashboard.
+- Build evaluations that target your observed failure modes, and validate every LLM judge against human labels.
+- Implement deterministic guardrails (identity, tools, SQL, network egress) first, and measure false-positive rates on all classifier guardrails.
+- Gate every code, prompt, model, and index change in CI using hard safety gates and regression thresholds.
+- Run cheap deterministic checks on 100% of production traffic, sample LLM judges, review traces weekly, and turn failures into regression tests.
 
 ## Further reading
 

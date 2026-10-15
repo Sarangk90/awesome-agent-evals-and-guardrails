@@ -1,10 +1,14 @@
 # Metric Cheatsheet
 
-> **TL;DR** — One table of every metric, eval, and guardrail check covered in this repo, with what it measures, whether it needs ground truth, how it's computed, where it runs, and what it costs. Use the "quick pick" tables in §3 when you have a specific question ("is my retriever good?") and want the 2–3 metrics to start with.
+> **TL;DR**
+> - **Look up any metric fast.** Compare every evaluation and guardrail check by ground-truth needs, method, runtime location, and cost.
+> - **Start with the quick picks.** Use §3 to choose 1–2 primary metrics for your specific diagnostic question.
+> - **Separate offline gates from online monitors.** Use reference-based metrics to gate releases and reference-free metrics to monitor live traffic.
+> - **Prioritize cheap deterministic checks.** Run schema, citation, SQL, and tool-call checks on 100% of traffic before sampling LLM judges.
 
-**You'll learn:** the full metric landscape at a glance · which metrics need references · which are cheap enough for 100% of production traffic · which metric answers which question
-· **Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md)
-· **Related:** [Eval selection decision tree](./01-eval-selection-decision-tree.md), [Guardrail selection decision tree](./02-guardrail-selection-decision-tree.md), [Glossary](../00-foundations/04-glossary.md)
+**You will learn:** The full metric landscape at a glance · Which metrics require reference data · Which checks fit 100% production traffic · Which metric answers each diagnostic question  
+**Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md)  
+**Related:** [Eval selection decision tree](./01-eval-selection-decision-tree.md), [Guardrail selection decision tree](./02-guardrail-selection-decision-tree.md), [Glossary](../00-foundations/04-glossary.md)
 
 ---
 
@@ -18,7 +22,7 @@
 | **Where** | **Off** = offline on datasets · **On** = online eval on production traffic · **GR** = runtime guardrail (can block) |
 | **Cost** | **$0** = negligible compute · **$** = cheap model/classifier · **$$** = LLM judge per item · **$$$** = human time or multi-call judges |
 
-Costs are relative per evaluated item. "On" for a Judge metric normally means *sampled* traffic.
+Costs are relative per evaluated item. When a Judge metric runs online ("On"), you usually run it on sampled traffic.
 
 ---
 
@@ -38,8 +42,8 @@ Costs are relative per evaluated item. "On" for a Judge metric normally means *s
 | Context precision (RAGAS-style) | retrieval | relevant chunks ranked above irrelevant ones | Opt (judge can use reference) | Judge / Stat | Off | $$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
 | Context recall (RAGAS-style) | retrieval | reference answer's claims attributable to retrieved context | Yes (reference answer or contexts) | Judge / Stat | Off | $$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
 | Context relevance | retrieval | retrieved context is relevant to the question | No | Judge | Off/On | $$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
-| Retrieval latency / empty-result rate | ops | speed; queries returning nothing above threshold | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
-| Retrieval score drift | ops | shift in similarity-score / query-embedding distributions | No | Stat | On | $ | [Monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
+| Retrieval latency / empty-result rate | ops | speed and queries returning nothing above threshold | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
+| Retrieval score drift | ops | shift in similarity-score or query-embedding distributions | No | Stat | On | $ | [Monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
 
 ### 2.2 Generation and end-to-end RAG
 
@@ -51,14 +55,14 @@ Costs are relative per evaluated item. "On" for a Judge metric normally means *s
 | Faithfulness / groundedness | generation | every claim in answer supported by retrieved context | No | Judge / Clf (NLI) | Off/On/GR | $$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
 | Hallucination rate | generation | share of answers with unsupported claims | No (vs context) | Judge | Off/On | $$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
 | Answer relevancy | generation | answer addresses the question asked | No | Judge / Stat | Off/On | $$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
-| Completeness | generation | covers all parts of the question / reference | Opt | Judge | Off | $$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
-| Refusal correctness (unanswerable) | e2e | abstains when context lacks the answer; doesn't over-refuse | Yes (answerable label) | Judge / Code | Off | $–$$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
+| Completeness | generation | covers all parts of the question or reference | Opt | Judge | Off | $$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
+| Refusal correctness (unanswerable) | e2e | abstains when context lacks the answer without over-refusing | Yes (answerable label) | Judge / Code | Off | $–$$ | [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) |
 | Rubric-based quality (custom criteria) | generation | product-specific pass/fail criteria from error analysis | Opt | Judge / Human | Off/On | $$ | [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) |
-| Pairwise preference | generation | A vs B which is better | No | Judge / Human | Off | $$ | [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) |
+| Pairwise preference | generation | A vs B comparison | No | Judge / Human | Off | $$ | [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) |
 | Judge–human agreement (TPR/TNR, kappa) | generation | validity of an LLM judge | Yes (human labels) | Stat | Off | $$$ | [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) |
-| Format / schema validity | generation | output parses, matches JSON schema / template | No | Code | Off/On/GR | $0 | [Instruction adherence](../02-offline-evals/06-instruction-and-citation-adherence.md) |
+| Format / schema validity | generation | output parses and matches JSON schema or template | No | Code | Off/On/GR | $0 | [Instruction adherence](../02-offline-evals/06-instruction-and-citation-adherence.md) |
 | Length / verbosity | generation | within length bounds | No | Code | Off/On | $0 | [Instruction adherence](../02-offline-evals/06-instruction-and-citation-adherence.md) |
-| Tone / style adherence | generation | matches brand/voice guidelines | No | Judge / Clf | Off/On | $–$$ | [Generation quality](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
+| Tone / style adherence | generation | matches brand and voice guidelines | No | Judge / Clf | Off/On | $–$$ | [Generation quality](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
 | Readability | generation | reading-level formulas | No | Code | Off | $0 | [Generation quality](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
 
 ### 2.3 Instruction and citation adherence
@@ -79,20 +83,20 @@ Costs are relative per evaluated item. "On" for a Judge metric normally means *s
 |---|---|---|---|---|---|---|---|
 | Task / goal completion | agent | run achieves the user's goal | Opt (success criteria) | Code (state) / Judge / Human | Off/On | $–$$ | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
 | Tool selection accuracy | agent | correct tool (or none) chosen | Yes (expected tool) | Code | Off | $0 | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
-| Tool argument correctness | agent | args valid (schema) and semantically correct | Yes for semantic; No for schema | Code / Judge | Off/On | $0–$$ | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
+| Tool argument correctness | agent | args valid (schema) and semantically correct | Yes for semantic, No for schema | Code / Judge | Off/On | $0–$$ | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
 | Tool-call schema validity | agent | args parse against tool schema | No | Code | Off/On/GR | $0 | [Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) |
 | Trajectory match (exact / in-order / any-order) | agent | steps vs reference trajectory | Yes (reference path) | Code | Off | $0 | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
 | Trajectory quality (judge) | agent | reasonable, non-redundant path | No | Judge | Off | $$ | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
-| Step efficiency | agent | #steps, redundant/repeated calls vs minimum | Opt | Code | Off/On | $0 | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
+| Step efficiency | agent | step count and redundant calls vs minimum | Opt | Code | Off/On | $0 | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
 | Loop / non-termination rate | agent | runs hitting max steps or repeating | No | Code | Off/On/GR | $0 | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
-| Routing / delegation accuracy | agent | orchestrator/router picks correct path or sub-agent | Yes (expected route) | Code | Off | $0 | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
-| Retrieval decision accuracy | agent | retrieves when needed, skips when not | Yes (label) | Code / Judge | Off | $0–$$ | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
+| Routing / delegation accuracy | agent | orchestrator or router picks correct path or sub-agent | Yes (expected route) | Code | Off | $0 | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
+| Retrieval decision accuracy | agent | retrieves when needed and skips when not | Yes (label) | Code / Judge | Off | $0–$$ | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
 | Error recovery rate | agent | recovers after tool failure | Opt | Code / Judge | Off | $–$$ | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
 | Hand-off fidelity | agent | info preserved between agents | Opt | Judge | Off | $$ | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
-| pass@k / pass^k (consistency) | agent | success in any of k runs / all of k runs | Opt | Code | Off | $$ (k runs) | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
+| pass@k / pass^k (consistency) | agent | success in any of k runs or all of k runs | Opt | Code | Off | $$ (k runs) | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
 | Conversation goal completion | agent | multi-turn session achieves user goal | Opt | Judge / Human | Off/On | $$ | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
-| Tool error rate | ops | tool calls returning errors/timeouts | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
-| Cost & latency per task | ops | tokens, $, wall-clock per run | No | Code | Off/On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
+| Tool error rate | ops | tool calls returning errors or timeouts | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
+| Cost & latency per task | ops | tokens, dollars, and wall-clock time per run | No | Code | Off/On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
 
 ### 2.5 Text-to-SQL
 
@@ -103,11 +107,11 @@ Costs are relative per evaluated item. "On" for a Judge metric normally means *s
 | Component / AST match | SQL | clause-level match (SELECT, WHERE, GROUP BY…) | Yes | Code | Off | $0 | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
 | SQL similarity (edit/AST distance) | SQL | partial-credit similarity to gold | Yes | Code | Off | $0 | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
 | SQL validity | SQL | parses and executes without error | No | Code | Off/On | $0 | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
-| Schema-linking recall/precision | SQL | correct tables/columns identified | Yes (gold tables) | Code | Off | $0 | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
+| Schema-linking recall/precision | SQL | correct tables and columns identified | Yes (gold tables) | Code | Off | $0 | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
 | Semantic SQL correctness (judge) | SQL | SQL answers the question when no gold SQL exists | No | Judge / Human | Off/On | $$ | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
 | Answer-vs-result faithfulness | SQL | NL answer consistent with returned rows | No | Code (numbers) / Judge | Off/On | $0–$$ | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
 | Ambiguity/clarification handling | SQL | asks or states assumptions when question is ambiguous | Opt | Judge | Off | $$ | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
-| Query efficiency | SQL | runtime, rows scanned, cost | No | Code | Off/On | $0 | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
+| Query efficiency | SQL | runtime, rows scanned, and cost | No | Code | Off/On | $0 | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
 | Empty-result / execution-error rate | ops | production SQL failures | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
 
 ### 2.6 Safety and responsible-AI evals
@@ -115,15 +119,15 @@ Costs are relative per evaluated item. "On" for a Judge metric normally means *s
 | Metric | Category | Measures | GT? | Method | Where | Cost | Details |
 |---|---|---|---|---|---|---|---|
 | Toxicity | safety | hateful, abusive, harassing content | No | Clf / Judge | Off/On/GR | $–$$ | [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
-| Profanity | safety | swear words / cursing | No | Code (wordlist) / Clf | Off/On/GR | $0–$ | [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
+| Profanity | safety | swear words or cursing | No | Code (wordlist) / Clf | Off/On/GR | $0–$ | [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
 | Bias / fairness | safety | differential treatment across groups (counterfactual pairs) | Opt (paired prompts) | Judge / Stat | Off | $$ | [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
 | Harmful-content categories | safety | self-harm, violence, illegal activity, etc. | No | Clf / Judge | Off/On/GR | $–$$ | [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
 | Jailbreak resistance / attack success rate | safety | share of adversarial prompts that succeed | Yes (expected safe behaviour) | Judge / Code | Off | $$ | [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
-| Prompt-injection attack success rate | safety | injected instructions in docs/tools followed | Yes (attack set) | Code (canary) / Judge | Off | $–$$ | [Threat model](../04-guardrails/07-threat-model-owasp.md) |
+| Prompt-injection attack success rate | safety | injected instructions in docs or tools followed | Yes (attack set) | Code (canary) / Judge | Off | $–$$ | [Threat model](../04-guardrails/07-threat-model-owasp.md) |
 | Over-refusal rate | safety | benign requests wrongly refused | Yes (benign set) | Judge / Code | Off/On | $–$$ | [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) |
-| PII leakage rate | safety | PII present in outputs that shouldn't contain it | No | Clf (NER) / Code (regex) | Off/On/GR | $–$ | [Output guardrails](../04-guardrails/04-output-guardrails.md) |
+| PII leakage rate | safety | PII present in outputs that should not contain it | No | Clf (NER) / Code (regex) | Off/On/GR | $–$ | [Output guardrails](../04-guardrails/04-output-guardrails.md) |
 | Unauthorized-data exposure (RBAC leak) | safety | content outside user's entitlement appears in output | Yes (role × forbidden markers) | Code | Off | $0 | [Access control & RBAC](../04-guardrails/06-access-control-rbac.md) |
-| Unauthorized action rate | safety | disallowed/unapproved tool calls attempted or executed | Yes (policy) | Code | Off/On | $0 | [Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) |
+| Unauthorized action rate | safety | disallowed or unapproved tool calls attempted or executed | Yes (policy) | Code | Off/On | $0 | [Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) |
 
 ### 2.7 Runtime guardrail checks
 
@@ -132,19 +136,19 @@ Costs are relative per evaluated item. "On" for a Judge metric normally means *s
 | Input length / rate limits | guardrail | resource abuse | No | Code | GR | $0 | [Input guardrails](../04-guardrails/02-input-guardrails.md) |
 | Topic / scope classifier | guardrail | out-of-scope requests | No | Clf / Judge | GR | $–$$ | [Input guardrails](../04-guardrails/02-input-guardrails.md) |
 | Prompt-injection / jailbreak detector | guardrail | malicious instructions in input | No | Clf / Judge | GR | $–$$ | [Input guardrails](../04-guardrails/02-input-guardrails.md) |
-| SQL-in-input detector | guardrail | raw SQL / injection payloads in user text | No | Code (regex/parser) | GR | $0 | [Input guardrails](../04-guardrails/02-input-guardrails.md) |
-| Input PII detection / redaction | guardrail | PII before it's sent to the model/logs | No | Clf (NER) + Code | GR | $ | [Input guardrails](../04-guardrails/02-input-guardrails.md) |
-| Document/row-level ACL filtering | guardrail | user only retrieves what they're entitled to | No (policy) | Code | GR | $0 | [Access control & RBAC](../04-guardrails/06-access-control-rbac.md) |
-| Context injection scan | guardrail | instructions hidden in retrieved docs/tool outputs | No | Clf / Code | GR | $ | [Retrieval & context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md) |
+| SQL-in-input detector | guardrail | raw SQL or injection payloads in user text | No | Code (regex/parser) | GR | $0 | [Input guardrails](../04-guardrails/02-input-guardrails.md) |
+| Input PII detection / redaction | guardrail | PII before it reaches the model or logs | No | Clf (NER) + Code | GR | $ | [Input guardrails](../04-guardrails/02-input-guardrails.md) |
+| Document/row-level ACL filtering | guardrail | user only retrieves authorized records | No (policy) | Code | GR | $0 | [Access control & RBAC](../04-guardrails/06-access-control-rbac.md) |
+| Context injection scan | guardrail | instructions hidden in retrieved docs or tool outputs | No | Clf / Code | GR | $ | [Retrieval & context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md) |
 | Source allowlist / provenance | guardrail | only trusted sources enter context | No (policy) | Code | GR | $0 | [Retrieval & context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md) |
 | Tool allowlist per role | guardrail | agent can only call permitted tools | No (policy) | Code | GR | $0 | [Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) |
-| Tool argument validation | guardrail | schema, enums, ranges, ownership checks | No | Code | GR | $0 | [Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) |
+| Tool argument validation | guardrail | schema, enums, ranges, and ownership checks | No | Code | GR | $0 | [Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) |
 | SQL statement policy (read-only, allowed schemas) | guardrail | only safe SQL executes | No | Code (parser) | GR | $0 | [Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) |
 | Human approval for actions | guardrail | irreversible actions confirmed | No | Human | GR | $$$ | [Tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) |
 | Step / budget / loop limits | guardrail | runaway agents | No | Code | GR | $0 | [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md) |
 | Output schema validation | guardrail | malformed outputs | No | Code | GR | $0 | [Output guardrails](../04-guardrails/04-output-guardrails.md) |
 | Output PII / secret scan | guardrail | leakage | No | Code + Clf | GR | $ | [Output guardrails](../04-guardrails/04-output-guardrails.md) |
-| Link / image sanitization | guardrail | exfiltration via URLs, phishing links | No | Code | GR | $0 | [Output guardrails](../04-guardrails/04-output-guardrails.md) |
+| Link / image sanitization | guardrail | exfiltration via URLs and phishing links | No | Code | GR | $0 | [Output guardrails](../04-guardrails/04-output-guardrails.md) |
 | Output toxicity / policy filter | guardrail | harmful output | No | Clf / Judge | GR | $–$$ | [Output guardrails](../04-guardrails/04-output-guardrails.md) |
 | Groundedness gate | guardrail | ungrounded answers on high-stakes intents | No | Judge / Clf (NLI) | GR | $$ | [Output guardrails](../04-guardrails/04-output-guardrails.md) |
 | Guardrail recall / FPR | guardrail | effectiveness and UX cost of a guardrail | Yes (attack + benign sets) | Stat | Off | $ | [Guardrail selection §9](./02-guardrail-selection-decision-tree.md#9-measuring-guardrails-false-positives-matter) |
@@ -154,20 +158,20 @@ Costs are relative per evaluated item. "On" for a Judge metric normally means *s
 | Signal | Category | Measures | GT? | Method | Where | Cost | Details |
 |---|---|---|---|---|---|---|---|
 | Thumbs up/down rate | feedback | explicit satisfaction | No | Code | On | $0 | [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
-| Re-ask / rephrase rate | feedback | user didn't get what they needed | No | Code / Stat | On | $0 | [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
+| Re-ask / rephrase rate | feedback | user did not get what they needed | No | Code / Stat | On | $0 | [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
 | Copy / accept / click-through on citations | feedback | answer was used | No | Code | On | $0 | [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
-| Escalation / handoff to human rate | feedback | assistant couldn't resolve | No | Code | On | $0 | [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
+| Escalation / handoff to human rate | feedback | assistant could not resolve the request | No | Code | On | $0 | [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
 | Session abandonment | feedback | user gave up | No | Code | On | $0 | [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
-| Sampled online judge scores | e2e | faithfulness/relevance/policy on live traffic | No | Judge | On | $$ | [Online evals](../03-online-evals-and-observability/01-online-evals.md) |
+| Sampled online judge scores | e2e | faithfulness, relevance, and policy on live traffic | No | Judge | On | $$ | [Online evals](../03-online-evals-and-observability/01-online-evals.md) |
 | Input/topic drift | ops | query distribution change vs baseline | No | Stat | On | $ | [Monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
 | Latency p50/p95, error rate, tokens, cost | ops | system health | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
-| Guardrail trigger rate | ops | blocks/flags per guardrail over time | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
+| Guardrail trigger rate | ops | blocks and flags per guardrail over time | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
 
 ---
 
 ## 3. Quick picks by question
 
-Start with the **bold** item; add the others when you need more resolution.
+Start with the **bold** metric. Add the secondary metrics only when you need finer diagnostic detail.
 
 ### 3.1 Retrieval
 
@@ -176,9 +180,9 @@ Start with the **bold** item; add the others when you need more resolution.
 | …if my retriever finds the right docs at all | **Recall@k / hit rate@k** | Context recall (judge) | Relevant doc IDs (or reference answers) |
 | …if the best docs are ranked first | **MRR** (one right answer) / **nDCG@k** (graded) | MAP | Relevant IDs, graded for nDCG |
 | …if I'm stuffing the context with junk | **Precision@k** / context precision | Context relevance (judge) | Labels or judge |
-| …which chunker/embedder/reranker is better | **Recall@k + nDCG@k** on the same labelled set | Downstream answer correctness | Labelled set, fixed |
+| …which chunker/embedder/reranker is better | **Recall@k + nDCG@k** on the same labelled set | Downstream answer correctness | Fixed labelled set |
 | …if retrieval is the bottleneck vs generation | **"Fact present in context?"** on failed answers | Context recall | Error analysis traces |
-| …how retrieval behaves without labels | **Context relevance (judge)** | Synthetic Q from chunks → hit rate | Nothing / corpus |
+| …how retrieval behaves without labels | **Context relevance (judge)** | Synthetic Q from chunks → hit rate | Nothing or corpus |
 
 ### 3.2 Generation and answers
 
@@ -268,7 +272,7 @@ flowchart LR
     end
 ```
 
-Reference-free metrics are what you can run **online**. Reference-based metrics are what you **gate releases** on.
+Run reference-free metrics **online** on live traffic. Run reference-based metrics offline to **gate releases**.
 
 ---
 
@@ -278,16 +282,16 @@ Reference-free metrics are what you can run **online**. Reference-based metrics 
 |---|---|---|
 | Schema/format validity, citation validity, SQL validity, tool-call schema, step/loop counts, latency/cost, PII regex, toxicity classifier, guardrail trigger counts, feedback signals | Faithfulness, answer relevancy, context relevance, instruction adherence (judge), tone, semantic SQL judge, conversation goal completion | Answer correctness, retrieval IR metrics, execution accuracy, trajectory match, tool selection accuracy, red-team ASR, judge validation |
 
-Sampling rates are heuristics; set them from your traffic volume and judge cost (see [eval selection §9](./01-eval-selection-decision-tree.md#9-budget-making-the-plan-affordable)).
+Treat these sampling rates as starting heuristics. Calculate your exact sampling rate from your traffic volume and judge budget (see [eval selection §9](./01-eval-selection-decision-tree.md#9-budget-making-the-plan-affordable)).
 
 ---
 
 ## Key takeaways
 
-- Most high-value checks are deterministic and nearly free: schema, citation validity, SQL validity/execution, tool-call match, step counts. Use them first.
-- Reference-free metrics (faithfulness, relevancy, safety) run online; reference-based metrics (correctness, recall@k, execution accuracy) gate releases.
-- Each question has a 1–2 metric starting point; resist adding metrics that no one will act on.
-- Every LLM-judge metric depends on a validated judge; every guardrail check needs measured recall and false-positive rate.
+- Use deterministic checks first because schema, citation validity, SQL execution, tool-call match, and step counts are fast and free.
+- Run reference-free metrics (faithfulness, relevancy, safety) online, and use reference-based metrics (correctness, recall@k, execution accuracy) to gate releases.
+- Start with 1–2 metrics per diagnostic question and skip metrics that nobody will act on.
+- Validate every LLM judge against human labels, and measure recall and false-positive rate for every guardrail.
 
 ## Further reading
 

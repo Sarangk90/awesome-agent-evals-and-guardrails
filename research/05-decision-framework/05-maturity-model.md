@@ -1,20 +1,24 @@
 # Eval & Guardrail Maturity Model
 
-> **TL;DR** — Most teams move through five levels: **0 Ad hoc vibes → 1 Basic test set → 2 Systematic offline evals → 3 Continuous online evals + guardrails → 4 Data flywheel & governance.** Each level has observable practices, not aspirations. Score yourself on the scorecard in §4, find your weakest dimension, and use the "how to level up" section to pick the next two or three moves — don't try to jump two levels at once.
+> **TL;DR**
+> - **Progress through five observable levels.** Advance from Level 0 (ad hoc vibes) to Level 4 (data flywheel and governance).
+> - **Fix your weakest dimension first.** Your overall maturity is capped by your lowest-scoring dimension across datasets, evals, guardrails, and process.
+> - **Match your target level to your risk tier.** Reach at least Level 2 for medium-risk launches and Level 3 guardrails for high-risk systems.
+> - **Advance one level at a time.** Score yourself in 20 minutes with §4 and pick your next two actions from §5.
 
-**You'll learn:** what each maturity level looks like in practice · capabilities per dimension (datasets, offline evals, online evals, guardrails, process & governance) · how to level up · a self-assessment scorecard you can run in 20 minutes
-· **Prerequisites:** [Implementation playbook](./04-implementation-playbook.md)
-· **Related:** [Eval selection](./01-eval-selection-decision-tree.md), [Guardrail selection](./02-guardrail-selection-decision-tree.md), [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
+**You will learn:** What each maturity level looks like in practice · Capabilities across five dimensions · How to level up step by step · How to score your system in 20 minutes  
+**Prerequisites:** [Implementation playbook](./04-implementation-playbook.md)  
+**Related:** [Eval selection](./01-eval-selection-decision-tree.md), [Guardrail selection](./02-guardrail-selection-decision-tree.md), [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
 
 ---
 
 ## 1. Why a maturity model
 
-- **To decide what to do next.** Teams often invest at the wrong level — e.g. buying an observability platform (Level 3) before they have a single labelled example (Level 1).
-- **To match rigor to risk.** A low-risk internal prototype at Level 1 can be fine; a Tier-3 agent handling HR or finance data in production at Level 1 is not. See [risk tiers](./02-guardrail-selection-decision-tree.md#4-risk-tiers--required-guardrails).
-- **To communicate.** "We're Level 2 on evals but Level 1 on guardrails" is a useful sentence for a leadership or security review.
+- **Decide what to build next.** Teams often buy an observability platform (Level 3) before they create a single labelled example (Level 1).
+- **Match rigor to risk.** Level 1 suffices for a low-risk internal prototype. A Tier-3 agent handling HR or finance data in production requires Level 3 controls. See [risk tiers](./02-guardrail-selection-decision-tree.md#4-risk-tiers--required-guardrails).
+- **Communicate status clearly.** Stating "We are at Level 2 on evaluations but Level 1 on guardrails" aligns engineering, leadership, and security teams.
 
-The levels are cumulative: Level 3 assumes Level 2's practices are still running.
+The levels are cumulative. Level 3 requires all Level 2 practices to remain active.
 
 ### Minimum level by risk tier (heuristic)
 
@@ -42,13 +46,13 @@ flowchart LR
 
 | Characteristics | Typical symptoms |
 |---|---|
-| Quality judged by builders chatting with the system | Prompt changes fix one thing and silently break another |
-| No saved test cases; no tracing | "It worked yesterday" debates with no evidence |
-| Guardrails = a sentence in the system prompt ("never reveal…") | Demo-driven development; stakeholders lose trust after a bad demo |
-| Model/provider upgrades applied without checking | Nobody can say whether a change was an improvement |
+| Builders judge quality by chatting with the system | Prompt changes fix one bug and silently break another behavior |
+| No saved test cases and no tracing | Teams debate whether quality regressed without any evidence |
+| Guardrails consist of a system-prompt rule ("never reveal…") | Stakeholders lose trust after a single failed live demo |
+| Teams upgrade models or providers without testing | Nobody knows whether a change improved the system |
 
-**Capabilities:** none systematic.
-**Acceptable for:** throwaway spikes only.
+**Capabilities:** None systematic.
+**Acceptable for:** Throwaway spikes only.
 
 ### Level 1 — Basic test set
 
@@ -56,13 +60,13 @@ flowchart LR
 
 | Dimension | Practices |
 |---|---|
-| Datasets | 20–100 examples, mostly builder-written, maybe a few SME answers; stored somewhere shared |
-| Offline evals | Manual or scripted runs; pass/fail eyeballed or a single generic metric |
-| Online | Basic logging of inputs/outputs; maybe thumbs up/down |
-| Guardrails | Input length limits; output format checks; some deterministic auth on the app |
-| Process | Someone runs the set "before big changes" |
+| Datasets | 20–100 examples, mostly builder-written with a few SME answers, stored in a shared location |
+| Offline evals | Manual or scripted runs where engineers eyeball pass/fail or check one generic metric |
+| Online | Basic input/output logging and optional thumbs up/down feedback |
+| Guardrails | Input length limits, output format checks, and basic application authentication |
+| Process | An engineer runs the test set before major changes |
 
-**Typical gaps:** no error analysis; no component metrics; test set not versioned; scores not comparable over time; guardrails rely on prompt instructions; no tracing of retrieval/tool steps.
+**Typical gaps:** You lack error analysis, component metrics, versioned datasets, and retrieval or tool traces. Your scores cannot be compared over time, and your guardrails rely on prompt instructions.
 
 ### Level 2 — Systematic offline evals
 
@@ -70,13 +74,13 @@ flowchart LR
 
 | Dimension | Practices |
 |---|---|
-| Datasets | Versioned golden set (100–300+), stratified by intent/role/difficulty, SME-reviewed, with gold contexts / SQL / tool calls where applicable; synthetic data for coverage |
-| Offline evals | Error-analysis-driven metrics; component evals (retrieval, tools, SQL) + E2E; binary judges validated against human labels; repeated runs for agents |
-| Online | Full tracing (retrieval, tool, SQL spans); basic dashboards for latency/cost/errors |
-| Guardrails | Deterministic authz outside the LLM (ACL-filtered retrieval, RLS, tool allowlists); SQL policy; schema validation; PII/toxicity classifiers on output |
-| Process | CI eval gates (smoke on PR, full nightly); hard gates for safety; experiment tracking with versions |
+| Datasets | Versioned golden set (100–300+), stratified by intent/role/difficulty, SME-reviewed, with gold contexts, SQL, or tool calls |
+| Offline evals | Error-analysis-driven metrics, component + E2E evals, binary judges validated against human labels, and repeated agent runs |
+| Online | Full tracing across retrieval, tool, and SQL spans, plus dashboards for latency, cost, and errors |
+| Guardrails | Deterministic authorization outside the LLM (ACL retrieval, RLS, tool allowlists), SQL policy, schema validation, and output safety classifiers |
+| Process | CI evaluation gates (smoke on PR, full nightly), hard safety gates, and versioned experiment tracking |
 
-**Typical gaps:** no online quality signal beyond feedback; guardrails not measured for FPR; production data doesn't flow back into datasets; red teaming is one-off.
+**Typical gaps:** You have no online quality signals beyond user feedback, and you do not measure guardrail false-positive rates. Production failures do not flow back into datasets automatically, and red teaming happens only once.
 
 ### Level 3 — Continuous online evals + guardrails
 
@@ -84,13 +88,13 @@ flowchart LR
 
 | Dimension | Practices |
 |---|---|
-| Datasets | Golden set refreshed with production failures on a cadence; red-team/adversarial sets maintained |
-| Offline evals | As Level 2 + regression sets per incident; judge re-validation schedule |
-| Online | Deterministic checks on 100% of traffic; sampled LLM judges; implicit + explicit feedback; drift monitoring; alerts with owners and runbooks |
-| Guardrails | Layered (input, context, tool, output) per risk tier; lethal-trifecta mitigated by design; each guardrail measured (recall/FPR/latency); explicit fail-open/closed; shadow → block rollouts; kill switches |
-| Process | Weekly trace review; structured red teaming per release; launch readiness reviews; on-call for AI quality incidents |
+| Datasets | Golden set refreshed with production failures on a regular cadence, plus maintained red-team and adversarial sets |
+| Offline evals | All Level 2 practices, plus incident regression sets and a scheduled judge re-validation cadence |
+| Online | Deterministic checks on 100% of traffic, sampled LLM judges, implicit and explicit feedback, drift monitoring, and actionable alerts |
+| Guardrails | Layered controls per risk tier, architectural lethal-trifecta mitigation, measured recall/FPR/latency, explicit fail modes, shadow rollouts, and kill switches |
+| Process | Weekly trace reviews, per-release red teaming, launch readiness reviews, and on-call rotation for AI quality incidents |
 
-**Typical gaps:** improvements still driven by a few individuals; metrics not tied to business outcomes; limited governance artifacts; evals and guardrails not standardized across teams.
+**Typical gaps:** A few individuals still drive improvements manually, and metrics do not connect to business KPIs. Teams lack shared standards and automated governance artifacts.
 
 ### Level 4 — Data flywheel & governance
 
@@ -98,41 +102,41 @@ flowchart LR
 
 | Dimension | Practices |
 |---|---|
-| Datasets | Automated sampling/triage of production traces into labelling queues; dataset lineage and provenance; PII-safe data pipelines; retirement of stale examples |
-| Offline evals | Shared eval platform & metric library across teams; standard judge validation protocol; eval results tied to model/prompt/index registries |
-| Online | Online metrics linked to business KPIs (deflection, time saved, CSAT); A/B or canary with online evals for every significant change |
-| Guardrails | Central policy (policy-as-code) shared across agents; continuous automated red teaming; threat model reviewed per capability change |
-| Process & governance | Documented risk management aligned with frameworks like NIST AI RMF; model/system cards; audit trails; clear accountability; periodic maturity reviews |
+| Datasets | Automated production trace sampling into labelling queues, dataset lineage, PII-safe pipelines, and automated retirement of stale examples |
+| Offline evals | Shared evaluation platform and metric library across teams, standard judge validation protocols, and links to model/prompt/index registries |
+| Online | Online metrics linked to business KPIs (deflection, time saved, CSAT), plus canary rollouts with online evaluations for major changes |
+| Guardrails | Central policy-as-code shared across agents, continuous automated red teaming, and threat model updates for every capability change |
+| Process & governance | Documented risk management aligned with NIST AI RMF, system cards, audit trails, clear accountability, and quarterly maturity reviews |
 
-**Typical gaps at Level 4:** keeping it lightweight — governance overhead can slow iteration if not automated.
+**Typical gaps at Level 4:** Governance overhead can slow iteration if you do not automate evidence collection.
 
 ---
 
 ## 3. Capability matrix
 
-Rows are dimensions; cells describe what "done" looks like at each level.
+Rows represent dimensions. Cells describe what "done" looks like at each level.
 
 | Dimension | L0 | L1 | L2 | L3 | L4 |
 |---|---|---|---|---|---|
 | **Tracing & observability** | None | Input/output logs | Full spans: retrieval, tools, SQL, versions | + dashboards, alerts, drift | + cross-team standard, linked to registries |
-| **Error analysis** | None | Occasional anecdote | Structured open/axial coding; failure taxonomy with counts | Weekly, with taxonomy trend over time | Partly automated clustering + human review |
+| **Error analysis** | None | Occasional anecdote | Structured open/axial coding and failure taxonomy with counts | Weekly review with taxonomy trends over time | Partly automated clustering + human review |
 | **Datasets** | None | Small unversioned list | Versioned, stratified golden set with gold artifacts | + production failures, adversarial sets, refresh cadence | Automated flywheel, lineage, PII-safe pipelines |
 | **Retrieval evals** | None | Eyeballing results | recall@k, MRR/nDCG on labelled set | + online context relevance, retrieval drift | Shared IR benchmark per corpus |
 | **Generation/E2E evals** | Vibes | Single generic score | Binary, criterion-specific, reference-based correctness + faithfulness | + sampled online judges | Tied to business KPIs |
 | **Agent/tool/SQL evals** | None | Manual checks | Tool selection/args, execution accuracy, task completion, repeated runs | + online tool/SQL error monitoring | Standard harnesses & sandboxes across teams |
-| **LLM judges** | None | Unvalidated "rate 1–5" | Binary judges validated vs humans (TPR/TNR) | Re-validation schedule; judge drift monitored | Standard protocol, judge registry |
+| **LLM judges** | None | Unvalidated "rate 1–5" | Binary judges validated vs humans (TPR/TNR) | Re-validation schedule and judge drift monitoring | Standard protocol, judge registry |
 | **CI / release gates** | None | Manual pre-demo run | Smoke on PR, full nightly, hard gates | + pre-release red-team regression, canary | Automated promotion policies |
 | **Guardrails: authz & data** | Prompt instructions | App-level auth only | Identity-propagated ACL/RLS, tool allowlists | Tested per role continuously | Central policy-as-code |
-| **Guardrails: input/output** | None | Length/format checks | PII/toxicity/schema; SQL policy | Layered, measured recall/FPR, fail-mode decided, shadow rollouts | Shared guardrail service, continuous tuning |
-| **Security & red teaming** | None | Ad hoc "try to break it" | Threat model; pre-launch red team | Per-release red team; indirect injection tests; trifecta by design | Continuous automated red teaming + independent review |
+| **Guardrails: input/output** | None | Length/format checks | PII/toxicity/schema and SQL policy | Layered, measured recall/FPR, fail-mode decided, shadow rollouts | Shared guardrail service, continuous tuning |
+| **Security & red teaming** | None | Ad hoc "try to break it" | Threat model and pre-launch red team | Per-release red team, indirect injection tests, trifecta by design | Continuous automated red teaming + independent review |
 | **Feedback & online evals** | None | Thumbs only | Thumbs + logged traces | Implicit signals, sampled judges, alerts | Linked to KPIs, experiments |
-| **Process & ownership** | Nobody | Builder runs tests | Named owner; acceptance criteria | Weekly review; on-call; readiness reviews | Governance, audits, maturity reviews |
+| **Process & ownership** | Nobody | Builder runs tests | Named owner and acceptance criteria | Weekly review, on-call, readiness reviews | Governance, audits, maturity reviews |
 
 ---
 
 ## 4. Self-assessment scorecard
 
-Score each statement **0 = no**, **1 = partially**, **2 = yes, consistently**. Be honest: "we have a ticket for it" is 0.
+Score each statement **0 = no**, **1 = partially**, or **2 = yes, consistently**. Score a **0** if you only have an unimplemented backlog ticket.
 
 ### 4.1 Datasets (max 10)
 
@@ -160,9 +164,9 @@ Score each statement **0 = no**, **1 = partially**, **2 = yes, consistently**. B
 | # | Statement | Score |
 |---|---|---|
 | N1 | Every production run is traced, including retrieval, tool calls, and SQL | |
-| N2 | Deterministic checks run on 100% of traffic; LLM judges run on a sample | |
-| N3 | We collect explicit and implicit feedback and look at it weekly | |
-| N4 | Alerts on quality/safety metrics exist, with owners and runbooks | |
+| N2 | Deterministic checks run on 100% of traffic, and LLM judges run on a sample | |
+| N3 | We collect explicit and implicit feedback and review it weekly | |
+| N4 | Alerts on quality and safety metrics exist, with owners and runbooks | |
 | N5 | We monitor drift in inputs, retrieval scores, and guardrail trigger rates | |
 
 ### 4.4 Guardrails & security (max 14)
@@ -170,8 +174,8 @@ Score each statement **0 = no**, **1 = partially**, **2 = yes, consistently**. B
 | # | Statement | Score |
 |---|---|---|
 | G1 | Authorization is enforced outside the LLM using the end user's identity (ACL-filtered retrieval, RLS, tool permissions) | |
-| G2 | Tool calls are restricted by allowlist and validated arguments; SQL is read-only and parser-checked | |
-| G3 | We did the lethal-trifecta check and mitigated it by design where present | |
+| G2 | Tool calls are restricted by allowlist and validated arguments, and SQL is read-only and parser-checked | |
+| G3 | We ran the lethal-trifecta check and mitigated it by design where present | |
 | G4 | Output is scanned for PII/secrets, and links/images are sanitized | |
 | G5 | Each guardrail's recall, false-positive rate, and latency are measured | |
 | G6 | Fail-open vs fail-closed is an explicit, tested decision per guardrail | |
@@ -189,7 +193,7 @@ Score each statement **0 = no**, **1 = partially**, **2 = yes, consistently**. B
 
 ### 4.6 Interpreting the score
 
-Total max = 56. Compute both the **total** and the **lowest dimension percentage**: your effective level is capped by your weakest dimension.
+The maximum total score is 56. Calculate both your **total score** and your **lowest dimension percentage**. Your weakest dimension caps your effective maturity level.
 
 | Total score | Indicative level |
 |---|---|
@@ -214,7 +218,7 @@ weakest = min(pct, key=pct.get)
 print(f"total={total}/56", {k: f"{p:.0%}" for k, p in pct.items()}, "weakest:", weakest)
 ```
 
-The bands are heuristics for orientation, not a certification. A team with total 38 but 20% on guardrails should treat itself as Level 1 on guardrails and fix that first.
+Use these score bands for orientation, not certification. If your team scores 38 overall but 20% on guardrails, treat your guardrail maturity as Level 1 and fix it first.
 
 ---
 
@@ -222,80 +226,80 @@ The bands are heuristics for orientation, not a certification. A team with total
 
 ### 5.1 Level 0 → 1 (days)
 
-- [ ] Turn on tracing (inputs, outputs, retrieved chunks, tool calls)
-- [ ] Write down 30–50 realistic queries with what a good answer looks like
-- [ ] Read the outputs; write a note per failure; group them (first error analysis)
-- [ ] Move "never do X" rules out of the prompt and into code where possible (auth, tool permissions)
-- [ ] Add output format checks
+- [ ] Enable tracing for inputs, outputs, retrieved chunks, and tool calls.
+- [ ] Write 30–50 realistic queries with expected answer notes.
+- [ ] Read the outputs, record one note per failure, and group them into categories.
+- [ ] Move "never do X" rules out of the prompt and into deterministic code for auth and tool permissions.
+- [ ] Add deterministic output format checks.
 
-**Biggest trap:** buying a platform before you've read 50 traces.
+**Biggest trap:** Buying an evaluation platform before you read 50 traces.
 
 ### 5.2 Level 1 → 2 (weeks)
 
-- [ ] Version the golden set; grow to 100+; stratify; get SME references for top intents
-- [ ] Add component evals for the dominant failure modes (recall@k, execution accuracy, tool-call correctness)
-- [ ] Convert Likert/generic judges to binary, criterion-specific judges; validate against human labels
-- [ ] CI: smoke suite on PRs, full nightly, hard safety gates
-- [ ] Enforce authz with end-user identity in retrieval, DB, and tools
-- [ ] Threat model + first red-team pass
+- [ ] Version your golden set, grow it to 100+ stratified examples, and collect SME references for top intents.
+- [ ] Add component evaluations for your dominant failure modes (recall@k, execution accuracy, tool-call correctness).
+- [ ] Replace Likert or generic judges with binary, criterion-specific judges validated against human labels.
+- [ ] Configure CI to run a smoke suite on pull requests, full evaluations nightly, and hard safety gates.
+- [ ] Enforce authorization with end-user identity across retrieval, databases, and tools.
+- [ ] Complete a threat model and your first red-team pass.
 
-**Biggest trap:** adding 20 metrics. Keep 3–7 that map to failure modes.
+**Biggest trap:** Adding 20 metrics at once. Keep 3–7 metrics that map directly to your observed failure modes.
 
 ### 5.3 Level 2 → 3 (1–3 months)
 
-- [ ] Online: deterministic checks on 100%, sampled judges, feedback capture, dashboards
-- [ ] Alerts with owners and runbooks; test them with a synthetic regression
-- [ ] Weekly trace review ritual
-- [ ] Layered guardrails per tier; lethal-trifecta mitigated architecturally
-- [ ] Measure guardrails' recall/FPR; set explicit fail modes; shadow → block
-- [ ] Per-release red team incl. indirect injection; findings → regression tests
-- [ ] Production failures flow into the golden set on a cadence
+- [ ] Run deterministic checks on 100% of online traffic, sample LLM judges, capture user feedback, and build dashboards.
+- [ ] Configure alerts with named owners and runbooks, then test them with a synthetic regression.
+- [ ] Run a weekly trace review meeting.
+- [ ] Implement layered guardrails for your risk tier and remove lethal-trifecta legs by design.
+- [ ] Measure recall and false-positive rate for each guardrail, configure explicit fail modes, and promote from shadow to block.
+- [ ] Run red-team tests on every release, including indirect injection, and turn findings into regression tests.
+- [ ] Add production failures to your golden set on a regular schedule.
 
-**Biggest trap:** alerts nobody owns, and online judges no one validated against production data.
+**Biggest trap:** Creating alerts with no owner and running online judges that were never validated on production data.
 
 ### 5.4 Level 3 → 4 (quarters)
 
-- [ ] Automate sampling & triage of production traces into labelling queues
-- [ ] Dataset lineage, PII-safe pipelines, retention policies
-- [ ] Shared eval/guardrail platform and metric library across teams
-- [ ] Policy-as-code for guardrails; continuous automated red teaming
-- [ ] Link online metrics to business KPIs; canary + online evals for every significant change
-- [ ] Governance artifacts (risk register, system cards, audit trail) aligned with e.g. [NIST AI RMF](https://www.nist.gov/itl/ai-risk-management-framework)
+- [ ] Automate sampling and triage of production traces into human labelling queues.
+- [ ] Implement dataset lineage, PII-safe data pipelines, and retention policies.
+- [ ] Standardize a shared evaluation and guardrail platform across teams.
+- [ ] Manage guardrails as policy-as-code and run continuous automated red teaming.
+- [ ] Link online metrics to business KPIs and require canary rollouts with online evaluations for major changes.
+- [ ] Maintain governance artifacts (risk register, system cards, audit trail) aligned with the [NIST AI RMF](https://www.nist.gov/itl/ai-risk-management-framework).
 
-**Biggest trap:** governance theater — documents nobody uses. Automate evidence collection from the eval and tracing systems you already run.
+**Biggest trap:** Building governance theater with static documents nobody reads. Automate evidence collection directly from your evaluation and tracing systems.
 
 ---
 
 ## 6. Worked example: the running example's assessment
 
-The internal enterprise assistant after a 6-week pilot:
+Here is the scorecard for our internal enterprise assistant after a 6-week pilot:
 
 | Dimension | Score | Notes |
 |---|---|---|
-| Datasets | 5/10 | 120 examples, stratified, SME answers for policy Q&A; no gold SQL yet; no production refresh |
-| Offline evals | 6/12 | recall@k and faithfulness; judges are 1–5 scales, unvalidated; no repeated agent runs |
-| Online | 3/10 | Tracing on; thumbs only; no alerts |
-| Guardrails | 5/14 | ACL-filtered retrieval ✔; SQL runs on a read-only role ✔ but no parser policy; ticket tool has no confirmation; no trifecta review |
-| Process | 4/10 | Owner named; no CI gates |
-| **Total** | **23/56** | Indicative Level 2 by total; **guardrails at 36% → effectively Level 1 on guardrails** |
+| Datasets | 5/10 | 120 stratified examples and SME answers for policy Q&A, but no gold SQL or production refresh yet |
+| Offline evals | 6/12 | Has recall@k and faithfulness, but judges use unvalidated 1–5 scales and agent runs are not repeated |
+| Online | 3/10 | Tracing is enabled with thumbs feedback only and no alerts |
+| Guardrails | 5/14 | Has ACL-filtered retrieval and a read-only SQL role, but lacks SQL parser policy, ticket confirmation, and trifecta review |
+| Process | 4/10 | Quality owner is named, but no CI gates exist |
+| **Total** | **23/56** | Indicative Level 2 overall, but **guardrails score 36% (effectively Level 1)** |
 
-Next moves (in order):
+Prioritize these next steps in order:
 
-1. Lethal-trifecta review → strip external images/links; ticket confirmation step; SQL parser policy (Tier 3 paths).
-2. RBAC leak test set per role as a hard gate.
-3. 50 gold SQL pairs + execution accuracy.
-4. Convert judges to binary and validate.
-5. CI smoke + nightly suite.
+1. Complete the lethal-trifecta review, strip external images and links, require ticket confirmation, and enforce a SQL parser policy.
+2. Build an RBAC leak test set per role and enforce it as a hard CI gate.
+3. Create 50 gold SQL pairs and measure execution accuracy.
+4. Convert LLM judges to binary pass/fail criteria and validate them against human labels.
+5. Enable CI smoke gates on pull requests and a full nightly evaluation suite.
 
 ---
 
 ## Key takeaways
 
-- Maturity is about practices you can observe (versioned datasets, validated judges, measured guardrails, CI gates, weekly reviews), not tools you own.
-- Your effective level is capped by your weakest dimension — often guardrails or online monitoring.
-- Match the target level to risk tier: Tier 3 agents need Level 3 guardrails before launch.
-- Level up one step at a time; the biggest traps are platforms before error analysis, too many metrics, unowned alerts, and governance theater.
-- Re-score quarterly and pick the next two or three moves from the "how to level up" checklists.
+- Measure maturity by observable practices (versioned datasets, validated judges, measured guardrails, CI gates, weekly reviews), not by purchased tools.
+- Remember that your weakest dimension caps your effective maturity level.
+- Match your target maturity level to your risk tier, and require Level 3 guardrails before launching Tier 3 agents.
+- Advance one level at a time, and avoid buying platforms before error analysis or creating unowned alerts.
+- Re-score your system every quarter and pick your next two or three improvements from the leveling checklists.
 
 ## Further reading
 
