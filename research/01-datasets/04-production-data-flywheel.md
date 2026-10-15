@@ -5,16 +5,17 @@
 > - **Use production traces as your primary data source.** After launch, real user traffic provides your highest-value evaluation cases.
 > - **Separate measurement from discovery.** Use random sampling to measure true failure rates. Use targeted sampling (thumbs-down, low scores, errors) to find bugs.
 > - **Turn failures into regression tests.** Route sampled traces into annotation queues, categorize failures via error analysis, and add fixed bugs to a regression suite.
-> - **Protect privacy and fight drift.** Scrub PII before saving traces, version every dataset immutably, and re-validate rows whenever source documents change.
+> - **Estimate rates only from measurement samples.** Store each trace's inclusion probability, re-weight stratified labels, and correct judge-labelled rates for judge error.
+> - **Protect privacy and fight drift.** Pseudonymize PII and strip secrets in every field before saving rows, version every dataset immutably, and re-validate rows whenever source documents change.
 
 - **You will learn:**
     - How traces become eval rows
-    - Sampling strategies and budget allocation
+    - Sampling strategies, budget allocation, and re-weighted rate estimates
     - Annotation queue design
     - Error analysis to test cases
     - Regression set growth
     - Dataset versioning
-    - PII scrubbing and consent
+    - PII scrubbing, secrets, quasi-identifiers, and consent
     - Keeping datasets fresh as docs change
     - Contamination risks
     - Ownership
@@ -102,39 +103,95 @@ For an annotation budget of ~200 traces per week (heuristic split; tune to your 
 | Pool | Share | Count | Notes |
 |---|---|---|---|
 | Uniform random | 30% | 60 | Measurement; keep the method fixed across weeks |
-| Stratified quotas | 20% | 40 | E.g., ≥5 per language, ≥10 SQL, ≥10 tool actions, ≥5 privileged roles |
+| Stratified quotas | 20% | 40 | Measurement; equal split across strata (e.g., pipeline × language × role), hard cap of 40; log inclusion probabilities |
 | Negative feedback | 20% | 40 | All, if fewer |
 | Low online-eval score / judge disagreement | 15% | 30 | High-yield failure discovery |
 | Guardrail triggers | 10% | 20 | Half blocks (FP review), half near-threshold allows (FN hunting) |
 | Errors / anomalies | 5% | 10 | Tool/SQL errors, max-steps |
 
+These are **human-annotation** budgets. Automated checks run on far more traffic: deterministic checks and the injection classifier on 100% of traces, and online LLM judges on 1–5% of traces plus 100% of flagged traces (see [Online eval pipelines](../03-online-evals-and-observability/01-online-evals.md)).
+
+The sampler below keeps the two measurement pools usable for estimates. It excludes opted-out users, caps the stratified pool at its quota, and stores the inclusion probability of every measurement trace. Discovery pools are labelled as such.
+
 ```python
+import math
 import random
 from collections import defaultdict
 
-def weekly_sample(traces, budget=200, seed=None):
+def allocate(sizes: dict, quota: int) -> dict:
+    """Split `quota` across strata as equally as possible; small strata give their unused share to others."""
+    alloc, remaining = {}, quota
+    keys = sorted(sizes, key=lambda k: (sizes[k], str(k)))       # smallest first, deterministic
+    for i, key in enumerate(keys):
+        share = remaining // (len(keys) - i)     # equal share of what is left; unused shares roll forward
+        alloc[key] = min(sizes[key], share)
+        remaining -= alloc[key]
+    return alloc
+
+def weekly_sample(traces, budget=200, seed=None, random_share=0.30, strat_share=0.20):
     rng = random.Random(seed)
+    eligible = [t for t in traces if not t.opted_out]             # consent: exclude at sampling time
     picked, seen = [], set()
 
+    def add(t, pool, reason, **weights):
+        seen.add(t.id)
+        picked.append({"trace": t, "pool": pool, "reason": reason, **weights})
+
+    # 1. Measurement pool A: simple random sample. Every eligible trace has the same inclusion probability.
+    n_rand = min(int(random_share * budget), len(eligible))
+    for t in rng.sample(eligible, n_rand):
+        add(t, "measurement", "random", inclusion_prob=n_rand / len(eligible))
+
+    # 2. Measurement pool B: stratified sample, hard-capped at its quota.
+    by_stratum = defaultdict(list)
+    for t in eligible:
+        by_stratum[(t.pipeline, t.language, t.user_role)].append(t)
+    sizes = {k: len(v) for k, v in by_stratum.items()}
+    for key, k in allocate(sizes, int(strat_share * budget)).items():
+        for t in rng.sample(by_stratum[key], k):
+            if t.id not in seen:      # rare overlap with pool A: the trace is already in the queue
+                add(t, "measurement", f"stratified:{key}", stratum=key,
+                    stratum_size=sizes[key], inclusion_prob=k / sizes[key])
+
+    # 3. Discovery pools: targeted. Never use these labels to estimate rates.
     def take(pool, k, reason):
         pool = [t for t in pool if t.id not in seen]
         for t in rng.sample(pool, min(k, len(pool))):
-            seen.add(t.id)
-            picked.append((t, reason))
+            add(t, "discovery", reason)
 
-    take(traces, int(0.30 * budget), "random")
-    by_stratum = defaultdict(list)
-    for t in traces:
-        by_stratum[(t.pipeline, t.language, t.user_role)].append(t)
-    per = max(1, int(0.20 * budget) // max(1, len(by_stratum)))
-    for key, pool in by_stratum.items():
-        take(pool, per, f"stratified:{key}")
-    take([t for t in traces if t.feedback == "negative" or t.escalated], int(0.20 * budget), "neg_feedback")
-    take([t for t in traces if t.online_score is not None and t.online_score < 0.5], int(0.15 * budget), "low_score")
-    take([t for t in traces if t.guardrail_events], int(0.10 * budget), "guardrail")
-    take([t for t in traces if t.tool_errors or t.sql_error or t.hit_max_steps], int(0.05 * budget), "error")
-    return picked   # keep `reason`: it determines whether a label can be used for measurement
+    take([t for t in eligible if t.feedback == "negative" or t.escalated], int(0.20 * budget), "neg_feedback")
+    take([t for t in eligible if t.online_score is not None and t.online_score < 0.5], int(0.15 * budget), "low_score")
+    take([t for t in eligible if t.guardrail_events], int(0.10 * budget), "guardrail")
+    take([t for t in eligible if t.tool_errors or t.sql_error or t.hit_max_steps], int(0.05 * budget), "error")
+    return picked   # store `pool`, `reason`, and the weights with every label
+
+def stratified_rate(labels, stratum_sizes):
+    """Population failure rate from stratified labels: sum over strata of W_h * p_h.
+    labels: list of (stratum, failed: bool). stratum_sizes: traffic count per stratum (N_h)."""
+    by = defaultdict(list)
+    for stratum, failed in labels:
+        by[stratum].append(failed)
+    missing = set(stratum_sizes) - set(by)
+    if missing:
+        raise ValueError(f"No labels for {len(missing)} strata; the estimate would be biased")
+    total = sum(stratum_sizes.values())
+    rate, var = 0.0, 0.0
+    for stratum, size in stratum_sizes.items():
+        w, ys = size / total, by[stratum]
+        p = sum(ys) / len(ys)
+        rate += w * p
+        var += w**2 * p * (1 - p) / len(ys)    # ignores finite-population correction (conservative)
+    return rate, math.sqrt(var)
 ```
+
+*Tested with 20,000 synthetic traces in 60 strata (3 pipelines × 4 languages × 5 roles): the sampler returned 200 traces, with exactly 60 random and 40 stratified picks and no opted-out users.*
+
+#### 2.2.1 Estimating rates from the measurement pools
+
+- **Random pool:** The failure rate is the plain proportion of failed labels. Report a Wilson interval (see [Dataset strategy](./01-dataset-strategy.md#52-confidence-intervals-for-pass-rates)).
+- **Stratified pool:** Do not average the labels directly. Small strata are over-sampled, so a plain average over-weights them. Weight each stratum by its share of traffic, $W_h = N_h / N$, and use $\hat p = \sum_h W_h \hat p_h$ (`stratified_rate` above). This is the standard stratified estimator. It is the same as weighting each label by $1/\text{inclusion\_prob}$ ([Horvitz & Thompson, 1952](https://doi.org/10.1080/01621459.1952.10483446)).
+- **Too many strata:** With 60 strata and a quota of 40, some strata get no rows. `stratified_rate` then raises an error, because the estimate would be biased. For a global estimate, use coarser strata (for example, pipeline only) or the random pool. Use fine strata to find failures in rare slices.
+- **Judge-labelled rates:** If an online LLM judge produces the labels instead of humans, the measured rate inherits the judge's errors. Correct it with the judge's TPR and TNR (the Rogan–Gladen correction), or combine a small human-labelled sample with the judge labels (prediction-powered inference, [Angelopoulos et al., 2023](https://arxiv.org/abs/2301.09633)). See [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md).
 
 ### 2.3 Sampling conversations and agent runs
 
@@ -146,7 +203,7 @@ def weekly_sample(traces, budget=200, seed=None):
 
 ## 3. Annotation queues
 
-An **annotation queue** routes sampled traces to the right reviewers with a consistent labeling form. Observability platforms provide built-in queues (such as [LangSmith annotation queues](https://docs.smith.langchain.com/evaluation/how_to_guides/annotation_queues) and [Langfuse annotation queues](https://langfuse.com/docs/scores/annotation)). A spreadsheet or small custom app also works well (see [SME golden datasets](./02-sme-golden-datasets.md#9-labeling-tools)).
+An **annotation queue** routes sampled traces to the right reviewers with a consistent labeling form. Observability platforms provide built-in queues (such as [LangSmith annotation queues](https://docs.langchain.com/langsmith/annotation-queues) and [Langfuse annotation queues](https://langfuse.com/docs/evaluation/evaluation-methods/annotation-queues)). A spreadsheet or small custom app also works well (see [SME golden datasets](./02-sme-golden-datasets.md#9-labeling-tools)).
 
 ### 3.1 Queue design
 
@@ -165,6 +222,7 @@ An **annotation queue** routes sampled traces to the right reviewers with a cons
 {
   "trace_id": "tr_9f2c...",
   "queue": "general_quality",
+  "pool": "measurement",
   "sample_reason": "random",
   "labels": {
     "overall": "fail",
@@ -181,7 +239,7 @@ An **annotation queue** routes sampled traces to the right reviewers with a cons
 
 ### 3.3 Queue hygiene
 
-- [ ] Attach `sample_reason` to every item to separate measurement from discovery.
+- [ ] Attach `pool` and `sample_reason` (and, for measurement items, the inclusion probability) to every item to separate measurement from discovery.
 - [ ] Show reviewers the **full trace**: input, retrieved chunks (with doc versions), tool calls, SQL + results, final answer, and guardrail events.
 - [ ] Provide a one-click **"add to dataset"** action with the corrected expected output.
 - [ ] Overlap a small share of items between annotators to monitor agreement (see [SME golden datasets](./02-sme-golden-datasets.md#7-inter-annotator-agreement-iaa)).
@@ -192,11 +250,11 @@ An **annotation queue** routes sampled traces to the right reviewers with a cons
 
 ## 4. Error analysis → new test cases
 
-Error analysis is the highest-leverage activity in the flywheel. Read traces, name the failures, count them, fix the biggest ones, and freeze examples as tests. Follow this qualitative coding workflow (popularized for LLMs by Hamel Husain and Shreya Shankar):
+Error analysis is the highest-leverage activity in the flywheel. Read traces, name the failures, count them, fix the biggest ones, and freeze examples as tests. Follow this qualitative coding workflow (popularized for LLMs by Hamel Husain and Shreya Shankar). Read at least 100 traces, and continue until new traces stop showing new failure categories ([Husain & Shankar, evals FAQ](https://hamel.dev/blog/posts/evals-faq/)):
 
 ```mermaid
 flowchart TD
-    R["Read 50-100 sampled traces"] --> O["Open coding: free-text note on what went wrong, first failure only"]
+    R["Read at least 100 sampled traces, until no new failure categories appear"] --> O["Open coding: free-text note on what went wrong, first failure only"]
     O --> A["Axial coding: group notes into failure categories"]
     A --> C["Count per category, weight by severity and frequency"]
     C --> P["Prioritize top categories"]
@@ -232,27 +290,36 @@ Choose which fields to freeze based on the component you want to test:
 | SQL | Question + DB snapshot ID + gold SQL/result | SQL generation |
 
 ```python
+from scrub import RowScrubber
+
 def trace_to_rag_row(trace, label, dataset_version):
+    scrub = RowScrubber()          # one scrubber per row: "Jane Doe" is <PERSON_1> in every field
+    lang = trace.language
     return {
         "id": f"prod-{trace.id}",
-        "question": scrub_pii(trace.user_input),                 # §7
+        "question": scrub(trace.user_input, lang),                              # §7
         "user_role": trace.user_role,
-        "reference_answer": label.corrected_answer,
-        "key_facts": label.key_facts,
-        "reference_contexts": label.supporting_chunk_ids or [],
+        "reference_answer": scrub(label.corrected_answer, lang),
+        "key_facts": [scrub(f, lang) for f in label.key_facts],
+        "reference_contexts": [c.chunk_id for c in label.supporting_chunks],   # IDs only; rehydrate text (§7.3)
         "answerable": label.answerable,
         "expected_behavior": label.expected_behavior,           # e.g. "answer", "abstain", "refuse"
         "metadata": {
             "source": "production",
+            "pool": label.pool,                                  # "measurement" or "discovery" (§2.1)
             "sample_reason": label.sample_reason,
             "failure_category": label.failure_category,
+            "note": scrub(label.note, lang),
             "label_tier": "gold" if label.by_sme else "silver",
-            "doc_versions": {c.doc_id: c.doc_version for c in trace.retrieved},
+            "doc_versions": {c.doc_id: c.doc_version for c in label.supporting_chunks},   # the docs the label depends on
+            "retrieved_doc_versions": {c.doc_id: c.doc_version for c in trace.retrieved},  # what the app saw
             "app_version_at_capture": trace.app_version,
             "added_in": dataset_version,
         },
     }
 ```
+
+`RowScrubber` is the per-row pseudonymizer from §7.2. Use one instance per row, so each name gets the same placeholder in the question, reference answer, key facts, and annotator note. `doc_versions` comes from the chunks that support the **label**, because those are the documents that make the reference answer true. The retrieved chunks are kept separately as `retrieved_doc_versions`.
 
 **Generalize, do not just copy.** One production failure usually signals a broader class of failures. Add the real trace **plus** 3 to 5 variants (paraphrases, other regions, or other roles). Use synthetic generation to scale these variants (see [Synthetic datasets](./03-synthetic-datasets.md#6-query-evolution-and-edge-case-generation)).
 
@@ -272,7 +339,7 @@ Follow these rules to maintain your regression set:
 - [ ] **Control non-determinism.** Run flaky rows $k$ times and require a pass rate (such as $\ge 2/3$), or quarantine flaky rows rather than ignoring red builds.
 - [ ] **Prune regularly.** Deduplicate redundant rows, retire rows for removed features, and re-validate rows after document updates (§8).
 
-Regression sets grow rapidly right after launch and then slow down. If your regression set keeps growing linearly, the same bug categories are recurring; fix the root causes or add online monitors.
+Regression sets grow rapidly right after launch and then slow down. If your regression set keeps growing linearly, find out why. Growth from recurring failure categories means you must fix root causes or add online monitors. Growth from new features or new surface area is expected.
 
 ---
 
@@ -286,7 +353,7 @@ Evaluation scores are only comparable when run on the exact same dataset version
 |---|---|---|---|
 | **Git (JSONL/CSV/Parquet in repo)** | Datasets next to the eval code; PR review for changes | Small/medium text datasets; review workflow; diffs | Repo bloat for large files; sensitive data in git history is hard to remove |
 | **[DVC](https://dvc.org/)** or similar data-versioning tools | Git tracks pointers; data in object storage | Large datasets, DB snapshots, binary files | Extra tooling |
-| **Eval/observability platform datasets** (e.g., [LangSmith datasets](https://docs.smith.langchain.com/evaluation/concepts), [Langfuse datasets](https://langfuse.com/docs/datasets/overview), Arize Phoenix, Braintrust) | Datasets live in the platform; traces added from UI/API; experiments linked to dataset versions | Tight trace → dataset → experiment loop; non-engineers can contribute | Export regularly to your own storage; check platform versioning semantics; data residency |
+| **Eval/observability platform datasets** (e.g., [LangSmith datasets](https://docs.langchain.com/langsmith/evaluation-concepts), [Langfuse datasets](https://langfuse.com/docs/evaluation/experiments/datasets), Arize Phoenix, Braintrust) | Datasets live in the platform; traces added from UI/API; experiments linked to dataset versions | Tight trace → dataset → experiment loop; non-engineers can contribute | Export regularly to your own storage; check platform versioning semantics; data residency |
 | **Data warehouse tables** | Versioned tables/snapshots | Very large production-derived sets; SQL-based slicing | Needs discipline around immutability |
 
 **Recommended hybrid approach:** Use platform datasets for your daily annotation loop, and export periodic immutable snapshots to Git or DVC with version tags for CI.
@@ -321,7 +388,7 @@ datasets/
 }
 ```
 
-- **Use immutable version tags:** Bump the version whenever you add, remove, or relabel rows. Never edit a tagged version in place.
+- **Use immutable version tags:** Bump the version whenever you add, remove, or relabel rows. Never edit a tagged version in place. The one exception is a legal deletion request (see §7.3): publish a new version without the rows, purge them from old artifacts, and record the purge in the changelog.
 - **Log the dataset version with every experiment:** When the dataset changes, re-run your baseline on the new version before comparing scores.
 - **Keep row IDs stable across versions:** Stable IDs let you track history per row (for example, "this row has failed since v5").
 - **Maintain a changelog:** Record why rows were added (incident number, failure category) or removed (retired document, ambiguous prompt).
@@ -338,28 +405,110 @@ Production traces contain personal data, confidential business records, and rest
 
 - [ ] **Verify legal basis and consent:** Confirm that terms of use, employee notices, or customer contracts allow using interaction data for evaluation. Exclude opted-out users at sampling time.
 - [ ] **Minimize data:** Copy only the fields required for the evaluation. Replace raw user IDs with stable pseudonyms if you need session grouping.
-- [ ] **Scrub PII across all fields:** Run PII detection on user inputs, retrieved contexts, tool results, SQL results, and model outputs. Use tools like [Microsoft Presidio](https://microsoft.github.io/presidio/) plus custom recognizers for internal IDs.
+- [ ] **Scrub PII across all fields:** Run PII detection on user inputs, retrieved contexts, tool results, SQL results, and model outputs. Use tools like [Presidio](https://presidio.dataprivacystack.org/) plus custom recognizers for internal IDs. Configure a model for every language in your traffic (§7.2).
 - [ ] **Pseudonymize consistently:** Replace "Jane Doe" with the same placeholder (`<PERSON_1>`) throughout a multi-turn row so pronouns and references remain coherent.
 - [ ] **Preserve test semantics:** Scrubbing can break a test case (for example, a question about "Jane's manager" becomes unanswerable). Replace sensitive entities with realistic synthetic values when the entity value matters.
-- [ ] **Enforce dataset access control:** Evaluation datasets inherit the sensitivity of their source data. Restrict datasets built from `hr_admin` traces just like the underlying HR system (see [Access control & RBAC](../04-guardrails/06-access-control-rbac.md)).
+- [ ] **Enforce dataset access control:** Evaluation datasets inherit the sensitivity of their source data. Restrict datasets built from `hr_partner` traces just like the underlying HR system (see [Access control & RBAC](../04-guardrails/06-access-control-rbac.md)).
 - [ ] **Check annotator authorization:** Route restricted traces only to reviewers authorized to view that data.
-- [ ] **Support retention and deletion:** Define retention limits for evaluation datasets and support user deletion requests.
-- [ ] **Verify data residency:** Check where your evaluation platform and LLM judges process data.
-- [ ] **Scan for secrets:** Strip API keys, passwords, or tokens that users pasted into prompts.
+- [ ] **Support retention and deletion:** Define retention limits for evaluation datasets and support user deletion requests, including rows already copied into tagged versions (§7.3).
+- [ ] **Verify data residency and retention:** Check where your evaluation platform and LLM judges process data, and how long the vendor keeps prompts and outputs (§7.3).
+- [ ] **Scan for secrets:** Strip API keys, passwords, or tokens that users pasted into prompts. Use a dedicated secrets scanner such as [detect-secrets](https://github.com/Yelp/detect-secrets) or [gitleaks](https://github.com/gitleaks/gitleaks) in addition to PII detection, because PII models do not detect most secret formats.
+
+### 7.2 Consistent pseudonymization with Presidio (illustrative)
+
+Presidio's default anonymizer replaces every name with the same generic tag (`<PERSON>`). It does not detect most API keys or passwords, and its default configuration supports English only ([Presidio language support](https://presidio.dataprivacystack.org/analyzer/languages/)). The sketch below adds three things:
+
+- **Numbered placeholders per row:** A custom operator, adapted from the [Presidio pseudonymization sample](https://presidio.dataprivacystack.org/samples/python/pseudonymization/), maps each distinct value to `<PERSON_1>`, `<PERSON_2>`, and so on.
+- **A secrets recognizer:** Regex patterns catch common key formats and "password: …" phrases.
+- **More than one language:** English and German spaCy models. Rows in other languages go to manual review.
 
 ```python
-# illustrative: check current Presidio API
-from presidio_analyzer import AnalyzerEngine
-from presidio_anonymizer import AnonymizerEngine
+# Illustrative: one layer of defense; detection is never complete. Check the current Presidio API.
+from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
+from presidio_analyzer.nlp_engine import NlpEngineProvider
+from presidio_anonymizer import AnonymizerEngine, OperatorConfig
+from presidio_anonymizer.operators import Operator, OperatorType
 
-analyzer, anonymizer = AnalyzerEngine(), AnonymizerEngine()
+NLP_CONFIG = {
+    "nlp_engine_name": "spacy",
+    "models": [
+        {"lang_code": "en", "model_name": "en_core_web_lg"},
+        {"lang_code": "de", "model_name": "de_core_news_md"},
+    ],
+}
+LANGUAGES = [m["lang_code"] for m in NLP_CONFIG["models"]]
 
-def scrub_pii(text: str) -> str:
-    results = analyzer.analyze(text=text, language="en")
-    return anonymizer.anonymize(text=text, analyzer_results=results).text
+SECRET_PATTERNS = [  # extend with your own token formats; also run a dedicated secrets scanner
+    Pattern("openai_key", r"\bsk-[A-Za-z0-9_-]{20,}", 0.9),
+    Pattern("aws_access_key", r"\bAKIA[0-9A-Z]{16}\b", 0.9),
+    Pattern("github_token", r"\bgh[pousr]_[A-Za-z0-9]{36,}\b", 0.9),
+    Pattern("password_assignment", r"(?i)\b(?:password|passwort|passwd|pwd)\b(?:\s+(?:is|ist)\b)?\s*[:=]?\s*\S+", 0.7),
+]
+
+def build_analyzer() -> AnalyzerEngine:
+    nlp_engine = NlpEngineProvider(nlp_configuration=NLP_CONFIG).create_engine()
+    analyzer = AnalyzerEngine(nlp_engine=nlp_engine, supported_languages=LANGUAGES)
+    for lang in LANGUAGES:
+        analyzer.registry.add_recognizer(PatternRecognizer(
+            supported_entity="SECRET", patterns=SECRET_PATTERNS, supported_language=lang))
+    return analyzer
+
+class NumberedPlaceholder(Operator):
+    """Replace each distinct value with <TYPE_n>, reusing n for repeats of the same value."""
+    def operate(self, text: str, params: dict) -> str:
+        per_type = params["mapping"].setdefault(params["entity_type"], {})
+        suffix = "'s" if text.endswith("'s") else ""   # "John Smith's" and "John Smith" share one placeholder
+        key = text[: len(text) - len(suffix)]
+        if key not in per_type:
+            per_type[key] = f"<{params['entity_type']}_{len(per_type) + 1}>"
+        return per_type[key] + suffix
+    def validate(self, params: dict) -> None:
+        if "mapping" not in params:
+            raise ValueError("`mapping` is required")
+    def operator_name(self) -> str:
+        return "numbered_placeholder"
+    def operator_type(self) -> OperatorType:
+        return OperatorType.Anonymize
+
+analyzer = build_analyzer()
+anonymizer = AnonymizerEngine()
+anonymizer.add_anonymizer(NumberedPlaceholder)
+
+class RowScrubber:
+    """Use ONE instance per eval row so a name maps to the same placeholder in every field and turn."""
+    def __init__(self, score_threshold: float = 0.5):
+        self.mapping: dict[str, dict[str, str]] = {}   # raw PII -> placeholder: never store it with the dataset
+        self.score_threshold = score_threshold
+
+    def __call__(self, text: str | None, language: str = "en") -> str | None:
+        if not text:
+            return text
+        if language not in LANGUAGES:
+            raise ValueError(f"No PII model for language '{language}'; route the row to manual review")
+        results = analyzer.analyze(text=text, language=language, score_threshold=self.score_threshold)
+        ops = {"DEFAULT": OperatorConfig("numbered_placeholder", {"mapping": self.mapping})}
+        return anonymizer.anonymize(text=text, analyzer_results=results, operators=ops).text
 ```
 
-Automated PII scrubbers miss unusual name formats and contextual identifiers (such as "the only VP in the Lisbon office"). Spot-check scrubbed rows before sharing datasets outside your core team.
+*Tested with Presidio 2.2, `en_core_web_lg`, and `de_core_news_md`. Test inputs: two names (one possessive), an email address, a phone number, OpenAI-, AWS-, and GitHub-style keys, "password is …", and a German sentence with a name, a city, and "Passwort ist …". All were replaced. The test also showed false positives: words such as "Email" and "API" were tagged as PERSON or ORGANIZATION. Over-redaction is the safer error, but it can damage test semantics.*
+
+This is one layer, not a guarantee. Presidio's own documentation states that there is no guarantee that it will find all sensitive information. Add these controls:
+
+- Run a dedicated secrets scanner (see the checklist).
+- Use custom recognizers for internal IDs (employee numbers, ticket IDs).
+- Spot-check scrubbed rows by hand before you share a dataset outside the core team.
+- Keep the `mapping` (raw value → placeholder) out of the dataset. If you must keep it for re-identification, store it with the access controls of the source system.
+
+Automated PII scrubbers miss unusual name formats and contextual identifiers (such as "the only VP in the Lisbon office").
+
+### 7.3 Risks that scrubbing does not remove
+
+| Risk | Example | Mitigation |
+|---|---|---|
+| **Quasi-identifiers** | No name remains, but "HR partner, Lisbon office, joined March 2026, on parental leave" identifies one person | Generalize or remove combinations of attributes until each one matches several people. This is the idea of k-anonymity ([Sweeney, 2002](https://doi.org/10.1142/S0218488502001648)). Be most careful with small teams, offices, and rare roles. |
+| **Scrubbed contexts break tests** | Scrubbed chunk text no longer matches the indexed corpus, so text-matching `reference_contexts` checks and faithfulness checks fail | Store chunk IDs and doc versions in the row, not chunk text. At eval time, load the text again from a governed store with the same access controls as the source. |
+| **Judge vendor retention** | Every LLM-judge call sends the row to a third-party API | Check the vendor's data-retention and training terms. Use zero-data-retention options where your contract allows them, or a self-hosted judge for restricted data. |
+| **Deletion vs. immutable versions** | A user asks for deletion, but their trace is in `rag_qa/v5`, `v6`, and `v7` | Keep a row-ID → user-pseudonym index. Publish a new version without the rows, purge the rows from old versions and caches, and record the purge (not the content) in the changelog. Scores from before and after the purge are not directly comparable. |
 
 ---
 
@@ -444,7 +593,7 @@ Unowned datasets quickly go stale. Assign explicit owners for each dataset asset
 
 Governance checklist:
 
-- [ ] **Include a README in every dataset folder:** Document purpose, schema, sources, slices, label tiers, owner, and update cadence.
+- [ ] **Include a README in every dataset folder:** Document purpose, schema, sources, slices, label tiers, owner, update cadence, known gaps, and privacy handling. [Datasheets for Datasets](https://arxiv.org/abs/1803.09010) (Gebru et al.) and [Data Cards](https://arxiv.org/abs/2204.01075) (Pushkarna et al.) give question lists you can adapt as the template.
 - [ ] **Require peer review for dataset edits:** Treat relabeling a gold row as a product decision reviewed via PR.
 - [ ] **Follow a regular cadence:** Run weekly sampling and error analysis, monthly dataset releases, and quarterly coverage reviews.
 - [ ] **Track dataset health metrics:** Monitor rows per slice, stale row percentage, gold-to-silver ratio, regression pass rate, and annotation backlog.
@@ -470,12 +619,12 @@ Start small (for example, 50 traces every two weeks) and scale with traffic. Con
 ## Key takeaways
 
 - **Log complete trace context.** Capture user role, retrieved chunk IDs and versions, tool calls, SQL queries, guardrail events, and app version so traces can become test rows.
-- **Keep measurement and discovery pools separate.** Use random/stratified samples to measure quality rates, and targeted samples to find bugs.
+- **Keep measurement and discovery pools separate.** Use random/stratified samples to measure quality rates, and targeted samples to find bugs. Log inclusion probabilities and re-weight stratified labels by traffic share.
 - **Use annotation queues** with a concise labeling form and one-click dataset export.
-- **Run regular error analysis** (open coding → failure categories → counts → priorities) to turn production failures into fixes, test cases, and online judges.
+- **Run regular error analysis** (read ≥100 traces; open coding → failure categories → counts → priorities) to turn production failures into fixes, test cases, and online judges.
 - **Add every fixed bug to a separate regression suite** with deterministic checks where possible.
 - **Version datasets immutably** with manifests and changelogs, and record the dataset version on every experiment run.
-- **Scrub PII across all trace fields**, respect user consent, and match dataset access controls to source sensitivity.
+- **Scrub PII across all trace fields** with one pseudonymizer per row, scan for secrets, watch for quasi-identifiers, respect user consent and deletion requests, and match dataset access controls to source sensitivity.
 - **Automate drift detection** by tracking document provenance per row and routing invalidated rows to SMEs.
 - **Prevent eval contamination** and assign a named owner to every dataset.
 
@@ -487,16 +636,22 @@ Start small (for example, 50 traces every two weeks) and scale with traffic. Con
 - Jason Liu, [Systematically Improving Your RAG](https://jxnl.co/writing/2024/05/22/systematically-improving-your-rag/) (segmenting queries, using feedback and synthetic data to improve retrieval)
 - Eugene Yan, [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
 - **Platform docs:**
-    - [LangSmith evaluation concepts & datasets](https://docs.smith.langchain.com/evaluation/concepts)
-    - [LangSmith annotation queues](https://docs.smith.langchain.com/evaluation/how_to_guides/annotation_queues)
-    - [Langfuse datasets](https://langfuse.com/docs/datasets/overview)
-    - [Langfuse annotation](https://langfuse.com/docs/scores/annotation)
+    - [LangSmith evaluation concepts & datasets](https://docs.langchain.com/langsmith/evaluation-concepts)
+    - [LangSmith annotation queues](https://docs.langchain.com/langsmith/annotation-queues)
+    - [Langfuse datasets](https://langfuse.com/docs/evaluation/experiments/datasets)
+    - [Langfuse annotation queues](https://langfuse.com/docs/evaluation/evaluation-methods/annotation-queues)
 - [DVC](https://dvc.org/): data versioning
-- [Microsoft Presidio](https://microsoft.github.io/presidio/): PII detection and anonymization
+- [Presidio](https://presidio.dataprivacystack.org/): PII detection and anonymization (originally Microsoft; the docs moved from microsoft.github.io/presidio)
+- [detect-secrets](https://github.com/Yelp/detect-secrets) and [gitleaks](https://github.com/gitleaks/gitleaks): secret scanners
+- Sweeney, [k-Anonymity: A Model for Protecting Privacy](https://doi.org/10.1142/S0218488502001648) (2002): quasi-identifiers and re-identification
+- Angelopoulos et al., [Prediction-Powered Inference](https://arxiv.org/abs/2301.09633) (2023): combine a small human-labelled sample with many judge labels
+- Gebru et al., [Datasheets for Datasets](https://arxiv.org/abs/1803.09010); Pushkarna et al., [Data Cards](https://arxiv.org/abs/2204.01075): dataset documentation templates
 - **Within this repo:**
     - [Online eval pipelines](../03-online-evals-and-observability/01-online-evals.md)
     - [Tracing & OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md)
     - [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md)
     - [Monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
     - [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md)
+    - [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) (judge error correction)
+    - [Input guardrails](../04-guardrails/02-input-guardrails.md) (PII and secret detection at runtime)
     - [Maturity model](../05-decision-framework/05-maturity-model.md)

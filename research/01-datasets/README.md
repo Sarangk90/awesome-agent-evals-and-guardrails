@@ -3,9 +3,9 @@
 > **TL;DR**
 >
 > - **Design your dataset before your metrics.** Offline evals are only as trustworthy as the inputs and reference labels they run on.
-> - **Anchor with SME golden data.** Build 20–50 human-verified examples for release gates and LLM-judge calibration.
-> - **Scale with filtered synthetic rows.** Generate synthetic queries, multi-hop chains, and red-team attacks, then filter out low-quality rows.
-> - **Close the loop from production.** Feed real production failures and user feedback back into your dataset every week.
+> - **Anchor with SME golden data.** Start with 20–50 rows you read by hand. Grow to 100–300 expert-verified rows for release gates. Validating an LLM judge needs ≥100 human-labelled outputs, including 30–50 FAILs.
+> - **Scale with filtered synthetic rows.** Generate synthetic queries, multi-hop chains, and red-team attacks, then filter out low-quality rows and check the set against real traffic.
+> - **Close the loop from production.** Feed real production failures and user feedback back into your dataset every week. Estimate rates only from the random or re-weighted sample, and scrub PII before any trace enters a dataset.
 
 ---
 
@@ -13,17 +13,17 @@
 
 | Guide | What you will learn | Read this when… |
 |---|---|---|
-| [01 · Dataset Strategy](./01-dataset-strategy.md) | Why datasets come first, the five dataset sources, JSON schemas for all 8 eval types, slice coverage, and sample-size math | You are starting an eval project, choosing what fields to store, or deciding how many examples you need |
-| [02 · SME Golden Datasets](./02-sme-golden-datasets.md) | Working with domain experts, writing binary rubrics, reference answers vs. key facts, unanswerable questions, and Cohen's κ / Krippendorff's α | You need trustworthy reference data for release gates or LLM-judge calibration |
-| [03 · Synthetic Datasets](./03-synthetic-datasets.md) | Generating QA pairs, multi-hop questions, tool calls, SQL queries, and red-team attacks, plus automatic quality filters | You have no live traffic yet, need to fill rare slices, or need volume for guardrail tests |
-| [04 · Production Data Flywheel](./04-production-data-flywheel.md) | Sampling live traces, running annotation queues, turning errors into regression tests, scrubbing PII, and handling document drift | Your system has live users and you want your datasets to reflect real traffic |
+| [01 · Dataset Strategy](./01-dataset-strategy.md) | Why datasets come first, the five dataset sources, JSON schemas for all 8 eval types, slice coverage, confidence intervals, power and sample-size math, and paired tests | You are starting an eval project, choosing what fields to store, or deciding how many examples you need |
+| [02 · SME Golden Datasets](./02-sme-golden-datasets.md) | Working with domain experts, writing binary rubrics, reference answers vs. key facts, unanswerable questions, Cohen's κ / Fleiss' κ / Krippendorff's α with confidence intervals, the prevalence paradox, and label-error audits | You need trustworthy reference data for release gates or LLM-judge calibration |
+| [03 · Synthetic Datasets](./03-synthetic-datasets.md) | Generating QA pairs, multi-hop questions, tool calls, SQL queries, and red-team attacks, plus automatic quality filters and checks against real traffic | You have no live traffic yet, need to fill rare slices, or need volume for guardrail tests |
+| [04 · Production Data Flywheel](./04-production-data-flywheel.md) | Sampling live traces, running annotation queues, re-weighting stratified samples into unbiased rates, turning errors into regression tests, scrubbing and pseudonymizing PII, and handling document drift | Your system has live users and you want your datasets to reflect real traffic |
 
 ---
 
 ## Recommended reading order
 
 1. **Read [01 · Dataset Strategy](./01-dataset-strategy.md) first.** It defines the JSON schemas, slice dimensions, and sample-size rules used across the repository.
-2. **Read [02 · SME Golden Datasets](./02-sme-golden-datasets.md) second.** Build a small, trusted anchor set of 20–50 rows before scaling up.
+2. **Read [02 · SME Golden Datasets](./02-sme-golden-datasets.md) second.** Start with 20–50 rows you read by hand, then grow to 100–300 expert-verified rows for release gates. LLM-judge validation needs ≥100 human-labelled outputs with 30–50 FAILs.
 3. **Read [03 · Synthetic Datasets](./03-synthetic-datasets.md) third.** Expand coverage across rare slices and validate synthetic rows against your golden set.
 4. **Read [04 · Production Data Flywheel](./04-production-data-flywheel.md) fourth.** Once you launch, feed real production failures back into your dataset every week.
 

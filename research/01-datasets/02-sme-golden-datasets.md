@@ -2,17 +2,20 @@
 
 > **TL;DR**
 >
-> - **A golden dataset is a small (50–300 row) expert-verified dataset** that defines what "correct" means for your domain.
+> - **A golden dataset is a small (50–300 row) expert-verified dataset** that defines what "correct" means for your domain. Use 100–300 rows for release gates. LLM-judge validation needs ≥100 human-labelled outputs, including 30–50 FAILs.
 > - **Respect expert time:** pre-fill draft answers and show source chunks inline so subject-matter experts (SMEs) only have to verify and edit.
 > - **Use binary Pass/Fail rubrics and atomic key-facts lists** instead of vague 1–5 Likert scales.
-> - **Measure reviewer agreement** with Cohen's $\kappa$ or Krippendorff's $\alpha$. If two human experts cannot agree on a label, your rubric is ambiguous and no LLM judge will agree either.
+> - **Measure reviewer agreement** with Cohen's $\kappa$, Fleiss' $\kappa$, or Krippendorff's $\alpha$, with a confidence interval. If two human experts cannot agree on a label, the target is ill-defined, and judge-agreement numbers against those labels mean little.
+> - **Watch the prevalence paradox.** When almost all answers pass, $\kappa$ can be low even at 90%+ raw agreement. Report raw agreement, Gwet's AC1, and agreement on FAILs next to $\kappa$.
 
 - **What you will learn:**
     - How to work with subject-matter experts (SMEs) without wasting their time
     - How to write clear annotation guidelines and binary Pass/Fail rubrics
     - Why storing both a reference answer and a `key_facts` list gives the most reliable grading
     - How to handle unanswerable, partial, and false-premise questions
-    - How to calculate and interpret Cohen's $\kappa$ and Krippendorff's $\alpha$
+    - How to calculate and interpret Cohen's $\kappa$, Fleiss' $\kappa$, and Krippendorff's $\alpha$ (including ordinal scales and confidence intervals)
+    - How skewed pass rates distort $\kappa$, and what to report instead
+    - How to find label errors in a gold set
 - **Prerequisites:** [Dataset Strategy](./01-dataset-strategy.md)
 - **Related guides:**
     - [LLM-as-a-Judge](../02-offline-evals/07-llm-as-a-judge.md)
@@ -133,11 +136,11 @@ Avoid 1–5 Likert scales for release gates. Reviewers rarely agree on the diffe
 
 | Rubric type | Reviewer agreement | Actionability | When to use it |
 |---|---|---|---|
-| **Binary Pass/Fail + critique** | Highest | High (*"Fails because it missed the 5-day cap"*) | **Default** for release gates and LLM-judge calibration |
+| **Binary Pass/Fail + critique** | Highest (if the rubric is clear) | High (*"Fails because it missed the 5-day cap"*) | **Default** for release gates and LLM-judge calibration |
 | **Binary checklist (per criterion)** | High | High | Grading multi-part quality (correct, complete, cited, safe) |
 | **3-point (`Fail` / `Partial` / `Pass`)** | Medium | Medium | Multi-part questions where partial credit matters |
 | **1–5 Likert scale** | Low | Low | Early tone exploration; avoid for CI gates |
-| **Pairwise comparison (A vs. B)** | High | Medium | Picking the better of two prompt or model variants |
+| **Pairwise comparison (A vs. B)** | Medium–High (lower when ties are allowed) | Medium | Picking the better of two prompt or model variants |
 
 ### 4.2 Example checklist rubric (RAG answer)
 
@@ -231,9 +234,14 @@ If your dataset only contains answerable questions, you will never know if your 
 
 ## 7. Inter-annotator agreement (IAA)
 
-If two human experts cannot agree on whether an answer passes or fails, your rubric is unclear, and an LLM judge will fail too.
+If two human experts cannot agree on whether an answer passes or fails, your rubric is unclear. The target is then ill-defined: an LLM judge may match one expert, but its agreement score against the "gold" labels means little.
 
-**How to measure agreement:** Have at least 2 reviewers independently grade an overlap batch of 30–50 items. Calculate chance-corrected agreement before labeling the rest of the dataset.
+**How to measure agreement:**
+
+1. **Debug the rubric:** Have at least 2 reviewers independently grade an overlap batch of 30–50 items. Read every disagreement and fix the guidelines before you label the rest of the dataset.
+2. **Certify the labels:** Before you use the labels for release gates, collect at least 100 overlap items. You can accumulate them across batches. Report the agreement with a 95% confidence interval (§7.6).
+
+Why so many items? Agreement statistics are noisy on small samples. In the §7.2 example ($\kappa = 0.57$ on 100 items), the 95% bootstrap interval is about 0.40 to 0.73. On a 34-item subset, it widens to about 0.33 to 0.87. That range covers "fair" to "almost perfect".
 
 ### 7.1 Percent agreement (and why it's not enough)
 
@@ -241,7 +249,7 @@ Raw percent agreement is simply:
 
 $$p_o = \frac{\text{items where reviewers agree}}{\text{total items}}$$
 
-Why is raw agreement misleading? If 90% of system answers pass, two reviewers who blindly click "Pass" 90% of the time will agree **82% of the time by pure chance** ($0.90 \times 0.90 + 0.10 \times 0.10 = 0.82$). Always use a chance-corrected metric like **Cohen's $\kappa$** or **Krippendorff's $\alpha$**.
+Why is raw agreement misleading? If 90% of system answers pass, two reviewers who blindly click "Pass" 90% of the time will agree **82% of the time by pure chance** ($0.90 \times 0.90 + 0.10 \times 0.10 = 0.82$). Always report a chance-corrected metric like **Cohen's $\kappa$** or **Krippendorff's $\alpha$**. But read §7.5 first: when one label dominates, chance correction has its own problem.
 
 ### 7.2 Cohen's kappa (two annotators, nominal labels)
 
@@ -306,14 +314,151 @@ def krippendorff_alpha_nominal(items: list[list[str | None]]) -> float:
     return 1.0 if d_e == 0 else 1 - d_o / d_e
 ```
 
+This hand-rolled version handles nominal labels only. For other scales, use a library (below).
+
+#### Ordinal and interval labels
+
+For graded labels (such as relevance `0–3`), a `0 vs. 3` disagreement is worse than `2 vs. 3`. Use the ordinal or interval form of $\alpha$. The [`krippendorff`](https://github.com/pln-fing-udelar/fast-krippendorff) package takes a raters × items array, with `np.nan` for items a rater skipped:
+
+```python
+import numpy as np
+import krippendorff
+
+# rows = raters, columns = items; relevance grades 0-3; np.nan = rater skipped the item
+grades = np.array([
+    [3, 2, 0, 1, 3, 2, np.nan, 0],
+    [3, 3, 0, 1, 2, 2, 1,      0],
+    [2, 3, 1, np.nan, 3, 2, 1, 0],
+])
+print(round(krippendorff.alpha(reliability_data=grades, level_of_measurement="ordinal"), 3))
+print(round(krippendorff.alpha(reliability_data=grades, level_of_measurement="nominal"), 3))
+```
+
+Here the ordinal $\alpha$ (0.85) is much higher than the nominal $\alpha$ (0.54), because most disagreements are one grade apart. Nominal $\alpha$ counts those as full disagreements.
+
+#### Fleiss' kappa (three or more raters, complete data)
+
+If every item gets the same number of raters, you can also use **Fleiss' $\kappa$** ([Fleiss, 1971](https://doi.org/10.1037/h0031619)). It extends chance-corrected agreement to more than two raters. Use $\alpha$ instead when some raters skip items.
+
+```python
+import numpy as np
+from statsmodels.stats.inter_rater import aggregate_raters, fleiss_kappa
+
+# rows = items, columns = 3 raters; every rater labels every item
+labels = np.array([
+    ["Pass", "Pass", "Pass"], ["Pass", "Fail", "Pass"], ["Fail", "Fail", "Fail"],
+    ["Pass", "Pass", "Fail"], ["Fail", "Fail", "Pass"], ["Pass", "Pass", "Pass"],
+    ["Fail", "Fail", "Fail"], ["Pass", "Pass", "Pass"],
+])
+counts, categories = aggregate_raters(labels)   # items x categories count table
+print(categories, round(fleiss_kappa(counts, method="fleiss"), 3))
+```
+
 ### 7.4 Interpreting agreement
 
-| Score range ($\kappa$ or $\alpha$) | What it means | Action to take |
-|---|---|---|
-| **$< 0.40$** | Poor to fair agreement | Stop labeling. Your rubric is ambiguous; rewrite your decision rules. |
-| **$0.41 – 0.65$** | Moderate agreement | Adjudicate disagreements, tighten boundary rules, and run another 30-item overlap check. |
-| **$0.66 – 0.80$** | Substantial agreement | Good enough for directional evals; aim for $\ge 0.70$ before using for release gates. |
-| **$> 0.80$** | Strong agreement | Ready for release gates and LLM-judge calibration. |
+Many teams describe $\kappa$ with the bands from [Landis & Koch (1977)](https://doi.org/10.2307/2529310). These labels are a convention, not a statistical test. Landis and Koch called them arbitrary.
+
+| $\kappa$ | Conventional label (Landis & Koch) |
+|---|---|
+| $< 0$ | Poor |
+| $0.00 – 0.20$ | Slight |
+| $0.21 – 0.40$ | Fair |
+| $0.41 – 0.60$ | Moderate |
+| $0.61 – 0.80$ | Substantial |
+| $0.81 – 1.00$ | Almost perfect |
+
+For $\alpha$, Krippendorff recommends stricter cut-offs: rely on data with $\alpha \ge 0.80$, use data with $0.667 \le \alpha < 0.80$ only for tentative conclusions, and discard data below 0.667 (Krippendorff, *Content Analysis*, 2004; see also [Hayes & Krippendorff, 2007](https://doi.org/10.1080/19312450709336664)).
+
+Use these starting rules of thumb for $\kappa$ or $\alpha$, and calibrate them for your domain:
+
+| Result on the overlap batch | Action |
+|---|---|
+| **Below 0.667** | Stop labeling. Your rubric is ambiguous; rewrite the decision rules and run a new overlap batch. |
+| **0.667 – 0.80** | Adjudicate disagreements and tighten boundary rules. Use the labels for directional evals only. |
+| **Point estimate $\ge 0.80$ and lower 95% bound $\ge 0.667$** | Ready for release gates and for validating LLM judges. |
+
+Also check the per-class numbers in §7.5. A high $\kappa$ can hide poor agreement on the rare class.
+
+> **Note:** This bar is for **human-vs-human** agreement on gold labels. The bar for an **LLM judge** is different: you compare the judge with adjudicated gold labels and require TPR and TNR ≥ 0.85 and $\kappa \ge 0.60$ on ≥100 items (see §7.7).
+
+### 7.5 The prevalence paradox: when κ is low but agreement is high
+
+When one label dominates, $\kappa$ can be low even when raw agreement is very high. This is the **prevalence paradox** ([Feinstein & Cicchetti, 1990](https://doi.org/10.1016/0895-4356%2890%2990158-L)). RAG pass rates are often 85–95%, so this happens often.
+
+Report these statistics next to $\kappa$:
+
+- **Raw agreement** $p_o$.
+- **PABAK** (prevalence-adjusted bias-adjusted kappa) $= 2p_o - 1$ for two categories ([Byrt, Bishop & Carlin, 1993](https://doi.org/10.1016/0895-4356%2893%2990018-V)).
+- **Gwet's AC1**, which uses a chance term that stays small when one label dominates. For two categories, $p_e = 2\pi(1 - \pi)$, where $\pi$ is the mean share of `Pass` labels ([Gwet, 2008](https://doi.org/10.1348/000711006X126600)).
+- **Positive and negative specific agreement**: how often the raters agree on `Pass` and on `Fail`, separately.
+
+```python
+def binary_agreement(a: list[str], b: list[str], pos: str = "Pass") -> dict:
+    """Agreement statistics for two raters and two labels (pos / not pos)."""
+    n = len(a)
+    both_pos = sum(x == pos and y == pos for x, y in zip(a, b))
+    both_neg = sum(x != pos and y != pos for x, y in zip(a, b))
+    disagree = n - both_pos - both_neg
+    p_o = (both_pos + both_neg) / n
+    pa, pb = a.count(pos) / n, b.count(pos) / n
+    p_e = pa * pb + (1 - pa) * (1 - pb)
+    pi = (pa + pb) / 2                        # mean share of `pos` labels
+    p_e_ac1 = 2 * pi * (1 - pi)               # Gwet's chance agreement, two categories
+    return {
+        "raw_agreement": p_o,
+        "cohens_kappa": (p_o - p_e) / (1 - p_e) if p_e < 1 else 1.0,
+        "pabak": 2 * p_o - 1,
+        "gwet_ac1": (p_o - p_e_ac1) / (1 - p_e_ac1),
+        "positive_agreement": 2 * both_pos / (2 * both_pos + disagree),
+        "negative_agreement": 2 * both_neg / (2 * both_neg + disagree) if both_neg + disagree else float("nan"),
+    }
+
+# 100 answers: 88 both Pass, 4 + 4 disagreements, 4 both Fail
+a = ["Pass"] * 88 + ["Pass"] * 4 + ["Fail"] * 4 + ["Fail"] * 4
+b = ["Pass"] * 88 + ["Fail"] * 4 + ["Pass"] * 4 + ["Fail"] * 4
+for k, v in binary_agreement(a, b).items():
+    print(f"{k:20s} {v:.2f}")
+```
+
+```text
+raw_agreement        0.92
+cohens_kappa         0.46
+pabak                0.84
+gwet_ac1             0.91
+positive_agreement   0.96
+negative_agreement   0.50
+```
+
+Raw agreement (92%) and AC1 (0.91) look excellent, and $\kappa$ (0.46) looks poor. The specific agreement explains the gap. The reviewers agree on `Pass` 96% of the time but on `Fail` only 50% of the time. For an eval, the FAILs are what matter, so here $\kappa$ points to a real problem. Do not just switch to AC1 to get a better number.
+
+**Practical fix:** Enrich the overlap batch with likely failures (low judge scores, negative feedback) so that both labels have enough examples. Report that you enriched it.
+
+### 7.6 Confidence intervals for agreement
+
+Report every agreement statistic with a 95% confidence interval. A percentile bootstrap over items works for any statistic in this section:
+
+```python
+import random
+
+def bootstrap_ci(a: list, b: list, stat, iters: int = 2000, seed: int = 0) -> tuple[float, float]:
+    """95% percentile bootstrap CI for an agreement statistic; resample items, not labels."""
+    rng = random.Random(seed)
+    n, vals = len(a), []
+    for _ in range(iters):
+        idx = [rng.randrange(n) for _ in range(n)]
+        try:
+            vals.append(stat([a[i] for i in idx], [b[i] for i in idx]))
+        except ZeroDivisionError:   # a resample where both raters used one label only
+            continue
+    vals.sort()
+    return vals[int(0.025 * len(vals))], vals[int(0.975 * len(vals)) - 1]
+```
+
+Call it as `bootstrap_ci(a, b, cohens_kappa)`. For $\alpha$, the [Hayes & Krippendorff (2007)](https://doi.org/10.1080/19312450709336664) macro gives bootstrap intervals. You can also resample items (columns of the raters × items array) with the same loop.
+
+### 7.7 Human-vs-judge agreement
+
+When you validate an LLM judge, compare it with **adjudicated** gold labels, not with a single reviewer. Report the judge's **TPR** (share of human PASSes that the judge passes) and **TNR** (share of human FAILs that the judge fails) separately, plus $\kappa$. A single agreement number hides whether the judge misses failures or raises false alarms. The canonical bar (starting rule of thumb) is ≥100 labelled items with 30–50 FAILs, TPR and TNR ≥ 0.85, and $\kappa \ge 0.60$ on a held-out split (≥ 0.90 for high-risk slices: Tier 3 actions, text-to-SQL correctness, and safety). Re-validate after any change to the judge prompt or model. See [LLM-as-a-Judge](../02-offline-evals/07-llm-as-a-judge.md) for the full method, including how to correct pass rates for judge error.
 
 ---
 
@@ -343,7 +488,18 @@ flowchart TD
 
 1. **Keep first-pass labeling blind.** Reviewers must not see each other's grades before submitting.
 2. **Never majority-vote away expert knowledge.** If two junior reviewers outvote your senior HR policy owner on an HR rule, trust the policy owner and update the guideline.
-3. **Save adjudicated items as LLM-judge few-shot examples.** Hard boundary cases that required human adjudication make the best teaching examples for your automated judge.
+3. **Save adjudicated items as LLM-judge few-shot examples.** Hard boundary cases that required human adjudication make the best teaching examples for your automated judge. Keep them out of the judge's test split.
+
+### 8.1 Finding label errors in the gold set
+
+Gold labels also contain errors. [Northcutt et al. (2021)](https://arxiv.org/abs/2103.14749) estimated that at least 3.3% of test-set labels, on average, are wrong across 10 widely used ML benchmarks. A wrong gold label penalizes a correct system on every run.
+
+Audit the gold set on a schedule:
+
+- **Review rows where the system and a strong judge both disagree with the gold label.** If both say "Pass" and the label says "Fail", the label is often wrong. Send these rows back to adjudication. Do not flip them automatically.
+- **Review rows that fail across many system versions.** A row that every prompt and model fails can be a hard case, or a wrong reference.
+- **Use confident learning for large classified sets.** For guardrail or routing labels with a trained classifier, [confident learning](https://arxiv.org/abs/1911.00068) (implemented in [cleanlab](https://github.com/cleanlab/cleanlab)) ranks the examples most likely to be mislabeled.
+- **Record each correction** in the dataset changelog with the reason, and bump the dataset version.
 
 ---
 
@@ -357,8 +513,8 @@ Pick the simplest tool that displays the question, retrieved chunks, tool calls,
 | **Custom lightweight viewer** (Streamlit / Gradio / internal page) | Custom | You want to render citations, SQL tables, and agent steps exactly the way your SMEs work |
 | **[Argilla](https://docs.argilla.io/)** | Open-source annotation app | You need multi-annotator workflows and agreement tracking |
 | **[Label Studio](https://labelstud.io/)** | Open-source annotation app | You need customizable labeling forms and self-hosting |
-| **[LangSmith Annotation Queues](https://docs.smith.langchain.com/evaluation/how_to_guides/annotation_queues)** | Observability platform | You already log traces in LangSmith and want 1-click promotion to datasets |
-| **[Langfuse Annotation Queues](https://langfuse.com/docs/scores/annotation)** | Open-source observability | You already log traces in Langfuse and want inline trace scoring |
+| **[LangSmith Annotation Queues](https://docs.langchain.com/langsmith/annotation-queues)** | Observability platform | You already log traces in LangSmith and want 1-click promotion to datasets |
+| **[Langfuse Annotation Queues](https://langfuse.com/docs/evaluation/evaluation-methods/annotation-queues)** | Open-source observability | You already log traces in Langfuse and want inline trace scoring |
 
 ---
 
@@ -378,9 +534,9 @@ Use these starting estimates to plan SME sessions (measure your own speed in ses
 **Sample budget for a 200-row Golden RAG dataset:**
 
 - 200 pre-filled rows × 3 minutes = **10 SME hours**
-- 25% double-annotated overlap (50 rows) = **+2.5 SME hours**
+- 50% double-annotated overlap (100 rows, enough to certify agreement, §7) = **+5 SME hours**
 - Adjudication + guideline calibration = **+5 SME hours**
-- **Total:** **~17–18 SME hours** spread across a few 1-hour sessions.
+- **Total:** **~20 SME hours** spread across a few 1-hour sessions.
 
 ---
 
@@ -405,7 +561,9 @@ Use these starting estimates to plan SME sessions (measure your own speed in ses
 - [ ] Rubric uses binary Pass/Fail checks per criterion.
 - [ ] RAG rows store both a `reference_answer` and source-linked `key_facts`.
 - [ ] Unanswerable, partial, and ambiguous rows specify `expected_behavior`.
-- [ ] A 30–50 row overlap batch achieved $\kappa \ge 0.70$ (or $\alpha \ge 0.70$) after adjudication.
+- [ ] Rubric debugged on a 30–50 item overlap batch; then ≥100 overlap items (accumulated across batches) reached $\kappa$ or $\alpha \ge 0.80$ with a lower 95% bound $\ge 0.667$.
+- [ ] With skewed labels, raw agreement, Gwet's AC1, and agreement on FAILs are reported next to $\kappa$.
+- [ ] Gold labels are audited for errors on a schedule (§8.1).
 - [ ] Every row records `doc_versions`, `created_by`, and `label_tier: "gold"`.
 - [ ] Held-out test rows are blocked from being used in prompts or fine-tuning.
 
@@ -413,16 +571,23 @@ Use these starting estimates to plan SME sessions (measure your own speed in ses
 
 ## Key takeaways
 
-- **Small, high-quality golden datasets anchor your entire eval system.** 50–300 expert-verified rows are enough to gate releases and calibrate LLM judges.
+- **Small, high-quality golden datasets anchor your entire eval system.** 100–300 expert-verified rows are enough to gate releases. Validating an LLM judge needs ≥100 human-labelled outputs, including 30–50 FAILs.
 - **Pre-fill drafts and show sources inline** to respect SME time.
 - **Use binary Pass/Fail criteria and atomic `key_facts` lists** instead of 1–5 scales.
-- **Measure reviewer agreement ($\kappa$ or $\alpha$) early.** Low agreement means your rubric is ambiguous, not that your reviewers are careless.
+- **Measure reviewer agreement ($\kappa$ or $\alpha$) early, with a confidence interval.** Low agreement means your rubric is ambiguous, not that your reviewers are careless. Certify gate labels on ≥100 overlap items.
+- **Treat Landis & Koch bands as a convention.** When most answers pass, also report raw agreement, Gwet's AC1, and agreement on FAILs.
+- **Audit gold labels for errors.** Rows where the system and a strong judge both disagree with the label are the first place to look.
 
 ## Further reading
 
 - Hamel Husain, [Creating a LLM-as-a-Judge That Drives Business Results](https://hamel.dev/blog/posts/llm-judge/)
 - Shankar et al., [Who Validates the Validators? Aligning LLM-Assisted Evaluation of LLM Outputs with Human Preferences](https://arxiv.org/abs/2404.12272)
 - Krippendorff's alpha guide: [k-alpha.org](https://www.k-alpha.org/)
+- Landis & Koch, [The Measurement of Observer Agreement for Categorical Data](https://doi.org/10.2307/2529310) (1977)
+- Hayes & Krippendorff, [Answering the Call for a Standard Reliability Measure for Coding Data](https://doi.org/10.1080/19312450709336664) (2007)
+- Feinstein & Cicchetti, [High Agreement but Low Kappa: I. The Problems of Two Paradoxes](https://doi.org/10.1016/0895-4356%2890%2990158-L) (1990)
+- Gwet, [Computing Inter-Rater Reliability and Its Variance in the Presence of High Agreement](https://doi.org/10.1348/000711006X126600) (2008)
+- Northcutt et al., [Pervasive Label Errors in Test Sets Destabilize Machine Learning Benchmarks](https://arxiv.org/abs/2103.14749) (2021)
 - **Next in this section:**
     - [Synthetic Datasets](./03-synthetic-datasets.md)
     - [Production Data Flywheel](./04-production-data-flywheel.md)
