@@ -1,20 +1,26 @@
 # Dataset Strategy for Agentic RAG Evals
 
 > **TL;DR**
+>
 > - **Your dataset decides what your evals can see.** Choose your metrics first, then design a row schema that supplies every required input.
 > - **Combine five data sources:** SME golden examples, synthetic queries, production traces, adversarial attacks, and regression bugs.
 > - **Design coverage deliberately.** Use dimensions and tuples (intent × query type × user role × persona) and include 10–15% unanswerable questions.
 > - **Start with 20–50 rows you can read by hand.** Grow the dataset when you need narrower confidence intervals, and use paired tests (`McNemar`, `paired bootstrap`) to compare system versions.
 
-**What you will learn:**
-- Why datasets matter more than eval frameworks
-- When to use each of the five dataset sources
-- Ready-to-copy JSON schemas for all 8 eval types
-- How to design slice coverage using dimensions and tuples
-- How to calculate sample sizes, confidence intervals, and paired significance
-
-**Prerequisites:** [The Evals & Guardrails Map](../00-foundations/02-the-evals-and-guardrails-map.md) · [Agentic RAG Failure Modes](../00-foundations/03-agentic-rag-failure-modes.md)
-**Related guides:** [SME Golden Datasets](./02-sme-golden-datasets.md) · [Synthetic Datasets](./03-synthetic-datasets.md) · [Production Data Flywheel](./04-production-data-flywheel.md) · [Running Offline Experiments](../02-offline-evals/08-running-offline-experiments.md)
+- **What you will learn:**
+    - Why datasets matter more than eval frameworks
+    - When to use each of the five dataset sources
+    - Ready-to-copy JSON schemas for all 8 eval types
+    - How to design slice coverage using dimensions and tuples
+    - How to calculate sample sizes, confidence intervals, and paired significance
+- **Prerequisites:**
+    - [The Evals & Guardrails Map](../00-foundations/02-the-evals-and-guardrails-map.md)
+    - [Agentic RAG Failure Modes](../00-foundations/03-agentic-rag-failure-modes.md)
+- **Related guides:**
+    - [SME Golden Datasets](./02-sme-golden-datasets.md)
+    - [Synthetic Datasets](./03-synthetic-datasets.md)
+    - [Production Data Flywheel](./04-production-data-flywheel.md)
+    - [Running Offline Experiments](../02-offline-evals/08-running-offline-experiments.md)
 
 ---
 
@@ -153,6 +159,7 @@ Use this schema for Answer Correctness, Faithfulness, Answer Relevancy, Context 
 ```
 
 **Schema design tips:**
+
 - **Store both `key_facts` and `reference_answer`.** Checking whether 3 specific facts appear is much more objective than judging whether two paragraphs sound similar. See [SME Golden Datasets §5](./02-sme-golden-datasets.md#5-reference-answers-vs-key-facts-lists).
 - **Store both `doc_id`/`chunk_id` and `text` in `reference_contexts`.** IDs let you run fast retrieval checks, while the excerpt text lets an LLM judge grade Context Recall even if you re-chunk the corpus later.
 - **Track `doc_versions`.** When a policy document changes, this field tells you which eval rows need re-review. See [Production Data Flywheel §8](./04-production-data-flywheel.md#8-keeping-datasets-fresh-docs-drift).
@@ -200,6 +207,7 @@ Use a standard 4-point relevance scale (TREC convention):
 | **0** | Irrelevant (any unlisted chunk defaults to `0`) |
 
 **Schema design tips:**
+
 - **Label at the granularity you retrieve.** If you retrieve chunks, label chunks (or map chunk IDs back to parent document IDs).
 - **Watch out for unlabeled relevant chunks (pooling bias).** You cannot label every chunk in a 100,000-chunk corpus. When a new retriever surfaces a great chunk that was never labeled, naive metrics count it as a "miss." Periodically judge newly surfaced top-$k$ chunks with an LLM judge and human spot-check.
 - **Add `must_not_retrieve`.** This lets your retrieval benchmark double as an RBAC access-control test.
@@ -275,11 +283,12 @@ Use this schema for multi-step agent tasks. Always grade the **final outcome and
 ```
 
 **Schema design tips:**
+
 - **Snapshot the starting state (`initial_state`).** Run multi-step evals against mocked tools or a resettable sandbox database so every test run starts from the exact same state.
 - **Choose the right `trajectory_match_mode`:**
-  - `strict`: Exact same tools in the exact same order.
-  - `unordered`: Same set of tools in any order.
-  - `subset_in_order`: Expected tools appear in order, and extra read-only steps are allowed.
+    - `strict`: Exact same tools in the exact same order.
+    - `unordered`: Same set of tools in any order.
+    - `subset_in_order`: Expected tools appear in order, and extra read-only steps are allowed.
 
 ### 3.6 Text-to-SQL
 
@@ -305,6 +314,7 @@ Use this schema to measure Execution Accuracy, Result-Set Match, SQL syntax vali
 ```
 
 **Schema design tips:**
+
 - **Pin `db_id` to a frozen database snapshot.** If you run against a live warehouse that updates nightly, `expected_result` will break tomorrow.
 - **Include business definitions in `evidence`.** Without the formula for "net revenue" or fiscal quarters, the test grades whether the model guessed your company's internal jargon.
 - **Include negative safety and RBAC rows.** Test write attempts (`DROP`, `UPDATE`) and unauthorized queries against restricted columns:
@@ -324,6 +334,7 @@ Use this schema to measure Execution Accuracy, Result-Set Match, SQL syntax vali
 ### 3.7 Multi-turn conversation
 
 You can store multi-turn conversations in two ways:
+
 1. **Scripted turns:** Fixed user messages. Easy to replay and compare, but brittle if the assistant asks an unexpected follow-up question.
 2. **Simulated user scenarios:** A persona prompt and a goal. An LLM plays the user dynamically (see [Synthetic Datasets §9](./03-synthetic-datasets.md#9-multi-turn-persona-simulation)).
 
@@ -497,6 +508,7 @@ Here is what each **query type** tests in practice:
 If you ask an engineer or an LLM to "write 100 test questions," you will get 100 slight variations of the same 3 questions.
 
 Instead, use the **dimensions → tuples → inputs** method:
+
 1. Define 3–5 **dimensions** (slices).
 2. Combine them into **tuples** (specific combinations).
 3. Write or generate one realistic input per tuple.
@@ -511,7 +523,7 @@ flowchart LR
     R -->|gaps| T
 ```
 
-**Step 1 — Define your dimensions (keep each to 3–6 values):**
+**Step 1: Define your dimensions (keep each to 3–6 values):**
 
 ```python
 DIMENSIONS = {
@@ -522,7 +534,7 @@ DIMENSIONS = {
 }
 ```
 
-**Step 2 — Generate tuples, filter out invalid combinations, and sample:**
+**Step 2: Generate tuples, filter out invalid combinations, and sample:**
 
 ```python
 import itertools, random
@@ -544,9 +556,9 @@ sampled = random.sample(tuples, k=min(60, len(tuples)))
 print(len(all_tuples), len(tuples), len(sampled))
 ```
 
-**Step 3 — Turn each tuple into a realistic scenario and query** (see [Synthetic Datasets §3](./03-synthetic-datasets.md#3-dimensions-tuples-scenarios-queries)).
+**Step 3: Turn each tuple into a realistic scenario and query** (see [Synthetic Datasets §3](./03-synthetic-datasets.md#3-dimensions-tuples-scenarios-queries)).
 
-**Step 4 — Check your coverage matrix and fill empty cells:**
+**Step 4: Check your coverage matrix and fill empty cells:**
 
 | Intent \ Query type | `factoid` | `multi_hop` | `comparative` | `aggregation` | `unanswerable` |
 |---|---|---|---|---|---|
@@ -598,6 +610,7 @@ Here is what the 95% confidence interval looks like when $\hat{p} = 80\%$:
 | **1,000** | 0.013 | **±2.5 pts** | 77.5% – 82.5% |
 
 **Three rules to remember:**
+
 1. **On 50 examples, a jump from 80% to 85% is statistical noise.** Do not celebrate or panic over small changes on small datasets.
 2. **To cut your error bar in half, you need $4\times$ as many examples.**
 3. **Use the Wilson score interval when $n$ is small or $\hat{p}$ is near 0% or 100%:**
@@ -625,13 +638,16 @@ print(wilson_ci(50, 50))   # 100% observed, but 95% lower bound is ~0.93
 When you evaluate System A and System B on the **exact same dataset**, their results are paired. Paired statistical tests are much more sensitive than comparing two separate error bars, because question difficulty cancels out.
 
 For **binary Pass/Fail metrics**, run **McNemar's test** on the examples where A and B disagree:
+
 - Let $b$ = number of rows where A passes and B fails.
 - Let $c$ = number of rows where A fails and B passes.
 - Compute $\chi^2 = \frac{(|b - c| - 1)^2}{b + c}$. If $\chi^2 > 3.84$, the difference is statistically significant at $p < 0.05$.
 
 **Example:** On 300 rows, System A passes 240 (80.0%) and System B passes 250 (83.3%). Only 20 rows changed: $b = 5$ (A passed, B failed) and $c = 15$ (A failed, B passed).
+
 $$\chi^2 = \frac{(|5 - 15| - 1)^2}{5 + 15} = \frac{81}{20} = 4.05 > 3.84$$
-System B is significantly better—even though the standalone confidence intervals for 80.0% and 83.3% overlap!
+
+System B is significantly better, even though the standalone confidence intervals for 80.0% and 83.3% overlap!
 
 For **continuous metrics** (like `nDCG@k`), run a **paired bootstrap** on the per-row score differences:
 
@@ -694,9 +710,12 @@ Keep five distinct dataset splits:
 
 ## Further reading
 
-- Hamel Husain — [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) and [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
-- Hamel Husain & Shreya Shankar — [LLM Evals FAQ](https://hamel.dev/blog/posts/evals-faq/)
-- Eugene Yan — [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
-- Evan Miller (Anthropic) — [Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations](https://arxiv.org/abs/2411.00640)
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) and [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
+- Hamel Husain & Shreya Shankar, [LLM Evals FAQ](https://hamel.dev/blog/posts/evals-faq/)
+- Eugene Yan, [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
+- Evan Miller (Anthropic), [Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations](https://arxiv.org/abs/2411.00640)
 - [BEIR Benchmark](https://arxiv.org/abs/2104.08663) · [BIRD SQL Benchmark](https://arxiv.org/abs/2305.03111) · [τ-bench](https://arxiv.org/abs/2406.12045) · [AgentDojo](https://arxiv.org/abs/2406.13352)
-- Next in this section: [SME Golden Datasets](./02-sme-golden-datasets.md) · [Synthetic Datasets](./03-synthetic-datasets.md) · [Production Data Flywheel](./04-production-data-flywheel.md)
+- **Next in this section:**
+    - [SME Golden Datasets](./02-sme-golden-datasets.md)
+    - [Synthetic Datasets](./03-synthetic-datasets.md)
+    - [Production Data Flywheel](./04-production-data-flywheel.md)

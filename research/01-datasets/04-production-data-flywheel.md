@@ -1,14 +1,25 @@
 # The Production Data Flywheel
 
 > **TL;DR**
+>
 > - **Use production traces as your primary data source.** After launch, real user traffic provides your highest-value evaluation cases.
 > - **Separate measurement from discovery.** Use random sampling to measure true failure rates. Use targeted sampling (thumbs-down, low scores, errors) to find bugs.
 > - **Turn failures into regression tests.** Route sampled traces into annotation queues, categorize failures via error analysis, and add fixed bugs to a regression suite.
 > - **Protect privacy and fight drift.** Scrub PII before saving traces, version every dataset immutably, and re-validate rows whenever source documents change.
 
-**You will learn:** How traces become eval rows · Sampling strategies and budget allocation · Annotation queue design · Error analysis to test cases · Regression set growth · Dataset versioning · PII scrubbing and consent · Keeping datasets fresh as docs change · Contamination risks · Ownership  
-**Prerequisites:** [Dataset strategy](./01-dataset-strategy.md), [Tracing & OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md)  
-**Related:** [Online eval pipelines](../03-online-evals-and-observability/01-online-evals.md), [User feedback & implicit signals](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md), [Monitoring, alerting & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md), [SME golden datasets](./02-sme-golden-datasets.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)
+- **You will learn:**
+    - How traces become eval rows
+    - Sampling strategies and budget allocation
+    - Annotation queue design
+    - Error analysis to test cases
+    - Regression set growth
+    - Dataset versioning
+    - PII scrubbing and consent
+    - Keeping datasets fresh as docs change
+    - Contamination risks
+    - Ownership
+- **Prerequisites:** [Dataset strategy](./01-dataset-strategy.md), [Tracing & OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md)
+- **Related:** [Online eval pipelines](../03-online-evals-and-observability/01-online-evals.md), [User feedback & implicit signals](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md), [Monitoring, alerting & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md), [SME golden datasets](./02-sme-golden-datasets.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)
 
 ---
 
@@ -69,8 +80,8 @@ You cannot label every production trace. Your sampling strategy determines what 
 | **Uniform random** | Any trace with equal probability | **Unbiased** estimates of quality and failure prevalence; discovering unknown unknowns | Rare slices barely appear; most samples are "fine" |
 | **Stratified** | Random within strata (intent, role, language, pipeline: RAG/SQL/tool) with per-stratum quotas | Coverage of rare-but-important slices; per-slice estimates | Must re-weight to estimate global rates |
 | **Uncertainty / low-score** | Low online judge scores, judge disagreement, low retrieval similarity, borderline guardrail scores | Finding failures efficiently | Over-represents hard cases; depends on judge quality |
-| **Negative feedback** | Thumbs-down, "regenerate", rephrased follow-ups, escalation to human, abandoned sessions | High failure yield; user-validated problems | Feedback is sparse and skewed (some users never click) — see [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
-| **Guardrail triggers** | Blocked/flagged inputs and outputs | Reviewing false positives (blocked legit work) and true positives (attack examples) | Doesn't show false negatives (misses) — combine with random sampling of *allowed* traffic |
+| **Negative feedback** | Thumbs-down, "regenerate", rephrased follow-ups, escalation to human, abandoned sessions | High failure yield; user-validated problems | Feedback is sparse and skewed (some users never click); see [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
+| **Guardrail triggers** | Blocked/flagged inputs and outputs | Reviewing false positives (blocked legit work) and true positives (attack examples) | Doesn't show false negatives (misses); combine with random sampling of *allowed* traffic |
 | **Error / anomaly signals** | Tool errors, SQL errors, empty results, timeouts, retries, max-step hits, very long trajectories | Agent and SQL failures | Biased toward loud failures; silent wrong answers are missed |
 | **Novelty / clustering** | Queries far from existing dataset clusters; new topic clusters | Detecting new intents and drift | Needs embedding/cluster infra |
 | **Diff-based** | Traces where a new candidate version would answer differently (shadow/replay) | Pre-release risk review | Requires replay infra |
@@ -122,7 +133,7 @@ def weekly_sample(traces, budget=200, seed=None):
     take([t for t in traces if t.online_score is not None and t.online_score < 0.5], int(0.15 * budget), "low_score")
     take([t for t in traces if t.guardrail_events], int(0.10 * budget), "guardrail")
     take([t for t in traces if t.tool_errors or t.sql_error or t.hit_max_steps], int(0.05 * budget), "error")
-    return picked   # keep `reason` — it determines whether a label can be used for measurement
+    return picked   # keep `reason`: it determines whether a label can be used for measurement
 ```
 
 ### 2.3 Sampling conversations and agent runs
@@ -261,7 +272,7 @@ Follow these rules to maintain your regression set:
 - [ ] **Control non-determinism.** Run flaky rows $k$ times and require a pass rate (such as $\ge 2/3$), or quarantine flaky rows rather than ignoring red builds.
 - [ ] **Prune regularly.** Deduplicate redundant rows, retire rows for removed features, and re-validate rows after document updates (§8).
 
-Regression sets grow rapidly right after launch and then slow down. If your regression set keeps growing linearly, the same bug categories are recurring—fix the root causes or add online monitors.
+Regression sets grow rapidly right after launch and then slow down. If your regression set keeps growing linearly, the same bug categories are recurring; fix the root causes or add online monitors.
 
 ---
 
@@ -337,7 +348,7 @@ Production traces contain personal data, confidential business records, and rest
 - [ ] **Scan for secrets:** Strip API keys, passwords, or tokens that users pasted into prompts.
 
 ```python
-# illustrative — check current Presidio API
+# illustrative: check current Presidio API
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 
@@ -470,12 +481,22 @@ Start small (for example, 50 traces every two weeks) and scale with traffic. Con
 
 ## Further reading
 
-- Hamel Husain — [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/) and [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) (error analysis, data viewers, looking at your data)
-- Hamel Husain & Shreya Shankar — [LLM Evals FAQ](https://hamel.dev/blog/posts/evals-faq/) (open/axial coding, sampling traces)
-- Shankar et al. — [Who Validates the Validators?](https://arxiv.org/abs/2404.12272) (criteria drift as you review outputs)
-- Jason Liu — [Systematically Improving Your RAG](https://jxnl.co/writing/2024/05/22/systematically-improving-your-rag/) (segmenting queries, using feedback and synthetic data to improve retrieval)
-- Eugene Yan — [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
-- Platform docs — [LangSmith evaluation concepts & datasets](https://docs.smith.langchain.com/evaluation/concepts) · [LangSmith annotation queues](https://docs.smith.langchain.com/evaluation/how_to_guides/annotation_queues) · [Langfuse datasets](https://langfuse.com/docs/datasets/overview) · [Langfuse annotation](https://langfuse.com/docs/scores/annotation)
-- [DVC](https://dvc.org/) — data versioning
-- [Microsoft Presidio](https://microsoft.github.io/presidio/) — PII detection and anonymization
-- Within this repo: [Online eval pipelines](../03-online-evals-and-observability/01-online-evals.md) · [Tracing & OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md) · [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) · [Monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) · [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md) · [Maturity model](../05-decision-framework/05-maturity-model.md)
+- Hamel Husain, [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/) and [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) (error analysis, data viewers, looking at your data)
+- Hamel Husain & Shreya Shankar, [LLM Evals FAQ](https://hamel.dev/blog/posts/evals-faq/) (open/axial coding, sampling traces)
+- Shankar et al., [Who Validates the Validators?](https://arxiv.org/abs/2404.12272) (criteria drift as you review outputs)
+- Jason Liu, [Systematically Improving Your RAG](https://jxnl.co/writing/2024/05/22/systematically-improving-your-rag/) (segmenting queries, using feedback and synthetic data to improve retrieval)
+- Eugene Yan, [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
+- **Platform docs:**
+    - [LangSmith evaluation concepts & datasets](https://docs.smith.langchain.com/evaluation/concepts)
+    - [LangSmith annotation queues](https://docs.smith.langchain.com/evaluation/how_to_guides/annotation_queues)
+    - [Langfuse datasets](https://langfuse.com/docs/datasets/overview)
+    - [Langfuse annotation](https://langfuse.com/docs/scores/annotation)
+- [DVC](https://dvc.org/): data versioning
+- [Microsoft Presidio](https://microsoft.github.io/presidio/): PII detection and anonymization
+- **Within this repo:**
+    - [Online eval pipelines](../03-online-evals-and-observability/01-online-evals.md)
+    - [Tracing & OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md)
+    - [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md)
+    - [Monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
+    - [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md)
+    - [Maturity model](../05-decision-framework/05-maturity-model.md)

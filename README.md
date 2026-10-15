@@ -1,6 +1,6 @@
 # Awesome Agent Evals & Guardrails
 
-> A practitioner's guide to building **reliable, safe agentic RAG applications** — how to evaluate them (offline and online) and how to guard them at runtime.
+> A practitioner's guide to building **reliable, safe agentic RAG applications**: how to evaluate them (offline and online) and how to guard them at runtime.
 
 Building a demo agent is easy. Building one you can trust in production means answering hard questions:
 
@@ -31,7 +31,7 @@ Searchable docs with navigation, dark mode and zoomable diagrams.
 
 ## Contributing
 
-Corrections and additions are welcome — especially new metrics, tools, and real-world lessons. Please keep the existing page structure (TL;DR → content → Key takeaways → Further reading) and cite sources.
+Corrections and additions are welcome, especially new metrics, tools, and real-world lessons. Please keep the existing page structure (TL;DR → content → Key takeaways → Further reading) and cite sources.
 
 The docs site is built from `research/` with [Zensical](https://zensical.org) and deployed to GitHub Pages on every push to `main`. Just add or edit markdown files; navigation is generated from the folder and file names (section titles come from each folder's `README.md` heading). To preview locally:
 

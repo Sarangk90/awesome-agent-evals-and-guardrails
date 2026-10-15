@@ -1,6 +1,7 @@
 # 00 · Foundations
 
 > **TL;DR**
+>
 > - **Start here.** This section builds the core mental model for the entire guide.
 > - **Separate measurement from enforcement.** Learn why demos fail in production and how evals and guardrails share the same checks.
 > - **Classify every check on 5 axes.** If you only read one page, read [The Evals & Guardrails Map](./02-the-evals-and-guardrails-map.md).
@@ -14,7 +15,7 @@
 |---|---|---|
 | [01 · Why Evals and Guardrails](./01-why-evals-and-guardrails.md) | Why demos fail in production, how evals and guardrails share the same checks, and how to run the **Analyze → Measure → Improve** loop. | You are new to evals, or you need to convince your team to invest in them. |
 | [02 · The Evals & Guardrails Map](./02-the-evals-and-guardrails-map.md) | The five axes that classify every check, a master lookup table, and how one check works offline, online, and at runtime. | You want the big picture, or you need to pick the right guide for a specific task. |
-| [03 · Agentic RAG Failure Modes](./03-agentic-rag-failure-modes.md) | Every common failure across queries, routing, retrieval, generation, citations, tools, SQL, and security—plus how to detect and fix each one. | You are debugging bad answers, reviewing traces, or deciding what to measure first. |
+| [03 · Agentic RAG Failure Modes](./03-agentic-rag-failure-modes.md) | Every common failure across queries, routing, retrieval, generation, citations, tools, SQL, and security, plus how to detect and fix each one. | You are debugging bad answers, reviewing traces, or deciding what to measure first. |
 | [04 · Glossary](./04-glossary.md) | Clear, plain-English definitions for ~90 terms used across this guide, with links to deeper pages. | You see an unfamiliar term anywhere in the repository. |
 
 ---
@@ -43,6 +44,7 @@ When you finish this section, continue to [01 · Datasets](../01-datasets/README
 Every guide in this repository uses the same concrete system: **Acme Internal Assistant**.
 
 Acme Internal Assistant is an enterprise agent that does four things:
+
 1. **Answers document questions** over company policies and wikis using vector search and reranking.
 2. **Answers data questions** by generating SQL and querying a data warehouse (text-to-SQL).
 3. **Takes actions** by calling tools such as `create_ticket` and `lookup_employee`.

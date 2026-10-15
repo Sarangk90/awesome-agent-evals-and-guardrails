@@ -1,6 +1,7 @@
 # 01 · Datasets
 
 > **TL;DR**
+>
 > - **Design your dataset before your metrics.** Offline evals are only as trustworthy as the inputs and reference labels they run on.
 > - **Anchor with SME golden data.** Build 20–50 human-verified examples for release gates and LLM-judge calibration.
 > - **Scale with filtered synthetic rows.** Generate synthetic queries, multi-hop chains, and red-team attacks, then filter out low-quality rows.
@@ -14,7 +15,7 @@
 |---|---|---|
 | [01 · Dataset Strategy](./01-dataset-strategy.md) | Why datasets come first, the five dataset sources, JSON schemas for all 8 eval types, slice coverage, and sample-size math | You are starting an eval project, choosing what fields to store, or deciding how many examples you need |
 | [02 · SME Golden Datasets](./02-sme-golden-datasets.md) | Working with domain experts, writing binary rubrics, reference answers vs. key facts, unanswerable questions, and Cohen's κ / Krippendorff's α | You need trustworthy reference data for release gates or LLM-judge calibration |
-| [03 · Synthetic Datasets](./03-synthetic-datasets.md) | Generating QA pairs, multi-hop questions, tool calls, SQL queries, and red-team attacks—plus automatic quality filters | You have no live traffic yet, need to fill rare slices, or need volume for guardrail tests |
+| [03 · Synthetic Datasets](./03-synthetic-datasets.md) | Generating QA pairs, multi-hop questions, tool calls, SQL queries, and red-team attacks, plus automatic quality filters | You have no live traffic yet, need to fill rare slices, or need volume for guardrail tests |
 | [04 · Production Data Flywheel](./04-production-data-flywheel.md) | Sampling live traces, running annotation queues, turning errors into regression tests, scrubbing PII, and handling document drift | Your system has live users and you want your datasets to reflect real traffic |
 
 ---

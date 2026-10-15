@@ -1,13 +1,23 @@
 # The Evals & Guardrails Map
 
 > **TL;DR**
+>
 > - **Five questions classify every check:** **When** does it run? **What** is its scope? **How** is it computed? **Does** it need reference data? And for guardrails, **how** does it act?
 > - **Three loops keep an agent reliable:** Offline evals gate your releases, runtime guardrails protect live requests, and online evals turn production traffic into new test data.
 > - **Use this page as your compass.** Learn the five axes once, then use the master tables in Section 6 to jump to the exact guide you need.
 
-- **You will learn:** The five axes of evals and guardrails · Where every metric and guardrail fits · How datasets feed offline evals and how production feeds datasets · How to deploy one check in three places (with Python code)
+- **You will learn:**
+    - The five axes of evals and guardrails
+    - Where every metric and guardrail fits
+    - How datasets feed offline evals and how production feeds datasets
+    - How to deploy one check in three places (with Python code)
 - **Prerequisites:** [Why Evals and Guardrails](./01-why-evals-and-guardrails.md)
-- **Related guides:** [Failure Modes](./03-agentic-rag-failure-modes.md) · [Glossary](./04-glossary.md) · [Eval Selection Decision Tree](../05-decision-framework/01-eval-selection-decision-tree.md) · [Guardrail Selection Decision Tree](../05-decision-framework/02-guardrail-selection-decision-tree.md) · [Metric Cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
+- **Related guides:**
+    - [Failure Modes](./03-agentic-rag-failure-modes.md)
+    - [Glossary](./04-glossary.md)
+    - [Eval Selection Decision Tree](../05-decision-framework/01-eval-selection-decision-tree.md)
+    - [Guardrail Selection Decision Tree](../05-decision-framework/02-guardrail-selection-decision-tree.md)
+    - [Metric Cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
 
 ---
 
@@ -58,13 +68,14 @@ flowchart TD
 ```
 
 Read this diagram as three connected loops:
+
 1. **Pre-deploy loop (top):** Datasets feed **offline evals**. Passing scores allow your code to ship.
 2. **Runtime protection (middle):** **Guardrails** inspect inputs, retrieved context, tool calls, and outputs on every live request.
 3. **Learning flywheel (bottom):** Live requests produce **traces** and **user feedback**. Online evals flag bad traces, which you label and add back to your datasets.
 
 ---
 
-## 1. Axis A — When: offline vs online vs runtime guardrails
+## 1. Axis A: When (offline vs online vs runtime guardrails)
 
 Every check runs at one of three times: before deployment, after a live response, or during a live request.
 
@@ -80,13 +91,14 @@ Every check runs at one of three times: before deployment, after a live response
 | **Detailed guides** | [02 · Offline Evals](../02-offline-evals/README.md) | [03 · Online Evals & Observability](../03-online-evals-and-observability/README.md) | [04 · Guardrails](../04-guardrails/README.md) |
 
 Three useful bridges between these modes:
+
 - **Shadow mode:** Run a new model, prompt, or guardrail on live traffic without showing its output to users. You get real-world scores with zero user risk.
 - **Canary rollout:** Route 1–5% of live traffic to the new version and watch online evals before rolling out to 100%.
 - **Red teaming:** Attack the system offline to build an adversarial dataset, then use that dataset in CI to test your runtime guardrails. See [Threat Model & OWASP](../04-guardrails/07-threat-model-owasp.md).
 
 ---
 
-## 2. Axis B — Scope: end-to-end vs component
+## 2. Axis B: Scope (end-to-end vs component)
 
 An agentic RAG system is a chain of steps. You can score the **entire chain** from question to final answer, or you can isolate and score **one step** at a time.
 
@@ -132,7 +144,7 @@ flowchart LR
 
 ---
 
-## 3. Axis C — Method: how the check is computed
+## 3. Axis C: Method (how the check is computed)
 
 You can build a check using five different methods. Always start at the top of this table and move down only when a simpler method cannot test your rule.
 
@@ -148,7 +160,7 @@ You can build a check using five different methods. Always start at the top of t
 
 ---
 
-## 4. Axis D — Ground truth: reference-based vs reference-free
+## 4. Axis D: Ground truth (reference-based vs reference-free)
 
 Some checks compare the system's output against a known-correct **reference answer** (ground truth). Other checks grade the output using only the question and the retrieved context.
 
@@ -164,9 +176,10 @@ Some checks compare the system's output against a known-correct **reference answ
 
 ---
 
-## 5. Axis E — Guardrail mode: blocking vs non-blocking, sync vs async
+## 5. Axis E: Guardrail mode (blocking vs non-blocking, sync vs async)
 
 When you run a check at runtime as a guardrail, you must make two design choices:
+
 1. **Blocking vs. non-blocking:** Does it change what the user gets, or does it just log an alert?
 2. **Synchronous vs. asynchronous:** Does the request wait for the check to finish?
 
@@ -178,6 +191,7 @@ When you run a check at runtime as a guardrail, you must make two design choices
 | **Asynchronous (out-of-path)** | Runs in parallel or after the response is sent. Adds zero latency unless it cancels a live stream. | Sampled LLM judges, audit logging, drift monitors. |
 
 Four practical runtime patterns:
+
 - **Parallel guardrail:** Start your input guardrail and your LLM call at the same time. If the guardrail fires, cancel the LLM call before showing anything to the user.
 - **Streaming tripwire:** Stream tokens to the user while a background check watches the output. If the check detects a leak, cut the stream and replace the message.
 - **Shadow rollout:** Deploy every new guardrail in **non-blocking** mode first. Measure how often it false-triggers on real users before switching it to **blocking**.
@@ -224,9 +238,21 @@ flowchart LR
 Use these two tables to find any metric or guardrail in the repository.
 
 **Legend:**
-- **When:** `Off` = Offline eval · `On` = Online eval · `GR` = Runtime guardrail (`✅` = standard, `◐` = possible on a sample or with latency trade-offs, `❌` = not applicable)
-- **Ref:** `Yes` = Needs reference data · `No` = Reference-free · `Opt` = Both versions exist
-- **Method:** `Code` · `Stat` (statistical/IR) · `Clf` (ML classifier) · `Judge` (LLM judge) · `Human`
+
+- **When:**
+    - `Off` = Offline eval
+    - `On` = Online eval
+    - `GR` = Runtime guardrail (`✅` = standard, `◐` = possible on a sample or with latency trade-offs, `❌` = not applicable)
+- **Ref:**
+    - `Yes` = Needs reference data
+    - `No` = Reference-free
+    - `Opt` = Both versions exist
+- **Method:**
+    - `Code`
+    - `Stat` (statistical/IR)
+    - `Clf` (ML classifier)
+    - `Judge` (LLM judge)
+    - `Human`
 
 ### 6.1 Evals lookup table
 
@@ -306,6 +332,7 @@ Every offline eval requires dataset columns that match its inputs:
 | **Judge calibration** | `input`, `output`, `human_label`, `human_reason` | 100–200 traces graded Pass/Fail by an SME |
 
 You will build these datasets from three main sources:
+
 1. **[SME Golden Datasets](../01-datasets/02-sme-golden-datasets.md):** Written or verified by domain experts. Highest quality, slowest to build.
 2. **[Synthetic Datasets](../01-datasets/03-synthetic-datasets.md):** Generated by LLMs from your documents and schemas. Fast way to test edge cases before launch.
 3. **[Production Samples](../01-datasets/04-production-data-flywheel.md):** Real user traces pulled from production logs and labeled by experts.
@@ -333,15 +360,16 @@ flowchart LR
 ```
 
 Three habits keep this flywheel spinning:
+
 1. **Treat every guardrail block and thumbs-down click as a candidate test row.**
 2. **Keep your regression dataset separate from your capability dataset.** Regression rows test bugs that must never break again; capability rows test hard problems you are still trying to solve.
 3. **Scrub PII before saving production traces into datasets.** See [Production Data Flywheel](../01-datasets/04-production-data-flywheel.md).
 
 ---
 
-## 9. One check, three deployments — code example
+## 9. One check, three deployments: code example
 
-Let's take a single check—*"Is every claim in the answer supported by the retrieved context?"*—and run it in all three places:
+Let's take a single check (*"Is every claim in the answer supported by the retrieved context?"*) and run it in all three places:
 
 | Where it runs | How it is configured | What happens when it fails |
 |---|---|---|
@@ -417,11 +445,11 @@ You can use this exact three-way pattern for PII checks, SQL safety checks, tool
 
 ## Further reading
 
-- Es et al., 2023 — [Ragas: Automated Evaluation of Retrieval Augmented Generation](https://arxiv.org/abs/2309.15217) · [RAGAS documentation](https://docs.ragas.io/)
-- Zheng et al., 2023 — [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)
-- Shankar et al., 2024 — [Who Validates the Validators?](https://arxiv.org/abs/2404.12272)
-- Hamel Husain — [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
-- Eugene Yan — [Patterns for Building LLM-based Systems & Products](https://eugeneyan.com/writing/llm-patterns/)
-- OWASP — [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/)
-- Anthropic — [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
+- Es et al., 2023, [Ragas: Automated Evaluation of Retrieval Augmented Generation](https://arxiv.org/abs/2309.15217) · [RAGAS documentation](https://docs.ragas.io/)
+- Zheng et al., 2023, [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)
+- Shankar et al., 2024, [Who Validates the Validators?](https://arxiv.org/abs/2404.12272)
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
+- Eugene Yan, [Patterns for Building LLM-based Systems & Products](https://eugeneyan.com/writing/llm-patterns/)
+- OWASP, [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/)
+- Anthropic, [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
 - **Next guide:** [Agentic RAG Failure Modes](./03-agentic-rag-failure-modes.md)

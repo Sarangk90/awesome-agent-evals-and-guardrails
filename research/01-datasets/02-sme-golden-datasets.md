@@ -1,35 +1,39 @@
 # SME Golden Datasets
 
 > **TL;DR**
+>
 > - **A golden dataset is a small (50–300 row) expert-verified dataset** that defines what "correct" means for your domain.
 > - **Respect expert time:** pre-fill draft answers and show source chunks inline so subject-matter experts (SMEs) only have to verify and edit.
 > - **Use binary Pass/Fail rubrics and atomic key-facts lists** instead of vague 1–5 Likert scales.
 > - **Measure reviewer agreement** with Cohen's $\kappa$ or Krippendorff's $\alpha$. If two human experts cannot agree on a label, your rubric is ambiguous and no LLM judge will agree either.
 
-**What you will learn:**
-- How to work with subject-matter experts (SMEs) without wasting their time
-- How to write clear annotation guidelines and binary Pass/Fail rubrics
-- Why storing both a reference answer and a `key_facts` list gives the most reliable grading
-- How to handle unanswerable, partial, and false-premise questions
-- How to calculate and interpret Cohen's $\kappa$ and Krippendorff's $\alpha$
-
-**Prerequisites:** [Dataset Strategy](./01-dataset-strategy.md)
-**Related guides:** [LLM-as-a-Judge](../02-offline-evals/07-llm-as-a-judge.md) · [End-to-End RAG Evals](../02-offline-evals/01-end-to-end-rag-evals.md) · [Production Data Flywheel](./04-production-data-flywheel.md)
+- **What you will learn:**
+    - How to work with subject-matter experts (SMEs) without wasting their time
+    - How to write clear annotation guidelines and binary Pass/Fail rubrics
+    - Why storing both a reference answer and a `key_facts` list gives the most reliable grading
+    - How to handle unanswerable, partial, and false-premise questions
+    - How to calculate and interpret Cohen's $\kappa$ and Krippendorff's $\alpha$
+- **Prerequisites:** [Dataset Strategy](./01-dataset-strategy.md)
+- **Related guides:**
+    - [LLM-as-a-Judge](../02-offline-evals/07-llm-as-a-judge.md)
+    - [End-to-End RAG Evals](../02-offline-evals/01-end-to-end-rag-evals.md)
+    - [Production Data Flywheel](./04-production-data-flywheel.md)
 
 ---
 
 ## 1. What a golden dataset is (and isn't)
 
-A **golden dataset** is a set of eval examples whose expected outputs were written or verified by domain experts—such as HR policy owners, finance analysts, support leads, or data engineers.
+A **golden dataset** is a set of eval examples whose expected outputs were written or verified by domain experts (such as HR policy owners, finance analysts, support leads, or data engineers).
 
 | What a golden dataset IS | What a golden dataset IS NOT |
 |---|---|
-| The **source of truth** for what "correct" means in your domain | A massive dataset—50 to 300 rows is typical and plenty |
+| The **source of truth** for what "correct" means in your domain | A massive dataset (50 to 300 rows is typical and plenty) |
 | The anchor used to **calibrate LLM judges** and validate synthetic data | Something an LLM can generate without human verification |
-| A **living product specification** (including what must be refused) | Frozen forever—policies and database schemas change over time |
+| A **living product specification** (including what must be refused) | Frozen forever (policies and database schemas change over time) |
 | The benchmark for **release gates** and headline accuracy | A replacement for sampling live production traffic |
 
 Golden data gives you the highest return on investment in five places:
+
 1. **High-stakes RAG answers** (HR policy, finance rules, legal compliance).
 2. **Gold SQL queries and expected results** (only data owners know that "active customer" means `status = 'A' AND churn_date IS NULL`).
 3. **Graded retrieval relevance labels** (`relevant_docs` graded `0–3`).
@@ -37,6 +41,7 @@ Golden data gives you the highest return on investment in five places:
 5. **LLM-judge calibration sets** (human Pass/Fail grades on *actual system outputs*, used to test your LLM judge).
 
 > **Important distinction:** You need two kinds of human labels:
+>
 > 1. **Golden references:** The expected answer, SQL query, or relevant docs for a question.
 > 2. **Golden judgments:** A human's Pass/Fail grade on a specific *system output* (used to calibrate your [LLM-as-a-Judge](../02-offline-evals/07-llm-as-a-judge.md)).
 
@@ -85,7 +90,7 @@ Without written guidelines, every reviewer invents their own rules. Write a 1-pa
 ### 3.1 What to include
 
 ```markdown
-# Annotation Guidelines — Acme Assistant, HR Policy Answers (v1.3)
+# Annotation Guidelines: Acme Assistant, HR Policy Answers (v1.3)
 
 ## Your task
 For each question, review the draft answer and the source documents. Provide:
@@ -193,6 +198,7 @@ answer_correct (bin) = (key_fact_recall == 1.0) AND contradiction_free
 ```
 
 **How to write good key facts:**
+
 - **Make each fact atomic:** Put *"GBP 250"* and *"includes taxes"* in separate facts.
 - **Include scope qualifiers:** Keep the country, user role, or effective date attached to the number.
 - **Link each fact to its chunk ID:** This gives you `reference_contexts` for Context Recall at the same time.
@@ -225,13 +231,14 @@ If your dataset only contains answerable questions, you will never know if your 
 
 ## 7. Inter-annotator agreement (IAA)
 
-If two human experts cannot agree on whether an answer passes or fails, your rubric is unclear—and an LLM judge will fail too.
+If two human experts cannot agree on whether an answer passes or fails, your rubric is unclear, and an LLM judge will fail too.
 
 **How to measure agreement:** Have at least 2 reviewers independently grade an overlap batch of 30–50 items. Calculate chance-corrected agreement before labeling the rest of the dataset.
 
 ### 7.1 Percent agreement (and why it's not enough)
 
 Raw percent agreement is simply:
+
 $$p_o = \frac{\text{items where reviewers agree}}{\text{total items}}$$
 
 Why is raw agreement misleading? If 90% of system answers pass, two reviewers who blindly click "Pass" 90% of the time will agree **82% of the time by pure chance** ($0.90 \times 0.90 + 0.10 \times 0.10 = 0.82$). Always use a chance-corrected metric like **Cohen's $\kappa$** or **Krippendorff's $\alpha$**.
@@ -303,7 +310,7 @@ def krippendorff_alpha_nominal(items: list[list[str | None]]) -> float:
 
 | Score range ($\kappa$ or $\alpha$) | What it means | Action to take |
 |---|---|---|
-| **$< 0.40$** | Poor to fair agreement | Stop labeling. Your rubric is ambiguous—rewrite your decision rules. |
+| **$< 0.40$** | Poor to fair agreement | Stop labeling. Your rubric is ambiguous; rewrite your decision rules. |
 | **$0.41 – 0.65$** | Moderate agreement | Adjudicate disagreements, tighten boundary rules, and run another 30-item overlap check. |
 | **$0.66 – 0.80$** | Substantial agreement | Good enough for directional evals; aim for $\ge 0.70$ before using for release gates. |
 | **$> 0.80$** | Strong agreement | Ready for release gates and LLM-judge calibration. |
@@ -333,6 +340,7 @@ flowchart TD
 ```
 
 **Three rules for adjudication:**
+
 1. **Keep first-pass labeling blind.** Reviewers must not see each other's grades before submitting.
 2. **Never majority-vote away expert knowledge.** If two junior reviewers outvote your senior HR policy owner on an HR rule, trust the policy owner and update the guideline.
 3. **Save adjudicated items as LLM-judge few-shot examples.** Hard boundary cases that required human adjudication make the best teaching examples for your automated judge.
@@ -368,6 +376,7 @@ Use these starting estimates to plan SME sessions (measure your own speed in ses
 | **Review a multi-step agent trajectory** | 5–20 min | Collapse boilerplate JSON logs in the trace viewer |
 
 **Sample budget for a 200-row Golden RAG dataset:**
+
 - 200 pre-filled rows × 3 minutes = **10 SME hours**
 - 25% double-annotated overlap (50 rows) = **+2.5 SME hours**
 - Adjudication + guideline calibration = **+5 SME hours**
@@ -411,7 +420,9 @@ Use these starting estimates to plan SME sessions (measure your own speed in ses
 
 ## Further reading
 
-- Hamel Husain — [Creating a LLM-as-a-Judge That Drives Business Results](https://hamel.dev/blog/posts/llm-judge/)
-- Shankar et al. — [Who Validates the Validators? Aligning LLM-Assisted Evaluation of LLM Outputs with Human Preferences](https://arxiv.org/abs/2404.12272)
-- Krippendorff's alpha guide — [k-alpha.org](https://www.k-alpha.org/)
-- Next in this section: [Synthetic Datasets](./03-synthetic-datasets.md) · [Production Data Flywheel](./04-production-data-flywheel.md)
+- Hamel Husain, [Creating a LLM-as-a-Judge That Drives Business Results](https://hamel.dev/blog/posts/llm-judge/)
+- Shankar et al., [Who Validates the Validators? Aligning LLM-Assisted Evaluation of LLM Outputs with Human Preferences](https://arxiv.org/abs/2404.12272)
+- Krippendorff's alpha guide: [k-alpha.org](https://www.k-alpha.org/)
+- **Next in this section:**
+    - [Synthetic Datasets](./03-synthetic-datasets.md)
+    - [Production Data Flywheel](./04-production-data-flywheel.md)

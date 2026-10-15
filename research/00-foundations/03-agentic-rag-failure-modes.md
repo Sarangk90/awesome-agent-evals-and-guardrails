@@ -1,13 +1,23 @@
 # Agentic RAG Failure Modes
 
 > **TL;DR**
+>
 > - **Agents break in predictable places:** query understanding, routing, retrieval, generation, citations, tool calls, SQL generation, security, and multi-turn memory.
 > - **Always debug upstream first.** What looks like a generator hallucination is often a retriever failure in disguise.
 > - **Use this page as a field manual.** For every failure mode below, you will find the **symptom** you see, the **root cause**, the **eval** that measures it, and the **guardrail or fix** that stops it.
 
-- **You will learn:** How to separate retrieval bugs from generation bugs · Barnett et al.'s seven RAG failure points · Stage-by-stage failures for RAG, tools, SQL, security, and multi-turn chat · How to trace a broken answer back to its root cause
-- **Prerequisites:** [Why Evals and Guardrails](./01-why-evals-and-guardrails.md) · [The Evals & Guardrails Map](./02-the-evals-and-guardrails-map.md)
-- **Related guides:** [Threat Model & OWASP](../04-guardrails/07-threat-model-owasp.md) · [Eval Selection Decision Tree](../05-decision-framework/01-eval-selection-decision-tree.md) · [Glossary](./04-glossary.md)
+- **You will learn:**
+    - How to separate retrieval bugs from generation bugs
+    - Barnett et al.'s seven RAG failure points
+    - Stage-by-stage failures for RAG, tools, SQL, security, and multi-turn chat
+    - How to trace a broken answer back to its root cause
+- **Prerequisites:**
+    - [Why Evals and Guardrails](./01-why-evals-and-guardrails.md)
+    - [The Evals & Guardrails Map](./02-the-evals-and-guardrails-map.md)
+- **Related guides:**
+    - [Threat Model & OWASP](../04-guardrails/07-threat-model-owasp.md)
+    - [Eval Selection Decision Tree](../05-decision-framework/01-eval-selection-decision-tree.md)
+    - [Glossary](./04-glossary.md)
 
 ---
 
@@ -32,6 +42,7 @@ flowchart LR
 ```
 
 Follow two rules whenever you debug a bad answer:
+
 1. **Find the first upstream error.** If the retriever never fetched the right policy page, editing the generator prompt will not fix the answer.
 2. **Separate "missing information" from "misused information."** Compare **context recall**, **faithfulness**, and **answer correctness** side by side to see whether retrieval or generation failed:
 
@@ -66,6 +77,7 @@ Barnett et al. (*Seven Failure Points When Engineering a Retrieval Augmented Gen
 ## 3. Stage-by-stage taxonomy
 
 Use the tables below to diagnose traces during error analysis. Every table lists:
+
 - **Symptom:** What you see in the trace or user bug report.
 - **Root cause:** Why the system behaved that way.
 - **Detect (Eval):** Which check measures how often this happens.
@@ -180,17 +192,20 @@ Use the tables below to diagnose traces during error analysis. Every table lists
 ## 4. Worked example: tracing one bad answer upstream
 
 Suppose an Employee asks Acme Internal Assistant:
+
 - **Question:** *"How many PTO days do I get after 5 years?"*
 - **System Answer:** *"You get 20 days of PTO per year. [Source: HR-Handbook-2022]"*
 - **Actual Rule:** Employees get **25 days** under `HR-Policy-2024`.
 
 Here is how you trace that bug upstream:
+
 1. **Check generation first:** Did the generator hallucinate? **No.** Its answer of *"20 days"* is 100% faithful to `HR-Handbook-2022`.
 2. **Check the prompt context:** Was `HR-Policy-2024` in the prompt sent to the LLM? **No.**
 3. **Check the retriever:** Did the retriever find `HR-Policy-2024`? It ranked at **#9**, and `top-k` was set to **5**.
 4. **Identify the root cause:** This is **FP2 (Missed top-ranked doc)** combined with **Stale documents in the index**. The outdated 2022 handbook was never archived, and its longer text scored higher in vector search.
 
 How you fix and prevent it:
+
 - **Engineering fix:** Add `status="current"` metadata during ingestion, filter out archived handbooks at retrieval time, and add a reranker.
 - **Offline eval:** Add 15 time-sensitive policy questions to your golden dataset and measure `Recall@5` plus **answer correctness**.
 - **Why runtime guardrails did not catch it:** The answer was polite, well-cited, and 100% faithful to the retrieved chunk. Only a **reference-based offline eval** (or an SME review) can catch an answer that is faithfully grounded in an outdated document.
@@ -201,7 +216,7 @@ How you fix and prevent it:
 
 Treat these tables as a **starter menu**, not a checklist you must implement all at once:
 
-1. **Read ~100 traces on your own first** and write plain-English notes on the first error in each trace ([open coding](./01-why-evals-and-guardrails.md#51-analyze--error-analysis-first)).
+1. **Read ~100 traces on your own first** and write plain-English notes on the first error in each trace ([open coding](./01-why-evals-and-guardrails.md#51-analyze-error-analysis-first)).
 2. **Group your notes into 5–10 buckets** and match them to the failure names on this page where they fit.
 3. **Prioritize using frequency × severity:**
 
@@ -246,13 +261,13 @@ Treat these tables as a **starter menu**, not a checklist you must implement all
 
 ## Further reading
 
-- Barnett et al., 2024 — [Seven Failure Points When Engineering a Retrieval Augmented Generation System](https://arxiv.org/abs/2401.05856)
-- Cemri et al., 2025 — [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657)
-- Liu et al., 2023 — [Lost in the Middle: How Language Models Use Long Contexts](https://arxiv.org/abs/2307.03172)
-- Greshake et al., 2023 — [Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection](https://arxiv.org/abs/2302.12173)
-- Gao et al., 2023 — [Retrieval-Augmented Generation for Large Language Models: A Survey](https://arxiv.org/abs/2312.10997)
-- OWASP — [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) · [LLM01:2025 Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
-- Simon Willison — [Prompt injection series](https://simonwillison.net/series/prompt-injection/)
-- Yu et al., 2018 — [Spider: Text-to-SQL benchmark](https://arxiv.org/abs/1809.08887) · Li et al., 2023 — [BIRD benchmark](https://arxiv.org/abs/2305.03111)
-- Hamel Husain — [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
+- Barnett et al., 2024, [Seven Failure Points When Engineering a Retrieval Augmented Generation System](https://arxiv.org/abs/2401.05856)
+- Cemri et al., 2025, [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657)
+- Liu et al., 2023, [Lost in the Middle: How Language Models Use Long Contexts](https://arxiv.org/abs/2307.03172)
+- Greshake et al., 2023, [Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection](https://arxiv.org/abs/2302.12173)
+- Gao et al., 2023, [Retrieval-Augmented Generation for Large Language Models: A Survey](https://arxiv.org/abs/2312.10997)
+- OWASP, [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) · [LLM01:2025 Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
+- Simon Willison, [Prompt injection series](https://simonwillison.net/series/prompt-injection/)
+- Yu et al., 2018, [Spider: Text-to-SQL benchmark](https://arxiv.org/abs/1809.08887) · Li et al., 2023, [BIRD benchmark](https://arxiv.org/abs/2305.03111)
+- Hamel Husain, [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
 - **Next guide:** [Glossary](./04-glossary.md)

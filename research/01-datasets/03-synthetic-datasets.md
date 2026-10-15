@@ -1,21 +1,24 @@
 # Synthetic Datasets
 
 > **TL;DR**
+>
 > - **Use synthetic data to bootstrap before launch and fill rare slices after launch.** Treat it as a `silver` label tier until a human verifies it.
 > - **Force diversity structurally:** generate inputs in two steps (`dimensions → tuples → scenario → query`) using realistic user personas.
 > - **Ground generation in your artifacts:** use document chunks or knowledge graphs for RAG, JSON schemas for tool calls, and database execution for Text-to-SQL.
 > - **Over-generate by 2× and filter aggressively.** Unfiltered synthetic questions are usually too easy, copy exact phrases from chunks, or contain wrong reference answers.
 
-**What you will learn:**
-- When synthetic data helps and when it misleads you
-- How to run the `dimensions → tuples → scenario → query` pipeline
-- Chunk-based and knowledge-graph RAG generation (`RAGAS` and `DeepEval Synthesizer`)
-- Back-translation recipes for tool-calling and Text-to-SQL datasets
-- How to generate adversarial guardrail variants with benign twins
-- Automatic quality filters and human spot-check rules
-
-**Prerequisites:** [Dataset Strategy](./01-dataset-strategy.md)
-**Related guides:** [SME Golden Datasets](./02-sme-golden-datasets.md) · [Production Data Flywheel](./04-production-data-flywheel.md) · [Threat Model & OWASP](../04-guardrails/07-threat-model-owasp.md)
+- **What you will learn:**
+    - When synthetic data helps and when it misleads you
+    - How to run the `dimensions → tuples → scenario → query` pipeline
+    - Chunk-based and knowledge-graph RAG generation (`RAGAS` and `DeepEval Synthesizer`)
+    - Back-translation recipes for tool-calling and Text-to-SQL datasets
+    - How to generate adversarial guardrail variants with benign twins
+    - Automatic quality filters and human spot-check rules
+- **Prerequisites:** [Dataset Strategy](./01-dataset-strategy.md)
+- **Related guides:**
+    - [SME Golden Datasets](./02-sme-golden-datasets.md)
+    - [Production Data Flywheel](./04-production-data-flywheel.md)
+    - [Threat Model & OWASP](../04-guardrails/07-threat-model-owasp.md)
 
 ---
 
@@ -57,6 +60,7 @@ flowchart TD
 ```
 
 Two steps matter more than any prompt trick:
+
 1. **Plan coverage first:** Diversity comes from your tuple plan, not from turning up the LLM `temperature`.
 2. **Filter aggressively:** Quality comes from rejecting bad generations, not from expecting 100% perfection on the first prompt.
 
@@ -125,6 +129,7 @@ Use contrasting personas so your dataset tests more than polite textbook English
 The fastest way to build a RAG benchmark is to pick a document chunk and ask an LLM to write a question and reference answer from that chunk.
 
 **What you get automatically:**
+
 - `reference_contexts` (the source chunk ID), which unlocks **Context Recall**, **`Recall@k`**, **`Hit Rate@k`**, and **`MRR`**.
 - `reference_answer` and `key_facts`, which unlock **Answer Correctness**.
 
@@ -191,7 +196,7 @@ RAGAS provides built-in synthesizers for different hop counts and specificity le
 | **Multi-hop abstract** | *"How do travel expense rules differ between EMEA and the US?"* | `MultiHopAbstractQuerySynthesizer` |
 
 ```python
-# Illustrative — check current RAGAS API for your installed version
+# Illustrative: check current RAGAS API for your installed version
 from ragas.testset import TestsetGenerator
 from ragas.testset.persona import Persona
 from ragas.testset.synthesizers import (
@@ -236,7 +241,7 @@ First-pass synthetic questions are often too simple. Use **query evolution** (in
 [DeepEval's `Synthesizer`](https://deepeval.com/docs/golden-synthesizer) automates query evolution and quality filtering. To keep evolved questions strictly answerable from your documents, use `MULTICONTEXT`, `CONCRETIZING`, `CONSTRAINED`, and `COMPARATIVE` evolutions:
 
 ```python
-# Illustrative — check current DeepEval API
+# Illustrative: check current DeepEval API
 from deepeval.synthesizer import Synthesizer, Evolution
 from deepeval.synthesizer.config import EvolutionConfig, FiltrationConfig
 
@@ -367,6 +372,7 @@ Start with seed attacks across your threat model ([Threat Model & OWASP](../04-g
 ### 8.2 Tools for automated red-teaming
 
 Instead of writing mutation scripts from scratch, use established open-source red-teaming tools:
+
 - **[promptfoo red teaming](https://www.promptfoo.dev/docs/red-team/):** Generates attack plugins (injections, PII leaks, RBAC probes, multi-turn jailbreaks) tailored to your application prompt.
 - **[NVIDIA garak](https://github.com/NVIDIA/garak):** Automated LLM vulnerability scanner with built-in attack probes.
 - **[Microsoft PyRIT](https://github.com/Azure/PyRIT):** Python Risk Identification Toolkit for single-turn and multi-turn red teaming.
@@ -448,6 +454,7 @@ def near_duplicates(items, embed, threshold=0.9):
 ### 10.2 Human spot-check
 
 Always inspect a random sample of **30–50 filtered synthetic rows** by hand:
+
 1. Count how many rows you reject (unrealistic question, wrong reference answer, or too easy).
 2. If your human rejection rate exceeds **15%**, fix your generation prompts and filters instead of hand-editing individual rows.
 3. Promote a synthetic row to `label_tier: "gold"` only if a domain expert verifies its reference answer.
@@ -455,6 +462,7 @@ Always inspect a random sample of **30–50 filtered synthetic rows** by hand:
 ### 10.3 Validate the synthetic set against reality
 
 Once you have production traffic, compare your synthetic dataset against real user queries:
+
 - If your system scores **95% on synthetic data** but **70% on production samples**, your synthetic questions are too clean or have too much keyword overlap with your chunks.
 
 ---
@@ -519,9 +527,12 @@ def build_synthetic_rag_set(corpus, plan, budget: int):
 
 ## Further reading
 
-- RAGAS — [Testset Generation Concepts](https://docs.ragas.io/en/stable/concepts/test_data_generation/rag/)
-- DeepEval — [Golden Synthesizer](https://deepeval.com/docs/golden-synthesizer) and [Conversation Simulator](https://deepeval.com/docs/conversation-simulator)
-- Xu et al. — [WizardLM (Evol-Instruct)](https://arxiv.org/abs/2304.12244)
-- Panickssery et al. — [LLM Evaluators Recognize and Favor Their Own Generations](https://arxiv.org/abs/2404.13076)
-- Red teaming tools: [promptfoo red team](https://www.promptfoo.dev/docs/red-team/) · [NVIDIA garak](https://github.com/NVIDIA/garak) · [Microsoft PyRIT](https://github.com/Azure/PyRIT)
+- RAGAS, [Testset Generation Concepts](https://docs.ragas.io/en/stable/concepts/test_data_generation/rag/)
+- DeepEval, [Golden Synthesizer](https://deepeval.com/docs/golden-synthesizer) and [Conversation Simulator](https://deepeval.com/docs/conversation-simulator)
+- Xu et al., [WizardLM (Evol-Instruct)](https://arxiv.org/abs/2304.12244)
+- Panickssery et al., [LLM Evaluators Recognize and Favor Their Own Generations](https://arxiv.org/abs/2404.13076)
+- **Red teaming tools:**
+    - [promptfoo red team](https://www.promptfoo.dev/docs/red-team/)
+    - [NVIDIA garak](https://github.com/NVIDIA/garak)
+    - [Microsoft PyRIT](https://github.com/Azure/PyRIT)
 - Next in this section: [Production Data Flywheel](./04-production-data-flywheel.md)
