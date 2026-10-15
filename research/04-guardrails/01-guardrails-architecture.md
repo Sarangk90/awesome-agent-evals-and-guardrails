@@ -1,14 +1,23 @@
 # Guardrails Architecture
 
 > **TL;DR**
+>
 > - **Inspect single requests at runtime.** A guardrail checks an input, chunk, tool call, or output and decides to allow, block, modify, escalate, or flag it.
 > - **Build layered defense-in-depth.** Combine independent rules, classifiers, and deterministic authorization across layers because no single detector catches everything.
 > - **Treat each guardrail as a production classifier.** Define a spec, a latency budget, a fail-open or fail-closed mode, and should-block and should-allow test sets.
 > - **Keep policy in versioned configuration.** Separate detector scores from action thresholds and ship new guardrails in shadow mode before enforcing blocks.
 
-**You will learn:** Guardrails vs evals · Layered defense model · Five guardrail actions · Sync, async, and streaming patterns · Detector families · Policy-as-config · Refusal UX · Guardrail metrics and spec template  
-**Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [The evals and guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md)  
-**Related:** [Input guardrails](./02-input-guardrails.md), [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md), [Output guardrails](./04-output-guardrails.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md), [Access control / RBAC](./06-access-control-rbac.md), [Threat model / OWASP](./07-threat-model-owasp.md)
+- **You will learn:**
+    - Guardrails vs evals
+    - Layered defense model
+    - Five guardrail actions
+    - Sync, async, and streaming patterns
+    - Detector families
+    - Policy-as-config
+    - Refusal UX
+    - Guardrail metrics and spec template
+- **Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [The evals and guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md)
+- **Related:** [Input guardrails](./02-input-guardrails.md), [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md), [Output guardrails](./04-output-guardrails.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md), [Access control / RBAC](./06-access-control-rbac.md), [Threat model / OWASP](./07-threat-model-owasp.md)
 
 ---
 
@@ -91,7 +100,7 @@ flowchart TD
 | **Retrieval / context** | Retrieved chunks, tool results, memory | Permission filtering, provenance/allowlists, indirect injection scanning, spotlighting, freshness, relevance threshold, data minimization | Data leakage across permissions, indirect prompt injection, poisoned or stale context | [03](./03-retrieval-and-context-guardrails.md) |
 | **Tool / action** | Planned tool calls, arguments, generated SQL | Schema/arg validation, tool allowlist per role, read-only enforcement, SQL AST checks, rate/budget limits, human approval | Excessive agency, destructive actions, SQL injection, runaway loops | [05](./05-tool-and-action-guardrails.md) |
 | **Output** | Draft answer (whole or streamed) | Groundedness, citation verification, PII/secret leakage, toxicity, schema validation, policy compliance, system prompt leakage, unsafe markdown/links | Hallucination, leakage, harmful or off-policy content, broken downstream parsing | [04](./04-output-guardrails.md) |
-| **Policy / authorization** (cross-cutting) | Identity + resource + action | RBAC/ABAC checks, row/document-level security, entitlement propagation into every tool | Unauthorized access — never trust a probabilistic detector with permissions | [06](./06-access-control-rbac.md) |
+| **Policy / authorization** (cross-cutting) | Identity + resource + action | RBAC/ABAC checks, row/document-level security, entitlement propagation into every tool | Unauthorized access (never trust a probabilistic detector with permissions) | [06](./06-access-control-rbac.md) |
 
 **Design principles for the layered model**
 
@@ -163,7 +172,7 @@ Users experience total end-to-end latency. Decide up front how much latency budg
 
 Track **p95 and p99** latency rather than the mean. LLM-based guardrails have long latency tails.
 
-### 5.2 Run independent rails in parallel — and in parallel with the main work
+### 5.2 Run independent rails in parallel, and in parallel with the main work
 
 Most input guardrails do not depend on each other, and retrieval does not depend on their verdict. Run input guardrails and retrieval concurrently. Gate only the expensive *LLM call* on the guardrail results.
 
@@ -329,7 +338,7 @@ Make fail-closed practical by **degrading gracefully** (fall back from LLM rail 
 | Accuracy on well-defined patterns | Excellent | Good | Good |
 | Accuracy on semantic / novel cases | Poor (brittle, easy to evade) | Moderate; degrades out of distribution | Best generalization, but can itself be prompt-injected |
 | Explainability | Fully explainable | Score only | Natural-language rationale (not necessarily faithful) |
-| Determinism | Yes | Yes (fixed weights) | No (unless temperature 0 and pinned model — still not guaranteed) |
+| Determinism | Yes | Yes (fixed weights) | No (unless temperature 0 and pinned model, still not guaranteed) |
 | Maintenance | Rules grow and rot | Retrain/recalibrate; threshold tuning | Prompt versioning; re-validate on model upgrades |
 | Adversarial robustness | Low for denylists; high for allowlists and authorization | Moderate | Moderate; shares failure modes with the main LLM |
 | Best for | Authorization, structural validation, known formats, hard limits | High-volume semantic screening | Ambiguous, context-dependent policy decisions; the gray zone of a cascade |
@@ -348,7 +357,7 @@ Make fail-closed practical by **degrading gracefully** (fall back from LLM rail 
 Hard-coding thresholds and actions in application code makes policies hard to audit, tune, and roll back. Store your guardrail policy as **versioned configuration**. Review policy changes like code, evaluate them in CI before rollout, and stamp the active `policy_version` on every trace.
 
 ```yaml
-# guardrails/policy.yaml — illustrative schema, not tied to any framework
+# guardrails/policy.yaml: illustrative schema, not tied to any framework
 version: "2026-10-01.3"
 defaults:
   on_error: fail_open_flag
@@ -520,13 +529,13 @@ Write a one-page specification before building any guardrail. Answering these qu
 | **Policy version** | Config version where this spec is active |
 ```
 
-**Filled example — SQL-in-input for the enterprise assistant**
+**Filled example: SQL-in-input for the enterprise assistant**
 
 | Field | Value |
 |---|---|
 | Name | `sql_in_input` |
 | Purpose | Stop users from smuggling raw SQL into the text-to-SQL tool and detect SQL-injection payloads |
-| Layer | Input (paired with an independent check on generated SQL at the tool layer — [05](./05-tool-and-action-guardrails.md)) |
+| Layer | Input (paired with an independent check on generated SQL at the tool layer; see [05](./05-tool-and-action-guardrails.md)) |
 | Trigger | `text_to_sql` pipeline; all roles |
 | Detector | `sqlglot` parse check restricted to statement nodes + regex for injection idioms (`' OR 1=1`, `; DROP`, `UNION SELECT`) |
 | Action | Block if user asks to *run* a SQL statement; route to explain-only flow if user asks to *explain* it; block any injection idiom |
@@ -571,13 +580,16 @@ Write a one-page specification before building any guardrail. Answering these qu
 
 ## Further reading
 
-- OWASP — [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) and the [LLM Prompt Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)
-- NIST — [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)
-- Rebedea et al. — [NeMo Guardrails: A Toolkit for Controllable and Safe LLM Applications with Programmable Rails](https://arxiv.org/abs/2310.10501) · [docs](https://docs.nvidia.com/nemo/guardrails/latest/index.html)
-- Inan et al. — [Llama Guard: LLM-based Input-Output Safeguard for Human-AI Conversations](https://arxiv.org/abs/2312.06674)
-- OpenAI Cookbook — [How to implement LLM guardrails](https://cookbook.openai.com/examples/how_to_use_guardrails) (parallel guardrails, latency trade-offs)
-- OpenAI Agents SDK — [Guardrails](https://openai.github.io/openai-agents-python/guardrails/)
-- AWS — [Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)
-- Beurer-Kellner et al. — [Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837)
-- Debenedetti et al. — [Defeating Prompt Injections by Design (CaMeL)](https://arxiv.org/abs/2503.18813)
-- In this repo: [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md) · [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md) · [Threat model / OWASP](./07-threat-model-owasp.md)
+- OWASP, [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) and the [LLM Prompt Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)
+- NIST, [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)
+- Rebedea et al., [NeMo Guardrails: A Toolkit for Controllable and Safe LLM Applications with Programmable Rails](https://arxiv.org/abs/2310.10501) · [docs](https://docs.nvidia.com/nemo/guardrails/latest/index.html)
+- Inan et al., [Llama Guard: LLM-based Input-Output Safeguard for Human-AI Conversations](https://arxiv.org/abs/2312.06674)
+- OpenAI Cookbook, [How to implement LLM guardrails](https://cookbook.openai.com/examples/how_to_use_guardrails) (parallel guardrails, latency trade-offs)
+- OpenAI Agents SDK, [Guardrails](https://openai.github.io/openai-agents-python/guardrails/)
+- AWS, [Amazon Bedrock Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)
+- Beurer-Kellner et al., [Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837)
+- Debenedetti et al., [Defeating Prompt Injections by Design (CaMeL)](https://arxiv.org/abs/2503.18813)
+- **In this repo:**
+    - [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md)
+    - [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
+    - [Threat model / OWASP](./07-threat-model-owasp.md)

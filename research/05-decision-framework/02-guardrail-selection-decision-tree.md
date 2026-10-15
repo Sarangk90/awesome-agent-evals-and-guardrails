@@ -1,14 +1,19 @@
 # Guardrail Selection Decision Tree
 
 > **TL;DR**
+>
 > - **Select guardrails from risk, not vendor checklists.** Score your users, data sensitivity, action reversibility, and untrusted content exposure first.
 > - **Break the lethal trifecta by design.** Never combine private data, untrusted content, and external communication without deterministic controls or human approval.
 > - **Enforce security in deterministic code.** Keep authorization, tool allowlists, SQL policies, and network egress outside the LLM prompt.
 > - **Configure runtime behavior explicitly.** Set blocking mode, sync vs async execution, fail-open vs fail-closed rules, and latency budgets per guardrail.
 
-**You will learn:** How to score agent risk · How to run the lethal-trifecta check · Required guardrails by risk tier · How to choose blocking, sync, and fail-closed modes  
-**Prerequisites:** [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Threat model & OWASP](../04-guardrails/07-threat-model-owasp.md)  
-**Related:** [Eval selection](./01-eval-selection-decision-tree.md), [Input guardrails](../04-guardrails/02-input-guardrails.md), [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md), [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
+- **You will learn:**
+    - How to score agent risk
+    - How to run the lethal-trifecta check
+    - Required guardrails by risk tier
+    - How to choose blocking, sync, and fail-closed modes
+- **Prerequisites:** [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Threat model & OWASP](../04-guardrails/07-threat-model-owasp.md)
+- **Related:** [Eval selection](./01-eval-selection-decision-tree.md), [Input guardrails](../04-guardrails/02-input-guardrails.md), [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md), [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
 
 ---
 
@@ -264,7 +269,7 @@ See [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md) for a compa
 
 These archetypes match [eval selection §2](./01-eval-selection-decision-tree.md#2-the-five-input-questions). In the tables below, `B` = blocking, `NB` = non-blocking, `S` = synchronous, and `A` = asynchronous.
 
-### 11.1 A1 — Simple RAG chatbot
+### 11.1 A1: Simple RAG chatbot
 
 | Layer | Guardrail | Mode |
 |---|---|---|
@@ -276,7 +281,7 @@ These archetypes match [eval selection §2](./01-eval-selection-decision-tree.md
 | Output | Toxicity filter | B/S for public, NB/A for internal |
 | Output | Groundedness judge | NB/A |
 
-### 11.2 A2 — Agentic RAG with tools
+### 11.2 A2: Agentic RAG with tools
 
 | Layer | Guardrail | Mode |
 |---|---|---|
@@ -289,7 +294,7 @@ These archetypes match [eval selection §2](./01-eval-selection-decision-tree.md
 | Output | Apply all A1 checks plus secondary role-based output scanning | B/S |
 | Audit | Log every tool call with arguments, result status, and approver identity | A |
 
-### 11.3 A3 — Text-to-SQL agent
+### 11.3 A3: Text-to-SQL agent
 
 | Layer | Guardrail | Mode |
 |---|---|---|
@@ -301,7 +306,7 @@ These archetypes match [eval selection §2](./01-eval-selection-decision-tree.md
 | Output | Verify that numbers in the narrative answer match the SQL result set | NB/A or B for high-stakes |
 | Audit | Log generated SQL, user identity, role, and row count returned | A |
 
-### 11.4 A4 — Multi-agent / multi-step
+### 11.4 A4: Multi-agent / multi-step
 
 | Layer | Guardrail | Mode |
 |---|---|---|
@@ -312,7 +317,7 @@ These archetypes match [eval selection §2](./01-eval-selection-decision-tree.md
 | Memory | Validate writes to shared memory and attach provenance tags to stored entries | B/S |
 | Kill switch | Provide both per-agent and global kill switches | B |
 
-### 11.5 A5 — Multi-turn conversational
+### 11.5 A5: Multi-turn conversational
 
 | Layer | Guardrail | Mode |
 |---|---|---|
@@ -321,7 +326,7 @@ These archetypes match [eval selection §2](./01-eval-selection-decision-tree.md
 | Memory | Enforce PII scrubbing and retention limits on stored conversation history | B (policy) |
 | Output | Apply all A1–A3 output checks on every turn | B/S |
 
-### 11.6 Running example — final guardrail stack
+### 11.6 Running example: final guardrail stack
 
 | Layer | Control | Type | Mode | Fail |
 |---|---|---|---|---|
@@ -330,12 +335,12 @@ These archetypes match [eval selection §2](./01-eval-selection-decision-tree.md
 | Input | Prompt-injection classifier | Clf | NB/S (flag), B on HR/finance intents | Open (flag), Closed (HR/finance) |
 | Router | Intent → capability allowed for role? | Code | B/S | Closed |
 | Docs retrieval | ACL filter in vector query using user groups | Code | B/S | Closed |
-| Docs retrieval | Injection flag computed at indexing time | Clf | NB | — |
+| Docs retrieval | Injection flag computed at indexing time | Clf | NB | N/A |
 | SQL | Read-only role, RLS views per user, parser allowlist, timeout, row cap | Code/Infra | B/S | Closed |
 | Ticket tool | Fixed schema, enum fields, user-confirmation step, no external recipients | Code + UX | B/S | Closed |
 | Output | Strip external images/links, PII/secret regex + NER | Code + Clf | B/S | Closed |
 | Output | Groundedness judge on 10% sample and 100% of HR policy intents (async) | Judge | NB/A | Open |
-| Audit | Full trace with role, chunk IDs, SQL, tool calls | Code | A | — |
+| Audit | Full trace with role, chunk IDs, SQL, tool calls | Code | A | N/A |
 
 ---
 
@@ -379,11 +384,13 @@ flowchart TD
 
 ## Further reading
 
-- Simon Willison — [The lethal trifecta for AI agents](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/), [The Dual LLM pattern](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/)
-- Meta AI — [Agents Rule of Two: A Practical Approach to AI Agent Security](https://ai.meta.com/blog/practical-ai-agent-security/)
-- Beurer-Kellner et al. — [Design Patterns for Securing LLM Agents against Prompt Injections (arXiv:2506.08837)](https://arxiv.org/abs/2506.08837)
-- Debenedetti et al. — [Defeating Prompt Injections by Design (arXiv:2503.18813)](https://arxiv.org/abs/2503.18813)
-- OWASP — [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/), [Agentic AI – Threats and Mitigations](https://genai.owasp.org/resource/agentic-ai-threats-and-mitigations/)
-- NIST — [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework), [Generative AI Profile (NIST AI 600-1)](https://doi.org/10.6028/NIST.AI.600-1)
-- Microsoft — [Lessons From Red Teaming 100 Generative AI Products (arXiv:2501.07238)](https://arxiv.org/abs/2501.07238)
-- In this repo: [Guardrails section](../04-guardrails/README.md) · [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
+- Simon Willison, [The lethal trifecta for AI agents](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/), [The Dual LLM pattern](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/)
+- Meta AI, [Agents Rule of Two: A Practical Approach to AI Agent Security](https://ai.meta.com/blog/practical-ai-agent-security/)
+- Beurer-Kellner et al., [Design Patterns for Securing LLM Agents against Prompt Injections (arXiv:2506.08837)](https://arxiv.org/abs/2506.08837)
+- Debenedetti et al., [Defeating Prompt Injections by Design (arXiv:2503.18813)](https://arxiv.org/abs/2503.18813)
+- OWASP, [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/), [Agentic AI – Threats and Mitigations](https://genai.owasp.org/resource/agentic-ai-threats-and-mitigations/)
+- NIST, [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework), [Generative AI Profile (NIST AI 600-1)](https://doi.org/10.6028/NIST.AI.600-1)
+- Microsoft, [Lessons From Red Teaming 100 Generative AI Products (arXiv:2501.07238)](https://arxiv.org/abs/2501.07238)
+- **In this repo:**
+    - [Guardrails section](../04-guardrails/README.md)
+    - [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)

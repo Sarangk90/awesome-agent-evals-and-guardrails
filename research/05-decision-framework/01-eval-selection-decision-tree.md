@@ -1,14 +1,19 @@
 # Eval Selection Decision Tree
 
 > **TL;DR**
+>
 > - **Answer five scoping questions first.** Define your architecture, failure risk, ground-truth availability, product stage, and run budget before picking metrics.
 > - **Start with the universal core.** Instrument traces, run error analysis on 30–100 examples, and enforce deterministic checks first.
 > - **Target your observed bottlenecks.** Add component evaluations where error analysis reveals failures, and combine them with one end-to-end gate.
 > - **Validate every LLM judge.** Use binary pass/fail rubrics and measure alignment against 50–100 human labels before gating releases.
 
-**You will learn:** A step-by-step framework for choosing evaluations · When to use code checks, LLM judges, or humans · How to balance end-to-end and component metrics · Minimum viable evaluation stacks for five archetypes  
-**Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)  
-**Related:** [Guardrail selection](./02-guardrail-selection-decision-tree.md), [Metric cheatsheet](./03-metric-cheatsheet.md), [Implementation playbook](./04-implementation-playbook.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)
+- **You will learn:**
+    - A step-by-step framework for choosing evaluations
+    - When to use code checks, LLM judges, or humans
+    - How to balance end-to-end and component metrics
+    - Minimum viable evaluation stacks for five archetypes
+- **Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)
+- **Related:** [Guardrail selection](./02-guardrail-selection-decision-tree.md), [Metric cheatsheet](./03-metric-cheatsheet.md), [Implementation playbook](./04-implementation-playbook.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)
 
 ---
 
@@ -45,13 +50,13 @@ Answer these five questions before you select any metric.
 
 | # | Question | Typical answers | Why it changes the eval plan |
 |---|---|---|---|
-| Q1 | **What is the architecture?** | Simple RAG · Agentic RAG with tools · Text-to-SQL · Multi-agent / multi-step workflow · Multi-turn conversational | Determines which components exist and which component evaluations apply (no retriever means no retrieval metrics). |
-| Q2 | **What is the risk level and domain?** | Low (internal, read-only, advisory) · Medium (customer-facing, reputational) · High (regulated: finance, health, legal, HR, or irreversible actions) | Sets required thresholds, human review depth, dataset size, and pre-launch safety or red-team requirements. |
-| Q3 | **What ground truth can you get?** | None · SME time available · Production logs (with or without feedback) | Determines whether you use reference-based or reference-free metrics and synthetic or curated datasets. |
-| Q4 | **What stage are you in?** | Prototype · Pre-launch · Production | Sets your rigor: fast error analysis in prototype, CI gates pre-launch, and online drift monitoring in production. |
-| Q5 | **What is the budget?** | Cost per eval run · latency tolerance for online checks · human-review hours per week | Controls how many LLM-judge calls you run, your online sampling rate, and your suite execution frequency. |
+| Q1 | **What is the architecture?** | • Simple RAG<br>• Agentic RAG with tools<br>• Text-to-SQL<br>• Multi-agent / multi-step workflow<br>• Multi-turn conversational | Determines which components exist and which component evaluations apply (no retriever means no retrieval metrics). |
+| Q2 | **What is the risk level and domain?** | • Low (internal, read-only, advisory)<br>• Medium (customer-facing, reputational)<br>• High (regulated: finance, health, legal, HR, or irreversible actions) | Sets required thresholds, human review depth, dataset size, and pre-launch safety or red-team requirements. |
+| Q3 | **What ground truth can you get?** | • None<br>• SME time available<br>• Production logs (with or without feedback) | Determines whether you use reference-based or reference-free metrics and synthetic or curated datasets. |
+| Q4 | **What stage are you in?** | • Prototype<br>• Pre-launch<br>• Production | Sets your rigor: fast error analysis in prototype, CI gates pre-launch, and online drift monitoring in production. |
+| Q5 | **What is the budget?** | • Cost per eval run<br>• Latency tolerance for online checks<br>• Human-review hours per week | Controls how many LLM-judge calls you run, your online sampling rate, and your suite execution frequency. |
 
-### Q1 — Architecture archetypes used in this doc
+### Q1: Architecture archetypes used in this doc
 
 | ID | Archetype | Components that can fail independently |
 |---|---|---|
@@ -61,7 +66,7 @@ Answer these five questions before you select any metric.
 | **A4** | Multi-agent or multi-step workflow (orchestrator + sub-agents, or long plans) | orchestrator routing, each sub-agent, hand-offs, state/memory, termination |
 | **A5** | Multi-turn conversational assistant | everything above **plus** context carry-over, coreference, clarification behaviour, conversation-level goal completion |
 
-### Q2 — Risk tier quick classifier
+### Q2: Risk tier quick classifier
 
 Use the [guardrail selection doc](./02-guardrail-selection-decision-tree.md) for a full security risk assessment. For evaluation planning, use this three-tier classifier:
 
@@ -73,7 +78,7 @@ Use the [guardrail selection doc](./02-guardrail-selection-decision-tree.md) for
 
 Treat these dataset sizes as practical heuristics, not statistical guarantees. See §9.3 to calculate exact sample sizes.
 
-### Q3 — Ground-truth availability
+### Q3: Ground-truth availability
 
 | Situation | What you can do |
 |---|---|
@@ -81,7 +86,7 @@ Treat these dataset sizes as practical heuristics, not statistical guarantees. S
 | **SME time available** | Collect golden Q&A pairs, reference chunk IDs, gold SQL, expected tool calls, and human labels to align LLM judges |
 | **Production logs** | Mine real query distributions, implicit feedback (thumbs, re-asks, copies), and production failures to expand your golden set |
 
-### Q4/Q5 — Stage and budget
+### Q4/Q5: Stage and budget
 
 Apply your product stage and budget at the end as filters (§9, §10). They rarely change *which* evaluations you need. Instead, they control *how many examples you run, how often you run them, and which judge model you choose*.
 
@@ -129,40 +134,50 @@ Follow these rules when reading the tree:
 Use this checklist during planning meetings when you want fast decisions without a diagram.
 
 **"Have you read 30+ traces and recorded what goes wrong?"**
-→ No: Stop and read 30 traces first. Any metric you pick before error analysis is a guess.
-→ Yes: Continue using your written failure taxonomy.
+
+- → No: Stop and read 30 traces first. Any metric you pick before error analysis is a guess.
+- → Yes: Continue using your written failure taxonomy.
 
 **"Do you have reference answers?"**
-→ Yes, SME-written: Use reference-based answer correctness (via LLM judge or semantic match) as your headline end-to-end metric.
-→ No, but you have 2–4 hours of SME time: Collect 30–50 reference answers for your highest-risk intents first, and use reference-free metrics elsewhere.
-→ No, and no SMEs exist: Use reference-free metrics (faithfulness, answer relevancy) and synthetic Q&A from your corpus as directional signals.
+
+- → Yes, SME-written: Use reference-based answer correctness (via LLM judge or semantic match) as your headline end-to-end metric.
+- → No, but you have 2–4 hours of SME time: Collect 30–50 reference answers for your highest-risk intents first, and use reference-free metrics elsewhere.
+- → No, and no SMEs exist: Use reference-free metrics (faithfulness, answer relevancy) and synthetic Q&A from your corpus as directional signals.
 
 **"Do you know which documents *should* be retrieved for each question?"**
-→ Yes: Use standard IR metrics (`recall@k`, `MRR`, `nDCG`). They are cheap, deterministic, and fast.
-→ No: Use reference-free LLM judges for context relevance, or label relevant chunks for 50 queries yourself.
+
+- → Yes: Use standard IR metrics (`recall@k`, `MRR`, `nDCG`). They are cheap, deterministic, and fast.
+- → No: Use reference-free LLM judges for context relevance, or label relevant chunks for 50 queries yourself.
 
 **"Is retrieval the bottleneck?"**
-→ Check failed answers to see whether the retrieved context contained the needed fact. If fewer than ~70% of failures contained the needed fact, fix retrieval before tuning generation prompts.
-→ If the retrieved context contained the fact but the answer failed, focus on generation evaluations (faithfulness, reasoning, instruction adherence).
+
+- → Check failed answers to see whether the retrieved context contained the needed fact. If fewer than ~70% of failures contained the needed fact, fix retrieval before tuning generation prompts.
+- → If the retrieved context contained the fact but the answer failed, focus on generation evaluations (faithfulness, reasoning, instruction adherence).
 
 **"Is the output structured or verifiable by code?"** (JSON, SQL, tool calls, numbers, citation IDs)
-→ Yes: Write deterministic checks first (schema validation, SQL execution, exact or numeric match, regex). They are free, fast, and never drift.
-→ No (free text): Use an LLM judge with a binary, criterion-specific rubric validated against human labels.
+
+- → Yes: Write deterministic checks first (schema validation, SQL execution, exact or numeric match, regex). They are free, fast, and never drift.
+- → No (free text): Use an LLM judge with a binary, criterion-specific rubric validated against human labels.
 
 **"Does the agent call tools?"**
-→ Yes: Evaluate tool selection and argument correctness per step, and evaluate goal completion per run. Test side-effecting tools in a sandbox and check for unauthorized actions.
+
+- → Yes: Evaluate tool selection and argument correctness per step, and evaluate goal completion per run. Test side-effecting tools in a sandbox and check for unauthorized actions.
 
 **"Does it generate SQL?"**
-→ Yes: Use execution accuracy (comparing result sets against gold SQL) as your primary metric. Use string or AST similarity only as a secondary diagnostic.
+
+- → Yes: Use execution accuracy (comparing result sets against gold SQL) as your primary metric. Use string or AST similarity only as a secondary diagnostic.
 
 **"Is it multi-turn?"**
-→ Yes: Build conversation-level datasets using scripted or simulated users and measure session goal completion. Single-turn evaluations miss context-loss failures.
+
+- → Yes: Build conversation-level datasets using scripted or simulated users and measure session goal completion. Single-turn evaluations miss context-loss failures.
 
 **"Could a bad answer harm someone, leak data, or create legal exposure?"**
-→ Yes: Add safety, PII, and policy evaluations alongside adversarial red teaming, and require human review before launch.
+
+- → Yes: Add safety, PII, and policy evaluations alongside adversarial red teaming, and require human review before launch.
 
 **"Are you live?"**
-→ Yes: Run deterministic checks on 100% of traffic, sample reference-free LLM judges, collect user feedback, and promote failed traces into your golden set.
+
+- → Yes: Run deterministic checks on 100% of traffic, sample reference-free LLM judges, collect user feedback, and promote failed traces into your golden set.
 
 ---
 
@@ -303,10 +318,18 @@ Layer the archetype-specific stacks below on top of this universal core.
 
 - **Must-have**: Minimum viable evaluation suite required before launch.
 - **Nice-to-have**: Secondary metrics to add when error analysis or risk tier requires them.
-- **Method**: `Code` = deterministic check · `Stat` = statistical/IR metric · `Judge` = LLM judge · `Clf` = classifier · `Human` = SME review.
-- **Mode**: `Off` = offline dataset · `On` = online production traffic · `Both` = offline and online.
+- **Method**:
+    - `Code` = deterministic check
+    - `Stat` = statistical/IR metric
+    - `Judge` = LLM judge
+    - `Clf` = classifier
+    - `Human` = SME review
+- **Mode**:
+    - `Off` = offline dataset
+    - `On` = online production traffic
+    - `Both` = offline and online
 
-### 8.1 A1 — Simple RAG chatbot
+### 8.1 A1: Simple RAG chatbot
 
 | Priority | Eval | Metric | Method | Dataset type | Mode | Detail |
 |---|---|---|---|---|---|---|
@@ -324,6 +347,7 @@ Layer the archetype-specific stacks below on top of this universal core.
 **Minimum viable suite (A1):** Build a 50-example golden Q&A set (including ~10 unanswerable queries) and track four metrics: answer correctness, faithfulness, `recall@5`, and refusal correctness.
 
 **Build in this order:**
+
 1. Instrument traces, run 30 hand-written queries, and complete error analysis.
 2. Measure `recall@k` on 50 labelled queries because retrieval is usually the biggest RAG bottleneck.
 3. Add a validated, reference-based answer correctness judge on your golden set.
@@ -331,7 +355,7 @@ Layer the archetype-specific stacks below on top of this universal core.
 5. Add an unanswerable and out-of-scope test slice.
 6. Add citation checks, `nDCG`, and tone classifiers if error analysis reveals those issues.
 
-### 8.2 A2 — Agentic RAG with tools
+### 8.2 A2: Agentic RAG with tools
 
 | Priority | Eval | Metric | Method | Dataset type | Mode | Detail |
 |---|---|---|---|---|---|---|
@@ -346,11 +370,12 @@ Layer the archetype-specific stacks below on top of this universal core.
 | Nice | Retrieval decision | retrieved when needed, skipped when not | Judge or Code | Labelled need-to-retrieve | Off | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
 | Nice | Instruction adherence | follows system-prompt rules | Judge | Rule-targeted cases | Both | [Instruction adherence](../02-offline-evals/06-instruction-and-citation-adherence.md) |
 | Nice | Error recovery | recovers from tool error/timeouts | Code + Judge | Fault-injected scenarios | Off | [Agent & trajectory](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) |
-| Online | Tool error rate, step count, cost per task | — | Code | Production | On | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
+| Online | Tool error rate, step count, cost per task | Aggregate rates | Code | Production | On | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
 
 **Minimum viable suite (A2):** Create 50–100 scenarios with expected tool calls and success criteria. Measure task completion, tool selection, argument correctness, unauthorized-action rate, and answer correctness.
 
 **Build in this order:**
+
 1. Record traces with every tool span and group failures by step (plan, retrieve, select tool, pass arguments, synthesize).
 2. Add deterministic tool selection and argument schema checks.
 3. Measure task completion on goal-based scenarios using sandbox state checks or a validated judge.
@@ -360,7 +385,7 @@ Layer the archetype-specific stacks below on top of this universal core.
 
 > **Do not overfit to reference trajectories.** Agents often can solve a task through multiple valid paths. Grade the final outcome (sandbox state or final answer) and hard constraints (zero forbidden tool calls, `steps <= N`) instead of requiring an exact step sequence.
 
-### 8.3 A3 — Text-to-SQL agent
+### 8.3 A3: Text-to-SQL agent
 
 | Priority | Eval | Metric | Method | Dataset type | Mode | Detail |
 |---|---|---|---|---|---|---|
@@ -373,11 +398,12 @@ Layer the archetype-specific stacks below on top of this universal core.
 | Nice | SQL similarity | exact/component/AST match | Code | Q + gold SQL | Off | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
 | Nice | Ambiguity handling | asks clarification when the question is ambiguous | Judge | Ambiguous subset | Off | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
 | Nice | Query cost/efficiency | rows scanned, runtime | Code | Any | Both | [Text-to-SQL](../02-offline-evals/05-text-to-sql-evals.md) |
-| Online | Execution error rate, empty-result rate, user re-asks | — | Code | Production | On | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
+| Online | Execution error rate, empty-result rate, user re-asks | Aggregate rates | Code | Production | On | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
 
 **Minimum viable suite (A3):** Build 50–100 question and gold-SQL pairs against a frozen database snapshot. Measure execution accuracy, SQL validity, read-only compliance, role permissions, and answer-to-result faithfulness.
 
 **Build in this order:**
+
 1. Freeze a test database snapshot so execution accuracy stays reproducible across runs.
 2. Collect 50 analyst-verified gold SQL pairs covering joins, aggregations, date math, and domain metric definitions.
 3. Implement execution accuracy and SQL syntax/execution validity checks.
@@ -387,7 +413,7 @@ Layer the archetype-specific stacks below on top of this universal core.
 
 > **Avoid execution accuracy pitfalls:** Normalize column order, row order, and floating-point precision when comparing SQL result sets. Seed your test snapshot with edge-case rows so flawed queries do not return the right result by accident.
 
-### 8.4 A4 — Multi-agent / multi-step workflow
+### 8.4 A4: Multi-agent / multi-step workflow
 
 | Priority | Eval | Metric | Method | Dataset type | Mode | Detail |
 |---|---|---|---|---|---|---|
@@ -403,6 +429,7 @@ Layer the archetype-specific stacks below on top of this universal core.
 **Minimum viable suite (A4):** Measure end-to-end task success, orchestrator routing accuracy, loop/termination rates, and the core A1/A2/A3 suite for each critical sub-agent.
 
 **Build in this order:**
+
 1. Evaluate orchestrator routing accuracy first because bad routing breaks the entire workflow.
 2. Add end-to-end task success and loop/termination checks.
 3. Add component evaluations for your weakest sub-agent, followed by hand-off fidelity checks.
@@ -410,7 +437,7 @@ Layer the archetype-specific stacks below on top of this universal core.
 
 > **Question whether you need multi-agent complexity.** A single agent with well-designed tools is much easier to evaluate and debug. See Anthropic's [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents).
 
-### 8.5 A5 — Multi-turn conversational assistant
+### 8.5 A5: Multi-turn conversational assistant
 
 | Priority | Eval | Metric | Method | Dataset type | Mode | Detail |
 |---|---|---|---|---|---|---|
@@ -425,6 +452,7 @@ Layer the archetype-specific stacks below on top of this universal core.
 **Minimum viable suite (A5):** Run 30–50 multi-turn scripts or simulated user personas and measure conversation goal completion, context retention, instruction persistence, and per-turn archetype metrics.
 
 **Build in this order:**
+
 1. Evaluate individual turns extracted from real sessions first because single-turn checks are fastest to build.
 2. Add scripted multi-turn conversations that test observed context-loss or contradiction failures.
 3. Add simulated user personas to scale multi-turn testing before major releases.
@@ -541,9 +569,13 @@ See the [implementation playbook](./04-implementation-playbook.md) for detailed 
 
 ## Further reading
 
-- Hamel Husain — [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/), [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/), [AI Evals FAQ](https://hamel.dev/blog/posts/evals-faq/)
-- Eugene Yan — [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
-- Anthropic — [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), [Define success criteria and build evaluations](https://docs.anthropic.com/en/docs/test-and-evaluate/develop-tests)
-- Shankar et al. — [Who Validates the Validators? (arXiv:2404.12272)](https://arxiv.org/abs/2404.12272)
-- Es et al. — [RAGAS: Automated Evaluation of Retrieval Augmented Generation (arXiv:2309.15217)](https://arxiv.org/abs/2309.15217)
-- In this repo: [Metric cheatsheet](./03-metric-cheatsheet.md) · [Offline evals](../02-offline-evals/README.md) · [Online evals](../03-online-evals-and-observability/01-online-evals.md) · [Datasets](../01-datasets/README.md)
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/), [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/), [AI Evals FAQ](https://hamel.dev/blog/posts/evals-faq/)
+- Eugene Yan, [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
+- Anthropic, [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), [Define success criteria and build evaluations](https://docs.anthropic.com/en/docs/test-and-evaluate/develop-tests)
+- Shankar et al., [Who Validates the Validators? (arXiv:2404.12272)](https://arxiv.org/abs/2404.12272)
+- Es et al., [RAGAS: Automated Evaluation of Retrieval Augmented Generation (arXiv:2309.15217)](https://arxiv.org/abs/2309.15217)
+- **In this repo:**
+    - [Metric cheatsheet](./03-metric-cheatsheet.md)
+    - [Offline evals](../02-offline-evals/README.md)
+    - [Online evals](../03-online-evals-and-observability/01-online-evals.md)
+    - [Datasets](../01-datasets/README.md)

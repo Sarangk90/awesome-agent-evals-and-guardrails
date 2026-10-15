@@ -1,14 +1,22 @@
 # Input Guardrails
 
 > **TL;DR**
+>
 > - **Screen user inputs before retrieval or generation.** Input guardrails inspect user messages and attachments before they reach your retriever, tools, or generator.
 > - **Normalize and enforce hard limits first.** Strip invisible characters, fold confusables, and apply length and rate limits before running expensive detectors.
 > - **Run semantic and pattern detectors in parallel.** Screen for prompt injection, scope, PII, secrets, toxicity, SQL or code, and unsafe URLs or files.
 > - **Test for over-blocking.** Maintain a should-allow dataset of benign lookalike queries so security checks do not block legitimate work.
 
-**You will learn:** Input guardrail ordering · Unicode normalization · Length, rate, and language limits · Prompt injection and jailbreak detection · Topic scope · PII and secrets redaction · Toxicity, SQL/code, and URL/file checks  
-**Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md)  
-**Related:** [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md), [Output guardrails](./04-output-guardrails.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md), [Threat model / OWASP](./07-threat-model-owasp.md), [Generation quality & safety evals](../02-offline-evals/03-generation-quality-and-safety-evals.md)
+- **You will learn:**
+    - Input guardrail ordering
+    - Unicode normalization
+    - Length, rate, and language limits
+    - Prompt injection and jailbreak detection
+    - Topic scope
+    - PII and secrets redaction
+    - Toxicity, SQL/code, and URL/file checks
+- **Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md)
+- **Related:** [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md), [Output guardrails](./04-output-guardrails.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md), [Threat model / OWASP](./07-threat-model-owasp.md), [Generation quality & safety evals](../02-offline-evals/03-generation-quality-and-safety-evals.md)
 
 ---
 
@@ -216,7 +224,7 @@ def injection_heuristic(text: str) -> list[str]:
 ```
 
 ```python
-# Classifier rail — illustrative, check the current model card and transformers API.
+# Classifier rail: illustrative, check the current model card and transformers API.
 from transformers import pipeline
 
 clf = pipeline("text-classification", model="meta-llama/Llama-Prompt-Guard-2-86M")
@@ -289,7 +297,7 @@ def scope_check(query_vec: np.ndarray, intent_vecs: dict[str, np.ndarray],
 
 ## 7. PII detection and redaction
 
-**What it does.** Detect personal data in user messages — names, emails, phone numbers, government IDs (SSN, passport), credit cards, IBANs, addresses, birth dates, and employee IDs. Control whether that data can reach your LLM provider, logs, retriever, and tools.
+**What it does.** Detect personal data in user messages: names, emails, phone numbers, government IDs (SSN, passport), credit cards, IBANs, addresses, birth dates, and employee IDs. Control whether that data can reach your LLM provider, logs, retriever, and tools.
 
 **Why it matters.** Privacy regulations (GDPR, HIPAA), model-provider terms, and internal retention policies restrict how personal data flows. In our enterprise assistant, an HR partner might paste an employee complaint containing names and phone numbers.
 
@@ -311,7 +319,7 @@ def scope_check(query_vec: np.ndarray, intent_vecs: dict[str, np.ndarray],
 | **Block** | "Please don't paste full card numbers here." | The data class is strictly forbidden in chat (e.g., full payment cards or PHI) |
 
 ```python
-# Presidio — APIs as documented in presidio-analyzer / presidio-anonymizer; verify versions.
+# Presidio: APIs as documented in presidio-analyzer / presidio-anonymizer; verify versions.
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
@@ -364,7 +372,7 @@ def regex_redact(text: str) -> str:
 - **High-entropy string detection:** flag high-entropy strings that appear next to keywords like `secret`, `token`, or `api_key`.
 - **Maintained open-source rule sets:** reuse rules from [detect-secrets](https://github.com/Yelp/detect-secrets) or [gitleaks](https://github.com/gitleaks/gitleaks) instead of maintaining custom regexes from scratch.
 
-**Action.** **Modify** (redact the secret before it reaches the LLM, logs, or tools) and display a rotation warning: "It looks like you pasted a credential. I've removed it — please rotate this key." Flag high-value production credentials to your security team.
+**Action.** **Modify** (redact the secret before it reaches the LLM, logs, or tools) and display a rotation warning: "It looks like you pasted a credential. I've removed it; please rotate this key." Flag high-value production credentials to your security team.
 
 **False-positive risks.** Git commit SHAs, SHA-256 hashes, UUIDs, Base64 data URIs, and official example keys (`AKIAIOSFODNN7EXAMPLE`) look like secrets to raw entropy scanners. Require keyword context and maintain an allowlist of known documentation examples.
 
@@ -426,11 +434,11 @@ def find_secrets(text: str) -> list[str]:
 | **Regex** | Match statement keywords at line starts, markdown code fences, and classic SQL-injection idioms | Fast and effective for injection idioms, but causes false positives on prose containing "select", "update", or "drop" |
 | **Classifier** | Run a small classifier trained to distinguish SQL/code from natural language | Helpful when users frequently mix prose and unformatted query fragments |
 
-**Action — make it a policy decision, not just a detector decision:**
+**Action (make it a policy decision, not just a detector decision):**
 
 | Situation | Text-to-SQL pipeline | Doc Q&A pipeline |
 |---|---|---|
-| User SQL + intent to *execute* | **Block** with "Describe what you need and I'll write the query" (or allow only for `analyst` roles through full tool-layer SQL checks — [05](./05-tool-and-action-guardrails.md)) | Block (no SQL execution in this pipeline) |
+| User SQL + intent to *execute* | **Block** with "Describe what you need and I'll write the query" (or allow only for `analyst` roles through full tool-layer SQL checks; see [05](./05-tool-and-action-guardrails.md)) | Block (no SQL execution in this pipeline) |
 | User SQL + intent to *explain/optimize* | **Allow** and route to an explain-only flow with no database execution tool | Allow |
 | Injection idioms in a natural-language question | **Block** + flag | Flag |
 | DDL/DML (`DROP`, `DELETE`, `UPDATE`, `GRANT`) in any form | **Block** | Flag |
@@ -560,12 +568,16 @@ Re-validate the resolved IP at fetch time and on every HTTP redirect so attacker
 
 ## Further reading
 
-- Greshake et al. — [Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection](https://arxiv.org/abs/2302.12173)
-- Liu et al. — [Formalizing and Benchmarking Prompt Injection Attacks and Defenses](https://arxiv.org/abs/2310.12815)
-- Zou et al. — [Universal and Transferable Adversarial Attacks on Aligned Language Models](https://arxiv.org/abs/2307.15043)
-- Wallace et al. — [The Instruction Hierarchy: Training LLMs to Prioritize Privileged Instructions](https://arxiv.org/abs/2404.13208)
-- OWASP — [LLM01: Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/) · [LLM Prompt Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)
-- Meta — [PurpleLlama (Llama Prompt Guard 2, Llama Guard)](https://github.com/meta-llama/PurpleLlama)
+- Greshake et al., [Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection](https://arxiv.org/abs/2302.12173)
+- Liu et al., [Formalizing and Benchmarking Prompt Injection Attacks and Defenses](https://arxiv.org/abs/2310.12815)
+- Zou et al., [Universal and Transferable Adversarial Attacks on Aligned Language Models](https://arxiv.org/abs/2307.15043)
+- Wallace et al., [The Instruction Hierarchy: Training LLMs to Prioritize Privileged Instructions](https://arxiv.org/abs/2404.13208)
+- OWASP, [LLM01: Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/) · [LLM Prompt Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)
+- Meta, [PurpleLlama (Llama Prompt Guard 2, Llama Guard)](https://github.com/meta-llama/PurpleLlama)
 - [Microsoft Presidio](https://microsoft.github.io/presidio/) · [Yelp detect-secrets](https://github.com/Yelp/detect-secrets) · [gitleaks](https://github.com/gitleaks/gitleaks) · [sqlglot](https://github.com/tobymao/sqlglot) · [LLM Guard](https://github.com/protectai/llm-guard) (archived)
-- Unicode — [UTS #39: Unicode Security Mechanisms (confusables)](https://www.unicode.org/reports/tr39/)
-- In this repo: [Guardrails architecture](./01-guardrails-architecture.md) · [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md) · [Tool & action guardrails](./05-tool-and-action-guardrails.md) · [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
+- Unicode, [UTS #39: Unicode Security Mechanisms (confusables)](https://www.unicode.org/reports/tr39/)
+- **In this repo:**
+    - [Guardrails architecture](./01-guardrails-architecture.md)
+    - [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md)
+    - [Tool & action guardrails](./05-tool-and-action-guardrails.md)
+    - [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)

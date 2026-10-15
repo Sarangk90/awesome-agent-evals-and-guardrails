@@ -1,14 +1,19 @@
 # Eval and Observability Tools: The Landscape (October 2026 snapshot)
 
 > **TL;DR**
+>
 > - **Separate your system of record from metric libraries.** Pick one platform for traces, datasets, and experiments, and use swappable libraries for metrics.
 > - **Instrument once with OpenTelemetry.** Use OpenInference or OTel GenAI semantic conventions so you can switch backends without rewriting application code.
 > - **Calibrate every judge on your own data.** Two tools with "faithfulness" metrics use different prompts and scales, so validate against human labels.
 > - **Write domain metrics as deterministic code.** Check SQL execution accuracy, RBAC leakage, and tool-argument schemas directly in code.
 
-**You will learn:** What each major eval tool does best · Which metrics each tool ships · Capability matrix across 8 dimensions · How to run a bake-off  
-**Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md)  
-**Related:** [Guardrail tools](./02-guardrail-tools.md), [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
+- **You will learn:**
+    - What each major eval tool does best
+    - Which metrics each tool ships
+    - Capability matrix across 8 dimensions
+    - How to run a bake-off
+- **Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md)
+- **Related:** [Guardrail tools](./02-guardrail-tools.md), [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
 
 ---
 
@@ -159,7 +164,7 @@ Each card covers six fields: **Link · Type/License · Strengths · Notable metr
 | **Best for** | Running scenario-based multi-turn agent tests and automated vulnerability scans in one Python package. |
 | **Watch-outs** | Maintainers no longer update v2, and most older blog posts still show v2 APIs. |
 
-### lm-evaluation-harness (EleutherAI) — for model benchmarking context
+### lm-evaluation-harness (EleutherAI): for model benchmarking context
 
 | Field | Details |
 |---|---|
@@ -286,7 +291,7 @@ These platforms act as candidate **systems of record**. They store traces, datas
 | **Best for** | Self-hosting a specialized open-weight judge model for RAG faithfulness or rubric checks. |
 | **Watch-outs** | **Status:** In October 2026, the Patronus homepage shifted focus to RL environments and benchmarks. Verify whether the commercial eval platform remains supported before adopting it. |
 
-### Humanloop — sunset
+### Humanloop (sunset)
 
 | Field | Details |
 |---|---|
@@ -310,7 +315,7 @@ These platforms act as candidate **systems of record**. They store traces, datas
 
 Choose a cloud-native service when your organization already standardizes on that cloud and wants unified IAM, private networking, billing, and model catalog access. Expect tighter coupling to that cloud's regions and models.
 
-### Microsoft Foundry (formerly Azure AI Foundry) — evaluations & observability
+### Microsoft Foundry (formerly Azure AI Foundry): evaluations & observability
 
 | Field | Details |
 |---|---|
@@ -347,7 +352,14 @@ Choose a cloud-native service when your organization already standardizes on tha
 
 ## Comparison matrix
 
-**Legend:** ✅ first-class / native · 🟡 partial, via integration, preview, or enterprise-only · ❌ not a primary capability (may exist in limited form) · ❔ not verified — ask the vendor. For libraries, "Self-host" means the library runs entirely in your environment, even if it calls an external LLM judge API.
+**Legend:**
+
+- ✅ first-class / native
+- 🟡 partial, via integration, preview, or enterprise-only
+- ❌ not a primary capability (may exist in limited form)
+- ❔ not verified (ask the vendor)
+
+For libraries, "Self-host" means the library runs entirely in your environment, even if it calls an external LLM judge API.
 
 > This matrix reflects our assessment of public documentation in **October 2026**. Verify capabilities before you decide.
 
@@ -395,9 +407,9 @@ Different tools use different names and implementations for the same core concep
 | Answer supported by retrieved context | Faithfulness | Faithfulness | Groundedness | RetrievalGroundedness | Groundedness / Groundedness Pro |
 | Answer addresses the question | Response Relevancy | Answer Relevancy | Answer Relevance | RelevanceToQuery | Relevance |
 | Retrieved chunks are relevant | Context Precision | Contextual Precision / Contextual Relevancy | Context Relevance | RetrievalRelevance | Retrieval |
-| Retrieved chunks cover what's needed | Context Recall | Contextual Recall | — | RetrievalSufficiency (closest) | Document Retrieval (needs labels) |
-| Answer matches reference | Factual Correctness | custom G-Eval / correctness-style metrics | — | Correctness | Similarity, F1, Response Completeness |
-| Tool calls correct | Tool Call Accuracy / Tool Call F1 | tool correctness metric | — | ToolCallCorrectness | Tool Call Accuracy |
+| Retrieved chunks cover what's needed | Context Recall | Contextual Recall | N/A | RetrievalSufficiency (closest) | Document Retrieval (needs labels) |
+| Answer matches reference | Factual Correctness | custom G-Eval / correctness-style metrics | N/A | Correctness | Similarity, F1, Response Completeness |
+| Tool calls correct | Tool Call Accuracy / Tool Call F1 | tool correctness metric | N/A | ToolCallCorrectness | Tool Call Accuracy |
 
 See [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md), [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md), and [Agent, tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) for mathematical definitions and formulas.
 
@@ -405,7 +417,7 @@ See [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md), [Ret
 
 ## How to choose
 
-### Step 1 — Decide the system of record first
+### Step 1: Decide the system of record first
 
 Your system of record stores traces, datasets, experiments, and annotations. Because it is the hardest piece to replace, choose your platform first and select metric libraries second.
 
@@ -425,7 +437,7 @@ flowchart TD
     Q3 -->|"Mixed or none"| R8["Shortlist 2-3 of Langfuse, Phoenix or AX, Braintrust, Opik, Confident AI and run a bake-off"]
 ```
 
-### Step 2 — Add libraries for metrics and CI
+### Step 2: Add libraries for metrics and CI
 
 | Need | Good default | Alternatives |
 |---|---|---|
@@ -438,7 +450,7 @@ flowchart TD
 | Base-model selection | lm-evaluation-harness, HELM | Cloud model-evaluation jobs |
 | Red teaming | promptfoo redteam, garak, PyRIT, DeepTeam | See [Guardrail tools](./02-guardrail-tools.md#red-teaming-tools) |
 
-### Step 3 — Rules of thumb
+### Step 3: Rules of thumb
 
 1. **Instrument with OpenTelemetry:** Use OpenInference or OTel GenAI semantic conventions so your traces stay portable across Langfuse, Phoenix, MLflow, Foundry, and AgentCore.
 2. **Own your datasets:** Store golden datasets as JSONL or Parquet in Git or object storage, and treat your eval tool as a synced cache ([Dataset strategy](../01-datasets/01-dataset-strategy.md)).
@@ -448,7 +460,7 @@ flowchart TD
 6. **Run only one system of record:** Avoid splitting traces and datasets across multiple platforms. Use one platform and as many metric libraries as you need.
 7. **Budget judge token costs:** Multiply examples, metrics, judge calls per metric, and token price before you schedule nightly runs.
 
-### Step 4 — Run a bake-off on your own data
+### Step 4: Run a bake-off on your own data
 
 Vendor feature lists look similar on paper, so test how each tool fits your data and workflow. Time-box your bake-off to 1–2 weeks.
 
@@ -518,12 +530,12 @@ flowchart LR
 
 ## Further reading
 
-- [Guardrail tools](./02-guardrail-tools.md) — companion landscape for runtime guardrails, policy engines, and red teaming
-- [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md) — what to record on every trace and span
-- [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md) — experiment design, statistical significance, and CI gates
-- [Implementation playbook](../05-decision-framework/04-implementation-playbook.md) — where tool selection fits in your rollout sequence
-- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) — why error analysis must come before tool selection
-- Eugene Yan, [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/) — how to validate any tool's LLM judge
+- [Guardrail tools](./02-guardrail-tools.md): companion landscape for runtime guardrails, policy engines, and red teaming
+- [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md): what to record on every trace and span
+- [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md): experiment design, statistical significance, and CI gates
+- [Implementation playbook](../05-decision-framework/04-implementation-playbook.md): where tool selection fits in your rollout sequence
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/): why error analysis must come before tool selection
+- Eugene Yan, [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/): how to validate any tool's LLM judge
 - OpenAI, [Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)
 - Anthropic, [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
-- [References](../07-references/README.md) — full curated reading list
+- [References](../07-references/README.md): full curated reading list

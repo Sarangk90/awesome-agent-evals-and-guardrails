@@ -1,14 +1,21 @@
 # Retrieval and Context Guardrails
 
 > **TL;DR**
+>
 > - **Treat all retrieved context as untrusted data.** Retrieved chunks, tool outputs, web pages, emails, and memory can leak data, carry injections, or be stale.
 > - **Enforce guardrails at ingestion time.** Capture source provenance, ACLs, sensitivity labels, and timestamps, and scan documents for hidden text and injections.
 > - **Enforce guardrails at query time.** Filter permissions inside the search, gate on reranker relevance with abstention, spotlight untrusted text, and minimize sensitive fields.
 > - **Limit agent actions after reading untrusted data.** Downgrade tool privileges and require human confirmation for writes whenever low-trust content enters the context.
 
-**You will learn:** Why retrieval is a trust boundary · Ingestion guardrails and chunk metadata · Permission-aware retrieval (pre-filter vs post-filter) · Indirect prompt injection and spotlighting · Provenance, freshness, and abstention · Context poisoning and data minimization  
-**Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md), [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md)  
-**Related:** [Access control / RBAC](./06-access-control-rbac.md), [Input guardrails](./02-input-guardrails.md), [Output guardrails](./04-output-guardrails.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)
+- **You will learn:**
+    - Why retrieval is a trust boundary
+    - Ingestion guardrails and chunk metadata
+    - Permission-aware retrieval (pre-filter vs post-filter)
+    - Indirect prompt injection and spotlighting
+    - Provenance, freshness, and abstention
+    - Context poisoning and data minimization
+- **Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md), [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md)
+- **Related:** [Access control / RBAC](./06-access-control-rbac.md), [Input guardrails](./02-input-guardrails.md), [Output guardrails](./04-output-guardrails.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)
 
 ---
 
@@ -176,7 +183,7 @@ Create a **permission-leakage test set** containing `(user_persona, query)` pair
 
 Evaluate your defenses against benchmarks like BIPIA ([Yi et al., 2023](https://arxiv.org/abs/2312.14197), [repo](https://github.com/microsoft/BIPIA)) and AgentDojo ([Debenedetti et al., 2024](https://arxiv.org/abs/2406.13352), [repo](https://github.com/ethz-spylab/agentdojo)).
 
-### 5.1 Scan chunks — at ingestion and at retrieval
+### 5.1 Scan chunks (at ingestion and at retrieval)
 
 - **Scan at ingestion (§3):** run heuristics and classifiers across every chunk and extracted hidden text, quarantine high-scoring chunks, and store `injection_score` in chunk metadata.
 - **Rescan at retrieval:** re-run updated injection classifiers on **low-trust or user-writable chunks** (tickets, comments, emails, web pages) and drop chunks that exceed your threshold.
@@ -323,7 +330,7 @@ def relevance_gate(chunks: list[dict], t_keep: float = 0.5, min_chunks: int = 1)
 
 ## 9. Context poisoning
 
-**Context poisoning** (knowledge corruption) occurs when an attacker plants or edits content in your knowledge base so the generator repeats false facts. [PoisonedRAG (Zou et al., 2024)](https://arxiv.org/abs/2402.07867) shows that injecting just a few crafted passages per target question achieves high attack success rates even against large corpora. Unlike prompt injection, poisoned passages need no imperative instructions — only plausible false facts optimized for retrieval similarity.
+**Context poisoning** (knowledge corruption) occurs when an attacker plants or edits content in your knowledge base so the generator repeats false facts. [PoisonedRAG (Zou et al., 2024)](https://arxiv.org/abs/2402.07867) shows that injecting just a few crafted passages per target question achieves high attack success rates even against large corpora. Unlike prompt injection, poisoned passages need no imperative instructions, only plausible false facts optimized for retrieval similarity.
 
 Common enterprise poisoning vectors include:
 
@@ -406,14 +413,18 @@ In production, monitor your abstention rate, low-trust citation share, cited doc
 
 ## Further reading
 
-- Hines et al. — [Defending Against Indirect Prompt Injection Attacks With Spotlighting (arXiv 2403.14720)](https://arxiv.org/abs/2403.14720)
-- Greshake et al. — [Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection](https://arxiv.org/abs/2302.12173)
-- Zou et al. — [PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented Generation of Large Language Models](https://arxiv.org/abs/2402.07867)
-- Yi et al. — [Benchmarking and Defending Against Indirect Prompt Injection Attacks on Large Language Models (BIPIA)](https://arxiv.org/abs/2312.14197)
-- Debenedetti et al. — [AgentDojo: A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for LLM Agents](https://arxiv.org/abs/2406.13352)
-- Wallace et al. — [The Instruction Hierarchy: Training LLMs to Prioritize Privileged Instructions](https://arxiv.org/abs/2404.13208)
-- Chen et al. — [StruQ: Defending Against Prompt Injection with Structured Queries](https://arxiv.org/abs/2402.06363)
-- Debenedetti et al. — [Defeating Prompt Injections by Design (CaMeL)](https://arxiv.org/abs/2503.18813) · Beurer-Kellner et al. — [Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837)
-- Simon Willison — [The Dual LLM pattern for building AI assistants that can resist prompt injection](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/)
-- Microsoft — [Security filters for trimming results in Azure AI Search](https://learn.microsoft.com/en-us/azure/search/search-security-trimming-for-azure-search)
-- In this repo: [Access control / RBAC](./06-access-control-rbac.md) · [Tool & action guardrails](./05-tool-and-action-guardrails.md) · [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md) · [Threat model / OWASP](./07-threat-model-owasp.md)
+- Hines et al., [Defending Against Indirect Prompt Injection Attacks With Spotlighting (arXiv 2403.14720)](https://arxiv.org/abs/2403.14720)
+- Greshake et al., [Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection](https://arxiv.org/abs/2302.12173)
+- Zou et al., [PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented Generation of Large Language Models](https://arxiv.org/abs/2402.07867)
+- Yi et al., [Benchmarking and Defending Against Indirect Prompt Injection Attacks on Large Language Models (BIPIA)](https://arxiv.org/abs/2312.14197)
+- Debenedetti et al., [AgentDojo: A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for LLM Agents](https://arxiv.org/abs/2406.13352)
+- Wallace et al., [The Instruction Hierarchy: Training LLMs to Prioritize Privileged Instructions](https://arxiv.org/abs/2404.13208)
+- Chen et al., [StruQ: Defending Against Prompt Injection with Structured Queries](https://arxiv.org/abs/2402.06363)
+- Debenedetti et al., [Defeating Prompt Injections by Design (CaMeL)](https://arxiv.org/abs/2503.18813) · Beurer-Kellner et al., [Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837)
+- Simon Willison, [The Dual LLM pattern for building AI assistants that can resist prompt injection](https://simonwillison.net/2023/Apr/25/dual-llm-pattern/)
+- Microsoft, [Security filters for trimming results in Azure AI Search](https://learn.microsoft.com/en-us/azure/search/search-security-trimming-for-azure-search)
+- **In this repo:**
+    - [Access control / RBAC](./06-access-control-rbac.md)
+    - [Tool & action guardrails](./05-tool-and-action-guardrails.md)
+    - [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md)
+    - [Threat model / OWASP](./07-threat-model-owasp.md)

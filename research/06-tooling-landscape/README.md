@@ -1,6 +1,7 @@
 # 06 · Tooling Landscape
 
 > **TL;DR**
+>
 > - **Map concepts to real products.** Connect datasets, metrics, judges, and guardrails to open-source libraries, platforms, and cloud services.
 > - **Treat this guide as a dated October 2026 snapshot.** Re-verify ownership, license, maintenance status, and pricing before you adopt any tool.
 > - **Avoid vendor lock-in.** Instrument traces with OpenTelemetry, store datasets in your repo, and wrap guardrails behind your own interface.

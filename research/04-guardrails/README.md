@@ -1,13 +1,18 @@
 # 04 · Guardrails
 
 > **TL;DR**
+>
 > - **Enforce runtime safety per request.** Guardrails inspect inputs, retrieved context, tool calls, and outputs to allow, block, modify, escalate, or flag them.
 > - **Layer independent defenses.** Combine deterministic access controls, fast rules, ML classifiers, and targeted LLM checks across the request path.
 > - **Evaluate every guardrail like a classifier.** Measure precision, recall, false-positive rate, latency, and error cost before enforcing blocks in production.
 
-**You will learn:** Guardrail architecture · Input, retrieval, tool, and output rails · Deterministic RBAC · OWASP threat modeling  
-**Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [The evals and guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md)  
-**Related:** [Offline evals](../02-offline-evals/README.md), [Online evals & observability](../03-online-evals-and-observability/README.md), [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md), [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
+- **You will learn:**
+    - Guardrail architecture
+    - Input, retrieval, tool, and output rails
+    - Deterministic RBAC
+    - OWASP threat modeling
+- **Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [The evals and guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md)
+- **Related:** [Offline evals](../02-offline-evals/README.md), [Online evals & observability](../03-online-evals-and-observability/README.md), [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md), [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
 
 ---
 

@@ -1,14 +1,19 @@
 # Implementation Playbook: From Zero to Production
 
 > **TL;DR**
+>
 > - **Execute in seven sequential phases.** Progress from defining success and instrumenting traces to CI gates, online monitoring, and a data flywheel.
 > - **Start with error analysis on real traces.** Inspect 30–100 examples to identify your top failure modes before you build metric dashboards.
 > - **Gate every release in CI.** Enforce zero-failure hard safety gates and regression thresholds across code, prompt, model, and index changes.
 > - **Turn production failures into tests.** Sample live traffic, review traces weekly, and feed failure cases back into your golden dataset.
 
-**You will learn:** A seven-phase implementation plan with checklists · Team roles and RACI matrix · Pre-launch readiness criteria · Common evaluation anti-patterns to avoid  
-**Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Eval selection](./01-eval-selection-decision-tree.md), [Guardrail selection](./02-guardrail-selection-decision-tree.md)  
-**Related:** [Maturity model](./05-maturity-model.md), [Metric cheatsheet](./03-metric-cheatsheet.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
+- **You will learn:**
+    - A seven-phase implementation plan with checklists
+    - Team roles and RACI matrix
+    - Pre-launch readiness criteria
+    - Common evaluation anti-patterns to avoid
+- **Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Eval selection](./01-eval-selection-decision-tree.md), [Guardrail selection](./02-guardrail-selection-decision-tree.md)
+- **Related:** [Maturity model](./05-maturity-model.md), [Metric cheatsheet](./03-metric-cheatsheet.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
 
 ---
 
@@ -75,7 +80,7 @@ In the table below, `R` = Responsible, `A` = Accountable, `C` = Consulted, and `
 
 ---
 
-## Phase 0 — Define success and risks
+## Phase 0: Define success and risks
 
 **Goal:** Agree on what "good" and "unacceptable" mean *before* you build any metrics.
 
@@ -112,7 +117,7 @@ In the table below, `R` = Responsible, `A` = Accountable, `C` = Consulted, and `
 
 ---
 
-## Phase 1 — Instrument tracing, build first golden set, do error analysis
+## Phase 1: Instrument tracing, build first golden set, do error analysis
 
 **Goal:** Observe real system failures, group them into categories, and build your first golden dataset.
 
@@ -178,7 +183,7 @@ for cat, n in Counter(n["category"] for n in notes).most_common():
 
 ---
 
-## Phase 2 — Component and E2E offline evals; align LLM judges
+## Phase 2: Component and E2E offline evals; align LLM judges
 
 **Goal:** Build a repeatable offline evaluation suite that measures your observed failure modes with validated judges.
 
@@ -226,7 +231,7 @@ Follow the practices in [running offline experiments](../02-offline-evals/08-run
 
 ---
 
-## Phase 3 — Guardrails and red teaming
+## Phase 3: Guardrails and red teaming
 
 **Goal:** Block unacceptable behavior at runtime and verify your defenses with adversarial testing. You can run Phase 3 in parallel with Phase 2.
 
@@ -270,7 +275,7 @@ Follow the adversarial testing workflow in [threat model & OWASP](../04-guardrai
 
 ---
 
-## Phase 4 — CI eval gates and launch readiness
+## Phase 4: CI eval gates and launch readiness
 
 **Goal:** Block regressions automatically in CI and make an explicit, evidence-based launch decision.
 
@@ -347,7 +352,7 @@ Run **model version upgrades, embedding updates, and search index rebuilds** thr
 
 ---
 
-## Phase 5 — Production: online evals, monitoring, feedback
+## Phase 5: Production: online evals, monitoring, feedback
 
 **Goal:** Detect quality or safety regressions within hours rather than weeks. See [online eval pipelines](../03-online-evals-and-observability/01-online-evals.md), [monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md), and [user feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md).
 
@@ -387,7 +392,7 @@ Include the product owner, AI engineer, and domain SME weekly (plus Security mon
 
 ---
 
-## Phase 6 — Continuous improvement (the flywheel)
+## Phase 6: Continuous improvement (the flywheel)
 
 **Goal:** Use production traces to continuously improve your datasets, evaluations, guardrails, and product. See [production data flywheel](../01-datasets/04-production-data-flywheel.md).
 
@@ -472,10 +477,14 @@ Use this 90-day roadmap when starting from a working prototype of our enterprise
 
 ## Further reading
 
-- Hamel Husain — [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/), [Using LLM-as-a-Judge For Evaluation](https://hamel.dev/blog/posts/llm-judge/), [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/), [AI Evals FAQ](https://hamel.dev/blog/posts/evals-faq/)
-- Shankar et al. — [Who Validates the Validators? (arXiv:2404.12272)](https://arxiv.org/abs/2404.12272)
-- Anthropic — [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)
-- Martin Fowler / Thoughtworks — [Engineering Practices for LLM Application Development](https://martinfowler.com/articles/engineering-practices-llm.html)
-- Microsoft — [Lessons From Red Teaming 100 Generative AI Products (arXiv:2501.07238)](https://arxiv.org/abs/2501.07238)
-- NIST — [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)
-- In this repo: [Datasets](../01-datasets/README.md) · [Offline evals](../02-offline-evals/README.md) · [Online evals](../03-online-evals-and-observability/README.md) · [Guardrails](../04-guardrails/README.md)
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/), [Using LLM-as-a-Judge For Evaluation](https://hamel.dev/blog/posts/llm-judge/), [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/), [AI Evals FAQ](https://hamel.dev/blog/posts/evals-faq/)
+- Shankar et al., [Who Validates the Validators? (arXiv:2404.12272)](https://arxiv.org/abs/2404.12272)
+- Anthropic, [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)
+- Martin Fowler / Thoughtworks, [Engineering Practices for LLM Application Development](https://martinfowler.com/articles/engineering-practices-llm.html)
+- Microsoft, [Lessons From Red Teaming 100 Generative AI Products (arXiv:2501.07238)](https://arxiv.org/abs/2501.07238)
+- NIST, [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)
+- **In this repo:**
+    - [Datasets](../01-datasets/README.md)
+    - [Offline evals](../02-offline-evals/README.md)
+    - [Online evals](../03-online-evals-and-observability/README.md)
+    - [Guardrails](../04-guardrails/README.md)

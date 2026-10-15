@@ -1,14 +1,19 @@
 # Guardrail Tools: The Landscape (October 2026 snapshot)
 
 > **TL;DR**
+>
 > - **Enforce authorization with deterministic policy engines first.** Use OPA, Cedar, or OpenFGA for RBAC and tool access before adding probabilistic classifiers.
 > - **Combine specialized guardrail layers.** Pair an injection classifier or managed API, a PII engine, a policy engine, and red-teaming tools.
 > - **Know what each detector actually checks.** Content-safety models like Llama Guard do not detect prompt injection or enterprise data leaks.
 > - **Measure every guardrail on your own traffic.** Track false-positive rate, false-negative rate, and p95 latency across your domain documents and languages.
 
-**You will learn:** What each guardrail tool detects and where it runs · Open models vs managed APIs vs policy engines · Capability matrix and latency profiles · How to evaluate guardrails  
-**Prerequisites:** [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Threat model & OWASP](../04-guardrails/07-threat-model-owasp.md)  
-**Related:** [Eval & observability tools](./01-eval-and-observability-tools.md), [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md), [Input guardrails](../04-guardrails/02-input-guardrails.md), [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md)
+- **You will learn:**
+    - What each guardrail tool detects and where it runs
+    - Open models vs managed APIs vs policy engines
+    - Capability matrix and latency profiles
+    - How to evaluate guardrails
+- **Prerequisites:** [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Threat model & OWASP](../04-guardrails/07-threat-model-owasp.md)
+- **Related:** [Eval & observability tools](./01-eval-and-observability-tools.md), [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md), [Input guardrails](../04-guardrails/02-input-guardrails.md), [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md)
 
 ---
 
@@ -103,12 +108,12 @@ Each card covers six fields: **Link · Type/License · Strengths · Detects/cove
 | **Best for** | Agent pipelines that execute tools or code and need **trajectory alignment checks** in addition to text scanning. |
 | **Watch-outs** | AlignmentCheck invokes a capable LLM at each agent step and adds significant latency. Benchmark this newer framework carefully on your own traces. |
 
-### LLM Guard (Protect AI) — archived
+### LLM Guard (Protect AI): archived
 
 | Field | Details |
 |---|---|
 | **Link** | [GitHub (archived)](https://github.com/protectai/llm-guard) |
-| **Type / License** | OSS (Python), MIT — **archived and unmaintained** |
+| **Type / License** | OSS (Python), MIT (**archived and unmaintained**) |
 | **Strengths** | Shipped a clean pipeline of input scanners (Anonymize, BanCode, BanCompetitors, BanSubstrings, BanTopics, Gibberish, InvisibleText, Language, PromptInjection, Regex, Secrets, Sentiment, TokenLimit, Toxicity) and output scanners (Bias, Deanonymize, FactualConsistency, JSON, MaliciousURLs, NoRefusal, Relevance, Sensitive, Toxicity). |
 | **Detects/covers** | PII (via Presidio), prompt injection, toxicity, secrets, invisible text, banned topics, relevance, and malicious URLs. |
 | **Best for** | Studying scanner pipeline architecture or maintaining legacy deployments during migration. |
@@ -126,7 +131,7 @@ You host these open-weight models on your own infrastructure. They give you **fu
 |---|---|
 | **Link** | [Llama protections](https://www.llama.com/llama-protections/) · [Llama-Guard-4-12B on Hugging Face](https://huggingface.co/meta-llama/Llama-Guard-4-12B) · [Paper (arXiv 2312.06674)](https://arxiv.org/abs/2312.06674) |
 | **Type / License** | Open weights under Meta's Llama community license (custom, non-OSI license) |
-| **Versions** | **Llama Guard 1** (Dec 2023, 7B) · **Meta-Llama-Guard-2-8B** (Apr 2024) · **Llama-Guard-3-8B** (Jul 2024) · **Llama-Guard-3-1B** and **Llama-Guard-3-11B-Vision** (Sep 2024) · **Llama-Guard-4-12B** (Apr 2025, natively multimodal for text and multiple images, pruned from Llama 4 Scout) |
+| **Versions** | • **Llama Guard 1** (Dec 2023, 7B)<br>• **Meta-Llama-Guard-2-8B** (Apr 2024)<br>• **Llama-Guard-3-8B** (Jul 2024)<br>• **Llama-Guard-3-1B** and **Llama-Guard-3-11B-Vision** (Sep 2024)<br>• **Llama-Guard-4-12B** (Apr 2025, natively multimodal for text and multiple images, pruned from Llama 4 Scout) |
 | **Strengths** | Classifies **both user prompts and model responses** as safe or unsafe and outputs violated category codes. Uses the MLCommons hazard taxonomy (S1–S14, including Code Interpreter Abuse) and supports custom category definitions in the prompt. |
 | **Detects/covers** | Violent and non-violent crimes, sex-related crimes, child exploitation, defamation, specialized advice, privacy violations, intellectual property, indiscriminate weapons, hate, self-harm, sexual content, elections, and code interpreter abuse. |
 | **Best for** | Self-hosting input and output content-safety classification. Use the 1B variant for tight latency budgets. |
@@ -138,7 +143,7 @@ You host these open-weight models on your own infrastructure. They give you **fu
 |---|---|
 | **Link** | [Llama-Prompt-Guard-2-86M](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M) · [Llama-Prompt-Guard-2-22M](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M) |
 | **Type / License** | Open weights under Meta's Llama community license |
-| **Versions** | **Prompt-Guard-86M** (v1, 2024) · **Llama-Prompt-Guard-2-86M** (multilingual) and **Llama-Prompt-Guard-2-22M** (DeBERTa-xsmall architecture with ~75% lower latency than 86M) |
+| **Versions** | • **Prompt-Guard-86M** (v1, 2024)<br>• **Llama-Prompt-Guard-2-86M** (multilingual) and **Llama-Prompt-Guard-2-22M** (DeBERTa-xsmall architecture with ~75% lower latency than 86M) |
 | **Strengths** | Runs tiny BERT-style classifiers on CPU in milliseconds. Cheap enough to scan **every** user prompt and **every** retrieved document chunk. |
 | **Detects/covers** | v2 performs **binary** benign/malicious classification for prompt injections and jailbreaks (v1 output separate injection and jailbreak labels). |
 | **Best for** | Running a fast first-pass filter over user inputs and untrusted context (retrieved chunks and tool outputs). |
@@ -150,7 +155,7 @@ You host these open-weight models on your own infrastructure. They give you **fu
 |---|---|
 | **Link** | [GitHub](https://github.com/ibm-granite/granite-guardian) · [Paper (arXiv 2412.07724)](https://arxiv.org/abs/2412.07724) |
 | **Type / License** | Open weights, Apache-2.0 |
-| **Versions** | 3.0 → 3.2 (2024–2025) · **3.3 8B** (Aug 2025) with hybrid think/no-think modes · **4.1 8B** (Apr 2026) with improved Bring Your Own Criteria (BYOC) for multi-part policies |
+| **Versions** | • 3.0 → 3.2 (2024–2025)<br>• **3.3 8B** (Aug 2025) with hybrid think/no-think modes<br>• **4.1 8B** (Apr 2026) with improved Bring Your Own Criteria (BYOC) for multi-part policies |
 | **Strengths** | Evaluates prompts and responses for both general harm and **RAG or agent risks** under a permissive Apache-2.0 license. Supports natural-language BYOC policies, fast `no-think` scoring, and explainable `think` reasoning traces. |
 | **Detects/covers** | Harm, jailbreaks, profanity, **RAG hallucination** (groundedness, context relevance, answer relevance), **agent function-call hallucination**, and custom BYOC rules. |
 | **Best for** | Self-hosting RAG groundedness, tool-call validation, and content safety under an Apache-2.0 license. |
@@ -162,7 +167,7 @@ You host these open-weight models on your own infrastructure. They give you **fu
 |---|---|
 | **Link** | [Docs](https://ai.google.dev/gemma/docs/shieldgemma) · [ShieldGemma 2 (image)](https://huggingface.co/google/shieldgemma-2-4b-it) |
 | **Type / License** | Open weights under the Gemma Terms of Use |
-| **Versions** | **shieldgemma-2b / 9b / 27b** text classifiers (Jul 2024) · **shieldgemma-2-4b-it** image safety classifier (Mar 2025) |
+| **Versions** | • **shieldgemma-2b / 9b / 27b** text classifiers (Jul 2024)<br>• **shieldgemma-2-4b-it** image safety classifier (Mar 2025) |
 | **Strengths** | Scores policy violations conditioned on the policy text you pass in the prompt. Offers 2B, 9B, and 27B text model sizes so you can trade accuracy for latency. |
 | **Detects/covers** | Text: sexually explicit content, dangerous content, harassment, and hate speech. Image: sexually explicit content, dangerous content, and violence/gore. |
 | **Best for** | Self-hosting content moderation with tunable probability thresholds or scanning images for safety. |
@@ -257,12 +262,12 @@ You host these open-weight models on your own infrastructure. They give you **fu
 
 ## E. Prompt-injection prototypes
 
-### Rebuff — archived
+### Rebuff: archived
 
 | Field | Details |
 |---|---|
 | **Link** | [GitHub (archived)](https://github.com/protectai/rebuff) |
-| **Type / License** | OSS prototype, Apache-2.0 — **archived since 2024** |
+| **Type / License** | OSS prototype, Apache-2.0 (**archived since 2024**) |
 | **Strengths** | Demonstrated an influential **four-layer** defense: heuristics, LLM classification, a vector database of prior attacks, and **canary tokens** injected into system prompts to detect prompt leakage. |
 | **Best for** | Learning layered defense concepts and copying the canary-token pattern for system prompt leak detection. |
 | **Watch-outs** | Unmaintained prototype. Do not deploy Rebuff in production. |
@@ -346,7 +351,14 @@ Red-teaming tools attack your application offline and in CI to test how well you
 
 ## Comparison matrix
 
-**Legend:** ✅ first-class / native · 🟡 partial, via integration/plugin, preview, or with custom config · ❌ not a primary capability · ❔ not verified — ask the vendor. "Self-host" means the detector runs inside your own environment.
+**Legend:**
+
+- ✅ first-class / native
+- 🟡 partial, via integration/plugin, preview, or with custom config
+- ❌ not a primary capability
+- ❔ not verified (ask the vendor)
+
+"Self-host" means the detector runs inside your own environment.
 
 > This matrix reflects our assessment of public documentation in **October 2026**. Verify capabilities before you decide.
 
@@ -383,24 +395,24 @@ Red-teaming tools attack your application offline and in CI to test how well you
 
 | Risk in the enterprise assistant | Primary control (deterministic) | Detector (probabilistic) | Red-team check |
 |---|---|---|---|
-| User sees docs they lack access to | Enforce retrieval ACL filters via OpenFGA or OPA | — | Run promptfoo `rbac`, `bola`, and `rag-document-exfiltration` plus role-swap tests |
+| User sees docs they lack access to | Enforce retrieval ACL filters via OpenFGA or OPA | None | Run promptfoo `rbac`, `bola`, and `rag-document-exfiltration` plus role-swap tests |
 | Text-to-SQL reads restricted tables or rows | Use a read-only DB role, OPA/Cedar SQL allow-lists, and row-level security | Guardrails AI SQL validators | Run promptfoo SQL injection plugins and PyRIT campaigns |
 | `create_ticket` abused (wrong queue, spam, priority escalation) | Enforce OPA/Cedar tool authorization, rate limits, and human approval for high impact | LlamaFirewall AlignmentCheck, Azure task adherence | Run promptfoo `excessive-agency` and `bfla` plugins or DeepTeam |
 | Direct jailbreak / prompt injection | Enforce system prompt hierarchy and least privilege | Prompt Guard 2, Azure Prompt Shields, Bedrock prompt attack, Model Armor, Lakera | Run garak, PyRIT, and promptfoo |
 | Indirect injection in a wiki page | Apply spotlighting delimiters and isolate tool privileges from content | Prompt Guard 2 on chunks, Azure document attacks, Lakera | Run promptfoo indirect injection plugins |
 | PII in prompts, logs or answers | Redact before logging and mask before indexing | Presidio, Bedrock sensitive info filters, Model Armor SDP | Run PII-leakage probes |
 | Hallucinated or ungrounded answers | Require citations and refuse when evidence is missing | Granite Guardian groundedness, Bedrock contextual grounding, Azure groundedness | Evaluate against a dataset of unanswerable questions |
-| Toxic or harmful output | — | Llama Guard, ShieldGemma, OpenAI moderation, managed cloud APIs | Run garak toxicity probes |
+| Toxic or harmful output | None | Llama Guard, ShieldGemma, OpenAI moderation, managed cloud APIs | Run garak toxicity probes |
 
 ---
 
 ## How to choose
 
-### Step 1 — Put deterministic controls first
+### Step 1: Put deterministic controls first
 
 Deterministic controls like authorization policies, least-privilege roles, read-only database connections, retrieval ACLs, and human approval gates do not suffer from classifier false negatives. Implement a policy engine or IAM check before you add probabilistic detectors. See [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md).
 
-### Step 2 — Decide where detection must run
+### Step 2: Decide where detection must run
 
 ```mermaid
 flowchart TD
@@ -415,7 +427,7 @@ flowchart TD
     H -->|"No, mainly output validation"| J["Guardrails AI"]
 ```
 
-### Step 3 — Fill gaps by risk
+### Step 3: Fill gaps by risk
 
 | If your top risk is … | Start with | Add if needed |
 |---|---|---|
@@ -427,7 +439,7 @@ flowchart TD
 | Off-topic use | Bedrock denied topics or NeMo Colang dialog rails | A small topic classifier fine-tuned on your production logs |
 | Business-specific policy | gpt-oss-safeguard or Granite Guardian BYOC | Distill labels into a small, fast classifier for inline checks |
 
-### Step 4 — Rules of thumb
+### Step 4: Rules of thumb
 
 - **Run fast, cheap checks first:** Execute regex, schema, and policy checks before small classifiers, and run LLM rails last.
 - **Execute independent checks in parallel:** Run input classifiers concurrently with vector retrieval to hide guardrail latency.
@@ -519,14 +531,14 @@ Set your own target numbers based on your application's risk profile and latency
 
 ## Further reading
 
-- [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md) — where each guardrail check sits in the request lifecycle
+- [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md): where each guardrail check sits in the request lifecycle
 - [Input guardrails](../04-guardrails/02-input-guardrails.md) and [Retrieval & context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md)
 - [Output guardrails](../04-guardrails/04-output-guardrails.md) and [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md)
-- [Access control & RBAC](../04-guardrails/06-access-control-rbac.md) — deterministic authorization patterns for RAG and tools
+- [Access control & RBAC](../04-guardrails/06-access-control-rbac.md): deterministic authorization patterns for RAG and tools
 - [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md)
-- [Eval & observability tools](./01-eval-and-observability-tools.md) — companion landscape for evaluation and tracing tools
-- Simon Willison, [The lethal trifecta for AI agents](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) — why classifiers alone cannot solve prompt injection
+- [Eval & observability tools](./01-eval-and-observability-tools.md): companion landscape for evaluation and tracing tools
+- Simon Willison, [The lethal trifecta for AI agents](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/): why classifiers alone cannot solve prompt injection
 - Beurer-Kellner et al., [Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837)
-- Hines et al., [Spotlighting](https://arxiv.org/abs/2403.14720) — defending against indirect prompt injection in retrieved text
+- Hines et al., [Spotlighting](https://arxiv.org/abs/2403.14720): defending against indirect prompt injection in retrieved text
 - [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/)
-- [References](../07-references/README.md) — full curated reading list
+- [References](../07-references/README.md): full curated reading list

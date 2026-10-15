@@ -1,14 +1,19 @@
-# References: A Curated Reading List
+# 07 · References
 
 > **TL;DR**
+>
 > - **Start with the 10-item starter path.** Read the foundational papers and practitioner essays before diving into specialized topics.
 > - **Trace every metric and defense to its source.** Use this annotated index to find the research behind RAG metrics, judges, and guardrails.
 > - **Use public benchmarks only to shortlist models.** Rely on your own domain datasets to evaluate your application.
 > - **Map your controls to industry standards.** Connect your evals and guardrails to OWASP, NIST, MITRE ATLAS, and ISO 42001 for reviews.
 
-**You will learn:** Which papers and essays are worth your time · Where each metric and practice comes from · Which standards map to which risks · Which benchmarks fit agentic RAG  
-**Prerequisites:** None — use this list alongside any section  
-**Related:** [Tooling landscape](../06-tooling-landscape/README.md), [Glossary](../00-foundations/04-glossary.md), [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
+- **You will learn:**
+    - Which papers and essays are worth your time
+    - Where each metric and practice comes from
+    - Which standards map to which risks
+    - Which benchmarks fit agentic RAG
+- **Prerequisites:** None (use this list alongside any section)
+- **Related:** [Tooling landscape](../06-tooling-landscape/README.md), [Glossary](../00-foundations/04-glossary.md), [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
 
 ---
 
@@ -23,15 +28,15 @@
 
 | # | Read | Why first |
 |---|---|---|
-| 1 | Hamel Husain — [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) | Makes the case for error analysis before adopting eval tools. |
-| 2 | Applied LLMs — [What We've Learned From A Year of Building with LLMs](https://applied-llms.org/) | Summarizes tactical, operational, and strategic lessons in one guide. |
-| 3 | Anthropic — [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) | Explains simple agent patterns and when not to build an agent. |
-| 4 | Eugene Yan — [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/) | Shows which metrics are worth computing for each task. |
-| 5 | Es et al. — [RAGAS](https://arxiv.org/abs/2309.15217) | Defines the core vocabulary of reference-free RAG metrics. |
-| 6 | Zheng et al. — [Judging LLM-as-a-Judge](https://arxiv.org/abs/2306.05685) | Documents the judge biases you must control for. |
-| 7 | Shankar et al. — [Who Validates the Validators?](https://arxiv.org/abs/2404.12272) | Explains criteria drift and how to align judges with human preferences. |
-| 8 | Simon Willison — [The lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) | Shows why combining private data, untrusted content, and exfiltration paths creates core agent risk. |
-| 9 | Beurer-Kellner et al. — [Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837) | Provides architectural defenses that do not rely on detectors alone. |
+| 1 | Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) | Makes the case for error analysis before adopting eval tools. |
+| 2 | Applied LLMs, [What We've Learned From A Year of Building with LLMs](https://applied-llms.org/) | Summarizes tactical, operational, and strategic lessons in one guide. |
+| 3 | Anthropic, [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) | Explains simple agent patterns and when not to build an agent. |
+| 4 | Eugene Yan, [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/) | Shows which metrics are worth computing for each task. |
+| 5 | Es et al., [RAGAS](https://arxiv.org/abs/2309.15217) | Defines the core vocabulary of reference-free RAG metrics. |
+| 6 | Zheng et al., [Judging LLM-as-a-Judge](https://arxiv.org/abs/2306.05685) | Documents the judge biases you must control for. |
+| 7 | Shankar et al., [Who Validates the Validators?](https://arxiv.org/abs/2404.12272) | Explains criteria drift and how to align judges with human preferences. |
+| 8 | Simon Willison, [The lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) | Shows why combining private data, untrusted content, and exfiltration paths creates core agent risk. |
+| 9 | Beurer-Kellner et al., [Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837) | Provides architectural defenses that do not rely on detectors alone. |
 | 10 | [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) | Establishes the shared risk vocabulary for security reviews. |
 
 ---
@@ -144,7 +149,7 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 | Eugene Yan | [Patterns for Building LLM-based Systems & Products](https://eugeneyan.com/writing/llm-patterns/) | Catalogs practical patterns for evals, RAG, fine-tuning, caching, guardrails, defensive UX, and user feedback. |
 | Eugene Yan | [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/) | Recommends specific evaluation metrics for classification, summarization, translation, copyright, and toxicity. |
 | Eugene Yan | [Evaluating the Effectiveness of LLM-Evaluators (aka LLM-as-Judge)](https://eugeneyan.com/writing/llm-evaluators/) | Surveys LLM judge research and explains when you can trust automated evaluators. |
-| Eugene Yan | [An LLM-as-Judge Won't Save The Product—Fixing Your Process Will](https://eugeneyan.com/writing/eval-process/) | Shows why evaluation is an iterative process of observing, annotating, and experimenting rather than a tool purchase. |
+| Eugene Yan | [An LLM-as-Judge Won't Save The Product: Fixing Your Process Will](https://eugeneyan.com/writing/eval-process/) | Shows why evaluation is an iterative process of observing, annotating, and experimenting rather than a tool purchase. |
 | Anthropic | [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) | Contrasts deterministic workflows with autonomous agents and explains routing, chaining, and evaluator-optimizer loops. |
 | Anthropic | [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) | Offers practical guidance on agent graders, task design, and outcome evaluation versus transcript evaluation. |
 | Simon Willison | [The lethal trifecta for AI agents](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) | Explains why combining private data, untrusted content, and external communication creates exfiltration risk unless you remove one leg. |
@@ -213,7 +218,7 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 
 ## Further reading
 
-- [Tooling landscape](../06-tooling-landscape/README.md) — tools that implement the ideas in these papers
-- [Glossary](../00-foundations/04-glossary.md) — plain-language definitions of terms from the literature
-- [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md) — metrics from these papers summarized in one table
-- [Implementation playbook](../05-decision-framework/04-implementation-playbook.md) — step-by-step rollout plan for putting this research into production
+- [Tooling landscape](../06-tooling-landscape/README.md): tools that implement the ideas in these papers
+- [Glossary](../00-foundations/04-glossary.md): plain-language definitions of terms from the literature
+- [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md): metrics from these papers summarized in one table
+- [Implementation playbook](../05-decision-framework/04-implementation-playbook.md): step-by-step rollout plan for putting this research into production

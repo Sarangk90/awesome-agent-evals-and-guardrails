@@ -1,14 +1,19 @@
 # Metric Cheatsheet
 
 > **TL;DR**
+>
 > - **Look up any metric fast.** Compare every evaluation and guardrail check by ground-truth needs, method, runtime location, and cost.
 > - **Start with the quick picks.** Use §3 to choose 1–2 primary metrics for your specific diagnostic question.
 > - **Separate offline gates from online monitors.** Use reference-based metrics to gate releases and reference-free metrics to monitor live traffic.
 > - **Prioritize cheap deterministic checks.** Run schema, citation, SQL, and tool-call checks on 100% of traffic before sampling LLM judges.
 
-**You will learn:** The full metric landscape at a glance · Which metrics require reference data · Which checks fit 100% production traffic · Which metric answers each diagnostic question  
-**Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md)  
-**Related:** [Eval selection decision tree](./01-eval-selection-decision-tree.md), [Guardrail selection decision tree](./02-guardrail-selection-decision-tree.md), [Glossary](../00-foundations/04-glossary.md)
+- **You will learn:**
+    - The full metric landscape at a glance
+    - Which metrics require reference data
+    - Which checks fit 100% production traffic
+    - Which metric answers each diagnostic question
+- **Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md)
+- **Related:** [Eval selection decision tree](./01-eval-selection-decision-tree.md), [Guardrail selection decision tree](./02-guardrail-selection-decision-tree.md), [Glossary](../00-foundations/04-glossary.md)
 
 ---
 
@@ -17,10 +22,10 @@
 | Column | Values |
 |---|---|
 | **Category** | `retrieval` · `generation` · `e2e` · `agent` · `SQL` · `citation` · `safety` · `guardrail` · `ops` · `feedback` |
-| **GT?** (needs ground truth) | **Yes** = needs a reference (answer, relevant docs, gold SQL, expected tool call) · **No** = reference-free · **Opt** = works without, better with |
-| **Method** | **Code** = deterministic · **Stat** = statistical/IR/embedding · **Judge** = LLM-as-a-judge · **Clf** = trained classifier/NER · **Human** = human/SME label |
-| **Where** | **Off** = offline on datasets · **On** = online eval on production traffic · **GR** = runtime guardrail (can block) |
-| **Cost** | **$0** = negligible compute · **$** = cheap model/classifier · **$$** = LLM judge per item · **$$$** = human time or multi-call judges |
+| **GT?** (needs ground truth) | • **Yes** = needs a reference (answer, relevant docs, gold SQL, expected tool call)<br>• **No** = reference-free<br>• **Opt** = works without, better with |
+| **Method** | • **Code** = deterministic<br>• **Stat** = statistical/IR/embedding<br>• **Judge** = LLM-as-a-judge<br>• **Clf** = trained classifier/NER<br>• **Human** = human/SME label |
+| **Where** | • **Off** = offline on datasets<br>• **On** = online eval on production traffic<br>• **GR** = runtime guardrail (can block) |
+| **Cost** | • **$0** = negligible compute<br>• **$** = cheap model/classifier<br>• **$$** = LLM judge per item<br>• **$$$** = human time or multi-call judges |
 
 Costs are relative per evaluated item. When a Judge metric runs online ("On"), you usually run it on sampled traffic.
 
@@ -190,7 +195,7 @@ Start with the **bold** metric. Add the secondary metrics only when you need fin
 |---|---|---|---|
 | …if answers are correct | **Answer correctness (ref-based judge)** | Human SME spot checks | Reference answers |
 | …if the model is making things up | **Faithfulness / groundedness** | Citation precision | Retrieved context |
-| …if it answers the actual question | **Answer relevancy** | Completeness | — |
+| …if it answers the actual question | **Answer relevancy** | Completeness | None |
 | …if it knows when to say "I don't know" | **Refusal correctness** on unanswerable set | Over-refusal rate | Answerable labels |
 | …if it follows my system-prompt rules | **Instruction adherence** (one binary check per rule) | Instruction persistence | Rule list |
 | …if output is well-formed | **Schema/format validity** | Length bounds | Schema |
@@ -209,7 +214,7 @@ Start with the **bold** metric. Add the secondary metrics only when you need fin
 |---|---|---|---|
 | …if the agent gets the job done | **Task / goal completion** | pass^k for consistency | Success criteria |
 | …if it picks the right tool | **Tool selection accuracy** | Retrieval decision accuracy | Expected tool labels |
-| …if tool inputs are right | **Schema validity + argument correctness** | — | Expected args/constraints |
+| …if tool inputs are right | **Schema validity + argument correctness** | None | Expected args/constraints |
 | …if it wanders or loops | **Step efficiency, loop rate** | Trajectory quality (judge) | Traces |
 | …if my orchestrator routes correctly | **Routing accuracy** | Hand-off fidelity | Expected routes |
 | …if it's reliable, not lucky | **pass^k** (all k runs succeed) | Variance across runs | k repeated runs |
@@ -222,8 +227,8 @@ Start with the **bold** metric. Add the secondary metrics only when you need fin
 | …if the SQL returns the right answer | **Execution accuracy** | Semantic SQL judge (no gold) | Gold SQL + DB snapshot |
 | …why SQL is wrong | **Schema-linking recall** | Component/AST match | Gold tables / SQL |
 | …if SQL even runs | **Validity** | Empty-result rate | DB |
-| …if the narrative matches the data | **Answer-vs-result faithfulness** | — | Result rows |
-| …if users see only their data | **RBAC leak tests per role** | — | Role × query cases |
+| …if the narrative matches the data | **Answer-vs-result faithfulness** | None | Result rows |
+| …if users see only their data | **RBAC leak tests per role** | None | Role × query cases |
 
 ### 3.6 Safety and guardrails
 
@@ -278,7 +283,7 @@ Run reference-free metrics **online** on live traffic. Run reference-based metri
 
 ## 5. Cheap enough for 100% of traffic?
 
-| Yes — run on everything | Sample (e.g. 1–10%, plus all flagged/negative-feedback traces) | Offline only |
+| Yes (run on everything) | Sample (e.g. 1–10%, plus all flagged/negative-feedback traces) | Offline only |
 |---|---|---|
 | Schema/format validity, citation validity, SQL validity, tool-call schema, step/loop counts, latency/cost, PII regex, toxicity classifier, guardrail trigger counts, feedback signals | Faithfulness, answer relevancy, context relevance, instruction adherence (judge), tone, semantic SQL judge, conversation goal completion | Answer correctness, retrieval IR metrics, execution accuracy, trajectory match, tool selection accuracy, red-team ASR, judge validation |
 
@@ -295,8 +300,15 @@ Treat these sampling rates as starting heuristics. Calculate your exact sampling
 
 ## Further reading
 
-- In this repo: [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md) · [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) · [Agent & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) · [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md) · [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) · [Guardrails](../04-guardrails/README.md) · [Tooling landscape](../06-tooling-landscape/README.md)
-- Es et al. — [RAGAS (arXiv:2309.15217)](https://arxiv.org/abs/2309.15217)
-- Zheng et al. — [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (arXiv:2306.05685)](https://arxiv.org/abs/2306.05685)
-- Eugene Yan — [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
-- OWASP — [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/)
+- **In this repo:**
+    - [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md)
+    - [E2E RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md)
+    - [Agent & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md)
+    - [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md)
+    - [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
+    - [Guardrails](../04-guardrails/README.md)
+    - [Tooling landscape](../06-tooling-landscape/README.md)
+- Es et al., [RAGAS (arXiv:2309.15217)](https://arxiv.org/abs/2309.15217)
+- Zheng et al., [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (arXiv:2306.05685)](https://arxiv.org/abs/2306.05685)
+- Eugene Yan, [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
+- OWASP, [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/)

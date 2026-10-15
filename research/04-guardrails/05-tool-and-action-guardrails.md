@@ -1,14 +1,19 @@
 # Tool and Action Guardrails
 
 > **TL;DR**
+>
 > - **Gate every tool call in deterministic code.** Check role allowlists, validate arguments, enforce budgets, and require approval before any action runs.
 > - **Tier tools by worst-case impact.** Assign read, write, external, and destructive tiers, and bind strict controls and scoped credentials to each tier.
 > - **Guard SQL execution at the database and parser.** Combine a read-only database role and RLS with AST parsing, allowlists, row caps, and `EXPLAIN` limits.
 > - **Treat MCP servers as untrusted supply-chain inputs.** Pin tool descriptions, allowlist exposed tools per agent, and validate all tool outputs.
 
-**You will learn:** Tool impact tiers, allowlists, and argument validation · Human approval UX, dry runs, and idempotency · Step, cost, and loop budgets plus code sandboxing · Text-to-SQL execution guards and MCP security controls  
-**Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)  
-**Related:** [Access control & RBAC](./06-access-control-rbac.md), [Threat model & OWASP](./07-threat-model-owasp.md), [Agent tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md), [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md), [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
+- **You will learn:**
+    - Tool impact tiers, allowlists, and argument validation
+    - Human approval UX, dry runs, and idempotency
+    - Step, cost, and loop budgets plus code sandboxing
+    - Text-to-SQL execution guards and MCP security controls
+- **Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)
+- **Related:** [Access control & RBAC](./06-access-control-rbac.md), [Threat model & OWASP](./07-threat-model-owasp.md), [Agent tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md), [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md), [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
 
 ---
 
@@ -306,6 +311,7 @@ Unbounded agents burn money, overload downstream systems, and enable denial-of-w
 ### Loop detection
 
 Watch for four common loop patterns:
+
 - Repeating the same tool and arguments.
 - Oscillating between two calls (`A → B → A → B`).
 - Retrying a failing call with minor edits.
@@ -409,6 +415,7 @@ Treat the **database as the real security boundary** (steps 8–9). Steps 1–7 
 ### Layer-by-layer checklist
 
 **At the database (non-negotiable):**
+
 - [ ] Create a dedicated database role for the agent with `SELECT` privileges only on approved schemas and views.
 - [ ] Grant zero `INSERT`, `UPDATE`, `DELETE`, DDL, or table-ownership privileges to the agent role.
 - [ ] Set the session or transaction to read-only (`SET TRANSACTION READ ONLY`), or route queries to a read replica.
@@ -419,6 +426,7 @@ Treat the **database as the real security boundary** (steps 8–9). Steps 1–7 
 - [ ] Configure warehouse resource controls, including workload queue limits and per-query bytes-scanned caps.
 
 **In the application guard:**
+
 - [ ] Parse queries with a real SQL parser ([sqlglot](https://github.com/tobymao/sqlglot)) and never rely on regex checks like "starts with SELECT".
 - [ ] Allow exactly one statement per call to block stacked queries (`SELECT 1; DROP TABLE ...`).
 - [ ] Require the AST root node to be a read query (`SELECT`, `UNION`, CTE) and reject `SELECT ... INTO`.
@@ -431,13 +439,15 @@ Treat the **database as the real security boundary** (steps 8–9). Steps 1–7 
 - [ ] Bind application parameters with parameterized queries or AST nodes, and never interpolate raw user strings.
 
 **After execution:**
+
 - [ ] Cap the number of rows and bytes returned to the model.
 - [ ] Mask or drop any sensitive columns that slipped through.
 - [ ] Log the executed SQL, guardrail verdict, user identity, and returned row count.
 
 ### Illustrative SQL guard with sqlglot
 
-> `# illustrative — tested against sqlglot 30.x; check current API for your version.`
+> `# illustrative: tested against sqlglot 30.x; check current API for your version.`
+>
 > Use this guard as a pre-execution filter alongside a read-only database role and RLS.
 
 ```python
@@ -540,6 +550,7 @@ Sample verdicts for the `analyst` role:
 | `COPY sales.orders TO '/tmp/x'` | Denied: statement type COPY |
 
 Cover four remaining gaps outside the parser:
+
 - Dialect differences between `sqlglot` and your database engine.
 - Built-in functions that `sqlglot` parses natively rather than as `Anonymous`.
 - Expensive valid queries (mitigate with `EXPLAIN` limits and statement timeouts).
@@ -691,14 +702,18 @@ Track five operational metrics:
 
 ## Further reading
 
-- [MCP specification — Tools (security considerations)](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
+- [MCP specification: Tools (security considerations)](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
 - [MCP Security Best Practices](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices)
 - [MCP Authorization](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
-- [Invariant Labs — MCP tool poisoning attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks)
+- [Invariant Labs: MCP tool poisoning attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks)
 - [OWASP LLM06:2025 Excessive Agency](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/)
 - [OWASP LLM10:2025 Unbounded Consumption](https://genai.owasp.org/llmrisk/llm102025-unbounded-consumption/)
-- [Simon Willison — The lethal trifecta for AI agents](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/)
-- [Debenedetti et al. — Defeating Prompt Injections by Design (CaMeL)](https://arxiv.org/abs/2503.18813)
+- [Simon Willison: The lethal trifecta for AI agents](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/)
+- [Debenedetti et al.: Defeating Prompt Injections by Design (CaMeL)](https://arxiv.org/abs/2503.18813)
 - [sqlglot](https://github.com/tobymao/sqlglot)
-- [PostgreSQL — Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
-- Within this repo: [Threat model & OWASP](./07-threat-model-owasp.md) · [Access control & RBAC](./06-access-control-rbac.md) · [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md) · [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
+- [PostgreSQL: Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
+- **Within this repo:**
+    - [Threat model & OWASP](./07-threat-model-owasp.md)
+    - [Access control & RBAC](./06-access-control-rbac.md)
+    - [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md)
+    - [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)

@@ -1,14 +1,19 @@
 # Access Control and RBAC for Agentic RAG
 
 > **TL;DR**
+>
 > - **Enforce authorization in deterministic code.** Never rely on the LLM as a policy enforcement point, and keep unauthorized chunks out of the prompt.
 > - **Propagate end-user identity everywhere.** Pass the authenticated user and tenant context to every retriever, database, tool, cache, and memory store.
 > - **Apply defense in depth at the data layer.** Capture ACLs at ingestion, pre-filter in the vector store, post-check in code, and enable database RLS.
 > - **Verify zero unauthorized access continuously.** Run deterministic RBAC test matrices, plant canary documents, and red-team cross-tenant boundaries in CI.
 
-**You will learn:** End-user identity propagation and confused-deputy prevention · Vector store ACLs, multi-tenancy, and database RLS · Cache, memory, and log leak prevention with policy engines · Deterministic access-control test matrices, canary docs, and red teaming  
-**Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md)  
-**Related:** [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md), [Threat model & OWASP](./07-threat-model-owasp.md), [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md), [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md)
+- **You will learn:**
+    - End-user identity propagation and confused-deputy prevention
+    - Vector store ACLs, multi-tenancy, and database RLS
+    - Cache, memory, and log leak prevention with policy engines
+    - Deterministic access-control test matrices, canary docs, and red teaming
+- **Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md)
+- **Related:** [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md), [Threat model & OWASP](./07-threat-model-owasp.md), [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md), [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md)
 
 ---
 
@@ -500,10 +505,14 @@ Notice the strict asymmetry: false *allows* are security incidents at any rate, 
 - [OWASP LLM02:2025 Sensitive Information Disclosure](https://genai.owasp.org/llmrisk/llm022025-sensitive-information-disclosure/)
 - [OWASP LLM08:2025 Vector and Embedding Weaknesses](https://genai.owasp.org/llmrisk/llm082025-vector-and-embedding-weaknesses/)
 - [OAuth 2.0 Token Exchange (RFC 8693)](https://datatracker.ietf.org/doc/html/rfc8693)
-- [Microsoft identity platform — On-behalf-of flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow)
+- [Microsoft identity platform: On-behalf-of flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow)
 - [Confused deputy problem](https://en.wikipedia.org/wiki/Confused_deputy_problem)
 - [Zanzibar: Google's Consistent, Global Authorization System (USENIX ATC 2019)](https://www.usenix.org/conference/atc19/presentation/pang)
 - [Open Policy Agent](https://www.openpolicyagent.org/) · [Cedar](https://www.cedarpolicy.com/) · [OpenFGA](https://openfga.dev/) · [SpiceDB](https://authzed.com/spicedb)
 - [NIST RBAC](https://csrc.nist.gov/projects/role-based-access-control) · [NIST SP 800-162 ABAC](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)
 - [PostgreSQL Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
-- Within this repo: [Tool & action guardrails](./05-tool-and-action-guardrails.md) · [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md) · [Threat model & OWASP](./07-threat-model-owasp.md) · [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)
+- **Within this repo:**
+    - [Tool & action guardrails](./05-tool-and-action-guardrails.md)
+    - [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md)
+    - [Threat model & OWASP](./07-threat-model-owasp.md)
+    - [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)

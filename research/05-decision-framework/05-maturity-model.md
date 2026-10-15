@@ -1,14 +1,19 @@
 # Eval & Guardrail Maturity Model
 
 > **TL;DR**
+>
 > - **Progress through five observable levels.** Advance from Level 0 (ad hoc vibes) to Level 4 (data flywheel and governance).
 > - **Fix your weakest dimension first.** Your overall maturity is capped by your lowest-scoring dimension across datasets, evals, guardrails, and process.
 > - **Match your target level to your risk tier.** Reach at least Level 2 for medium-risk launches and Level 3 guardrails for high-risk systems.
 > - **Advance one level at a time.** Score yourself in 20 minutes with §4 and pick your next two actions from §5.
 
-**You will learn:** What each maturity level looks like in practice · Capabilities across five dimensions · How to level up step by step · How to score your system in 20 minutes  
-**Prerequisites:** [Implementation playbook](./04-implementation-playbook.md)  
-**Related:** [Eval selection](./01-eval-selection-decision-tree.md), [Guardrail selection](./02-guardrail-selection-decision-tree.md), [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
+- **You will learn:**
+    - What each maturity level looks like in practice
+    - Capabilities across five dimensions
+    - How to level up step by step
+    - How to score your system in 20 minutes
+- **Prerequisites:** [Implementation playbook](./04-implementation-playbook.md)
+- **Related:** [Eval selection](./01-eval-selection-decision-tree.md), [Guardrail selection](./02-guardrail-selection-decision-tree.md), [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
 
 ---
 
@@ -40,7 +45,7 @@ flowchart LR
     L3 --> L4["Level 4: Data flywheel and governance"]
 ```
 
-### Level 0 — Ad hoc vibes
+### Level 0: Ad hoc vibes
 
 > "We tried a bunch of questions and it looked good."
 
@@ -51,10 +56,10 @@ flowchart LR
 | Guardrails consist of a system-prompt rule ("never reveal…") | Stakeholders lose trust after a single failed live demo |
 | Teams upgrade models or providers without testing | Nobody knows whether a change improved the system |
 
-**Capabilities:** None systematic.
-**Acceptable for:** Throwaway spikes only.
+- **Capabilities:** None systematic.
+- **Acceptable for:** Throwaway spikes only.
 
-### Level 1 — Basic test set
+### Level 1: Basic test set
 
 > "We have a spreadsheet of questions we run before demos."
 
@@ -68,7 +73,7 @@ flowchart LR
 
 **Typical gaps:** You lack error analysis, component metrics, versioned datasets, and retrieval or tool traces. Your scores cannot be compared over time, and your guardrails rely on prompt instructions.
 
-### Level 2 — Systematic offline evals
+### Level 2: Systematic offline evals
 
 > "Every PR runs our eval suite, and we know which component broke."
 
@@ -82,7 +87,7 @@ flowchart LR
 
 **Typical gaps:** You have no online quality signals beyond user feedback, and you do not measure guardrail false-positive rates. Production failures do not flow back into datasets automatically, and red teaming happens only once.
 
-### Level 3 — Continuous online evals + guardrails
+### Level 3: Continuous online evals + guardrails
 
 > "We find out about quality drops from our alerts, not from users."
 
@@ -96,7 +101,7 @@ flowchart LR
 
 **Typical gaps:** A few individuals still drive improvements manually, and metrics do not connect to business KPIs. Teams lack shared standards and automated governance artifacts.
 
-### Level 4 — Data flywheel & governance
+### Level 4: Data flywheel & governance
 
 > "Production data continuously improves the system, and we can show an auditor how."
 
@@ -303,9 +308,14 @@ Prioritize these next steps in order:
 
 ## Further reading
 
-- In this repo: [Implementation playbook](./04-implementation-playbook.md) · [Eval selection](./01-eval-selection-decision-tree.md) · [Guardrail selection](./02-guardrail-selection-decision-tree.md) · [Production data flywheel](../01-datasets/04-production-data-flywheel.md) · [Monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
-- Hamel Husain — [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/), [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
-- Anthropic — [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
-- NIST — [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework), [Generative AI Profile (NIST AI 600-1)](https://doi.org/10.6028/NIST.AI.600-1)
-- OWASP — [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/)
-- Google — [Secure AI Framework (SAIF)](https://saif.google/)
+- **In this repo:**
+    - [Implementation playbook](./04-implementation-playbook.md)
+    - [Eval selection](./01-eval-selection-decision-tree.md)
+    - [Guardrail selection](./02-guardrail-selection-decision-tree.md)
+    - [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
+    - [Monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/), [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
+- Anthropic, [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
+- NIST, [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework), [Generative AI Profile (NIST AI 600-1)](https://doi.org/10.6028/NIST.AI.600-1)
+- OWASP, [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/)
+- Google, [Secure AI Framework (SAIF)](https://saif.google/)

