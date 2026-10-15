@@ -1,10 +1,14 @@
 # Running Offline Experiments
 
-> **TL;DR** — An eval only becomes useful when it drives decisions, and decisions need experiments: a pinned dataset, a recorded config, a baseline, a paired comparison with uncertainty, and a pre-agreed gate. Treat every prompt, retriever, model or tool change as an experiment; run cheap deterministic checks and a smoke eval on every PR, the full suite nightly or before release; compare variants **per item** with paired statistics, break results down by slice, and keep a held-out set you don't tune on.
+> **TL;DR**
+> - **Treat every change as a controlled experiment.** Run your baseline and variant on the same pinned dataset under identical judge versions.
+> - **Compare variants per item with paired statistics.** Inspect item-level flips (regressions and fixes) and compute paired bootstrap confidence intervals or McNemar's test.
+> - **Break results down by slice and enforce budgets.** Check critical slices (such as RBAC and safety) with zero-tolerance gates and protect a held-out test set.
+> - **Automate tiered evaluation gates in CI/CD.** Run unit checks and a smoke suite on pull requests, and run the full suite nightly.
 
-**You'll learn:** what to record for every eval run · how to compare a variant against a baseline (paired, per-item, with flips) · handling non-determinism (repeats, temperature, pass@k vs pass^k) · confidence intervals, paired bootstrap and McNemar's test · slice analysis · cost/latency budgets · ablations and sweeps for RAG knobs · avoiding overfitting to the eval set · CI/CD eval gates with an illustrative GitHub Actions workflow and pytest eval tests · reporting
- ·  **Prerequisites:** [Dataset strategy](../01-datasets/01-dataset-strategy.md), [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md)
- ·  **Related:** [Retrieval metrics](./02-retrieval-metrics.md), [Text-to-SQL evals](./05-text-to-sql-evals.md), [Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md), [Monitoring, alerting & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
+**You will learn:** What metadata to record for every run · Paired baseline-vs-variant comparisons and flip analysis · Handling non-determinism with `pass@k` and `pass^k` · Confidence intervals, paired bootstrap, and McNemar's test · Slice analysis, cost/latency budgets, and RAG ablations · Preventing eval-set overfitting · Tiered CI/CD gates with GitHub Actions and `pytest`  
+**Prerequisites:** [Dataset strategy](../01-datasets/01-dataset-strategy.md), [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md)  
+**Related:** [Retrieval metrics](./02-retrieval-metrics.md), [Text-to-SQL evals](./05-text-to-sql-evals.md), [Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md), [Monitoring, alerting & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
 
 ---
 
@@ -23,15 +27,15 @@ flowchart LR
     M --> O["Online monitoring confirms"]
 ```
 
-The key word is **paired**: baseline and variant run on *the same items*, under the same judge versions, at the same time. Comparing today's variant to a number in last month's slide deck is not an experiment.
+Run every comparison as a **paired** experiment on the exact same dataset items, using the same judge versions, at the same time. Never compare today's variant against a stale score from last month's slide deck.
 
-In our running example — an enterprise assistant over company docs, a warehouse (text-to-SQL), and a ticketing tool, with RBAC — typical experiments are: "switch embedding model", "top-k 5 → 8", "add a reranker", "new system prompt", "upgrade the generator model", "add schema retrieval for SQL".
+Consider our running example of an enterprise assistant over company docs, a data warehouse (text-to-SQL), and a ticketing tool with RBAC. Typical experiments change the embedding model, `top-k` (5 vs 8), reranker, system prompt, generator model, or SQL schema retriever.
 
 ---
 
 ## 2. What to record for every run
 
-If you can't reproduce a run, you can't trust a comparison with it.
+If you cannot reproduce an evaluation run, you cannot trust any comparison against it. Log these eight categories for every run:
 
 | Category | Record | Why |
 |---|---|---|
@@ -44,9 +48,9 @@ If you can't reproduce a run, you can't trust a comparison with it.
 | **Operational** | latency (end-to-end and per step), tokens in/out, cost, retries, tool-call counts | Budgets and trade-offs |
 | **Run meta** | seed(s), repeat index, timestamp, who/what triggered it (PR, nightly) | Non-determinism and audit |
 
-**Tooling:** most eval platforms have first-class "experiments" over datasets (e.g. LangSmith, Braintrust, Arize Phoenix, W&B Weave, MLflow's GenAI evaluation, promptfoo's eval viewer). A spreadsheet + JSONL files + a git-tracked config also works for a first version. See [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md). Whatever you pick, store **per-item** results, not just aggregates.
+**Tooling:** Dedicated evaluation platforms (such as LangSmith, Braintrust, Arize Phoenix, W&B Weave, MLflow GenAI evaluation, and promptfoo) provide built-in dataset experiment tracking. You can also start with git-tracked config files, JSONL output logs, and a summary script (see [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)). Always persist **per-item** outputs and scores, not just aggregate averages.
 
-**Cache aggressively** to cut cost and noise: when testing a generation-only change, reuse cached retrieval results from the baseline; when testing a retrieval change, you can score retrieval metrics first (cheap) and only run generation + judges if retrieval looks promising.
+**Cache intermediate steps** to reduce cost and variance. When you test a generation-only change, reuse cached retrieval outputs from the baseline run. When you test a retrieval change, compute fast retrieval metrics first and run generation plus LLM judges only if retrieval improves.
 
 ---
 
@@ -54,16 +58,16 @@ If you can't reproduce a run, you can't trust a comparison with it.
 
 ### 3.1 Look at flips, not just averages
 
-Two variants can both score 82% while failing completely different items. Build the **paired contingency table** for each binary metric:
+Two variants can both achieve an 82% pass rate while failing on completely different questions. Build a **paired contingency table** for every binary metric:
 
 |  | Variant PASS | Variant FAIL |
 |---|---|---|
 | **Baseline PASS** | both pass (a) | **regressions** (b) |
 | **Baseline FAIL** | **fixes** (c) | both fail (d) |
 
-- Net change = (c − b) / N.
-- **Read every regression** (b) before merging — regressions on previously passing items are where users notice.
-- High b *and* high c with small net change = the variant is *different*, not better. Often a sign of noise (see §4) or of a trade-off between slices (see §6).
+- Compute net improvement as `(c − b) / N`.
+- **Inspect every regression (`b`)** before merging, because users notice when previously working queries break.
+- High counts in both `b` and `c` with a near-zero net difference indicate that the variant is *different*, not better. This pattern usually points to sampling noise (§4) or a trade-off across slices (§6).
 
 ### 3.2 A comparison report
 
@@ -101,22 +105,22 @@ Decision                       Ship. Investigate 9 regressions (6 are SQL questi
 | Agent/tool environment | APIs, time, DB state change | Mock or snapshot tools; freeze "now"; pinned DB snapshot |
 | Item sampling | Small eval set | More items; CIs; stratify |
 
-**Evaluate at the temperature you ship.** Evaluating at 0 and shipping at 0.7 measures a different system.
+**Evaluate at the exact temperature you deploy in production.** Evaluating at temperature `0.0` while serving production traffic at `0.7` tests a different system.
 
 ### 4.2 Repeated runs
 
-Run each item **k times** (heuristic: 3–5 for PR-level decisions on small sets, more for agentic tasks with long trajectories). Then report per-item pass *rate* and aggregate. Repeats shrink noise from sampling but **do not** substitute for more items: they reduce within-item variance, not item-sampling variance.
+Execute each evaluation item **`k` times** (use 3 to 5 repeats for pull-request checks on small sets, and more repeats for multi-step agent trajectories). Compute the per-item pass rate and average across items. Repeated runs reduce within-item sampling variance, but they **do not** replace a larger dataset because they cannot reduce item-sampling variance.
 
 ### 4.3 pass@k vs pass^k
 
-These answer opposite questions:
+`pass@k` and `pass^k` answer opposite reliability questions:
 
 | Metric | Question | Definition (from n trials with c successes) | Use for |
 |---|---|---|---|
 | **pass@k** | "Does *at least one* of k attempts succeed?" | `1 − C(n−c, k) / C(n, k)` — the unbiased estimator from [Chen et al., 2021 (Codex)](https://arxiv.org/abs/2107.03374) | Settings with a verifier/selector or user retries (e.g. code + tests, best-of-k with a checker) |
 | **pass^k** | "Do *all* k attempts succeed?" — consistency/reliability | `C(c, k) / C(n, k)`, introduced in [τ-bench (Yao et al., 2024)](https://arxiv.org/abs/2406.12045) | User-facing agents: each user gets one attempt, and many users ask similar things |
 
-pass@k rises with k; pass^k falls with k. For an enterprise agent that must behave reliably every time, **pass^k is the more honest metric** — an agent with 80% per-trial success has pass^8 well below 80% unless its successes are concentrated on the same items.
+As `k` increases, `pass@k` rises while `pass^k` falls. For an enterprise assistant that must succeed reliably on the first try, **use `pass^k` as your primary reliability metric**. An agent with an 80% single-trial success rate can easily drop below 40% on `pass^8` if its failures are spread across items.
 
 ```python
 from math import comb
@@ -143,11 +147,11 @@ dataset_metric(items, 4, pass_hat_k)                 # ≈ 0.30
 
 ## 5. Statistical significance
 
-Eval sets are small, LLM outputs are noisy, and differences are often a few points. Without uncertainty estimates, teams ship noise. A good primer is Evan Miller's [Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640) (2024), which recommends standard errors/CIs on eval scores, **paired** comparisons between models on the same questions, **clustered** standard errors when questions are grouped (e.g. several questions about the same document), and power analysis.
+Evaluation datasets are often small, LLM outputs are stochastic, and real improvements are frequently only 2 to 5 percentage points. Without confidence intervals, teams routinely ship random noise. Follow Evan Miller's [Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640) (2024): report confidence intervals, run **paired** comparisons, and cluster standard errors by source document.
 
 ### 5.1 How big must the eval set be?
 
-Approximate 95% CI half-width for a single pass rate near p (normal approximation, `1.96·sqrt(p(1−p)/n)`):
+The table below shows the approximate 95% confidence interval half-width for a single pass rate `p` using the normal approximation `1.96 · sqrt(p(1 − p) / n)`:
 
 | n | p = 0.8 | p = 0.95 |
 |---|---|---|
@@ -157,7 +161,7 @@ Approximate 95% CI half-width for a single pass rate near p (normal approximatio
 | 500 | ± 0.035 | ± 0.02 |
 | 1000 | ± 0.025 | ± 0.014 |
 
-Paired comparisons are much tighter than this (shared item difficulty cancels out), which is why you should always compare on the same items. Still, as a heuristic: **with ~100 items, don't expect to reliably detect differences smaller than ~5 points**; for ~2–3 point effects you need several hundred items and paired tests. (For small n or p near 0/1, prefer Wilson intervals or the bootstrap over the normal approximation.)
+**Paired comparisons** achieve narrower confidence intervals than unpaired comparisons because shared item difficulty cancels out. A 100-item dataset detects ~5-point changes, while 300–500 paired items detect 2–3 point gains. When `n` is small or `p` is near 0 or 1, use Wilson intervals or bootstrap resampling instead of the normal approximation.
 
 ### 5.2 Paired bootstrap for the difference
 
@@ -188,7 +192,7 @@ def paired_bootstrap(base: list[float], var: list[float], n_boot: int = 10_000, 
 
 ### 5.3 McNemar's test for paired pass/fail
 
-For binary metrics on the same items, McNemar's test uses only the **discordant** pairs: b (baseline pass → variant fail) and c (fail → pass). The exact version is a binomial test of whether regressions and fixes are equally likely:
+For binary pass/fail metrics on the same items, **McNemar's test** analyzes only discordant pairs (`b` regressions and `c` fixes). The exact McNemar test is a binomial test of whether `b` and `c` are equally likely:
 
 ```python
 from math import comb
@@ -209,22 +213,22 @@ var  = [True] * 300 + [False] * 9 + [True] * 23 + [False] * 68
 mcnemar_exact(base, var)    # {'regressions': 9, 'fixes': 23, 'p_value': ≈0.02}
 ```
 
-If you use `scipy`, `scipy.stats.binomtest(min(b, c), b + c, 0.5)` gives the same exact test.
+In SciPy, call `scipy.stats.binomtest(min(b, c), b + c, 0.5)` to compute the same exact p-value.
 
 ### 5.4 Practical rules
 
-- [ ] Report **CIs**, not just point estimates. Put them in the PR comment.
-- [ ] Use **paired** tests (paired bootstrap, McNemar) for baseline vs variant.
-- [ ] Use **clustered** resampling when items share a source document, conversation, or template.
-- [ ] Beware **multiple comparisons**: testing 20 metrics × 10 slices will produce "significant" noise. Pre-declare the 1–3 primary metrics that decide shipping; treat the rest as diagnostics.
-- [ ] Statistical significance ≠ practical significance. Pre-agree on a **minimum effect worth shipping** (e.g. "+2 points correctness, or any reduction in critical failures").
-- [ ] Judge noise adds variance and judge *bias* adds error that significance tests don't see — validate judges first (see [LLM-as-a-judge](./07-llm-as-a-judge.md)).
+- [ ] **Report 95% confidence intervals** alongside point estimates in every pull-request summary.
+- [ ] **Use paired statistical tests** (paired bootstrap or McNemar's test) when comparing a variant against a baseline.
+- [ ] **Resample by cluster** whenever multiple test questions share a source document, conversation, or template.
+- [ ] **Pre-declare 1 to 3 primary metrics** to avoid false discoveries from testing 20 metrics across 10 slices simultaneously.
+- [ ] **Define a minimum practical effect size** before running the experiment (such as "+2 points on answer correctness").
+- [ ] **Validate your LLM judges first** (§7 of [LLM-as-a-judge](./07-llm-as-a-judge.md)), because statistical tests cannot detect systematic judge bias.
 
 ---
 
 ## 6. Slice-level analysis
 
-Aggregates hide regressions. Tag every dataset item (see [Dataset strategy](../01-datasets/01-dataset-strategy.md)) and report each primary metric per slice.
+Aggregate scores hide localized regressions. Tag every item in your dataset (see [Dataset strategy](../01-datasets/01-dataset-strategy.md)) and break down primary metrics by slice:
 
 | Slice dimension | Example values (running example) |
 |---|---|
@@ -247,15 +251,15 @@ should-refuse (RBAC)    40     1.00       1.00     0.00   ← critical slice, mu
 unanswerable            40     0.60       0.70    +0.10
 ```
 
-- Small slices have wide CIs — show n and CIs; don't panic over a 2-point move on 50 items, but **do** read the regressed items.
-- Watch for **Simpson's paradox**: overall improvement driven by the biggest slice while smaller slices regress.
-- Some slices are **critical** (RBAC, safety, should-refuse): use zero-tolerance gates on them regardless of the aggregate.
+- **Display slice size (`n`) and confidence intervals** to avoid overreacting to 1-item flips while still reading every regression.
+- **Check for Simpson's paradox**, where a large gain in a dominant slice masks a regression in a smaller business-critical slice.
+- **Enforce zero-tolerance gates on critical slices** (such as RBAC, safety, and prompt-injection refusals) regardless of overall score improvements.
 
 ---
 
 ## 7. Cost and latency budgets
 
-Quality improvements that double cost or latency are not free. Track operational metrics in the same experiment:
+A quality gain that doubles latency or token cost is rarely shippable. Measure operational metrics alongside quality in every experiment:
 
 | Metric | Granularity | Typical budget form (heuristic) |
 |---|---|---|
@@ -266,9 +270,7 @@ Quality improvements that double cost or latency are not free. Track operational
 | Tool calls / LLM calls per task | mean, max | Agent loops are where costs explode |
 | SQL bytes scanned | per query | Warehouse cost (see [Text-to-SQL evals](./05-text-to-sql-evals.md)) |
 
-Plot **quality vs cost** (and quality vs latency) for all candidate configs and pick from the **Pareto frontier** — configs that aren't beaten on both axes by another config. Make budgets explicit gates, not afterthoughts.
-
-Note that offline latency is only indicative (different load, caches, regions); confirm with online monitoring.
+Plot **quality against cost** and **quality against p95 latency** across candidate configurations, and select configurations on the **Pareto frontier**. Enforce cost and latency ceilings as explicit CI gates. Confirm latency online after deployment, since offline concurrency and cache behavior differ from production.
 
 ---
 
@@ -289,14 +291,14 @@ Note that offline latency is only indicative (different load, caches, regions); 
 | Schema retrieval for SQL (k tables) | Schema-linking recall, execution accuracy | Prompt length, hallucinated columns |
 | Agent max steps / tool set | Task success, pass^k | Cost, latency, loops |
 
-Use **component-level metrics** to localize the effect (see [Retrieval metrics](./02-retrieval-metrics.md)) and **end-to-end** metrics to confirm users would notice (see [End-to-end RAG evals](./01-end-to-end-rag-evals.md)). A retrieval improvement that doesn't move E2E correctness usually means generation or the dataset is the bottleneck.
+Pair **component-level metrics** ([Retrieval metrics](./02-retrieval-metrics.md)) with **end-to-end metrics** ([End-to-end RAG evals](./01-end-to-end-rag-evals.md)) to isolate bottlenecks. If a retrieval change improves `recall@k` by 10 points without moving end-to-end answer correctness, your generator prompt or evaluation dataset is the bottleneck.
 
 ### 8.2 Sweeps
 
-- **Grid** for 1–2 knobs with few values (top-k ∈ {3, 5, 8, 12} × reranker ∈ {off, on}).
-- **Random or Bayesian search** when there are many knobs; still keep the number of configs modest relative to your dataset size — every extra config is another chance to overfit (§9).
-- Run sweeps with **cheap metrics first** (retrieval metrics need no generation or judges), then run full E2E evals on the top 2–3 configs.
-- Optimize on **dev**, confirm the winner once on **held-out test**.
+- **Use grid search** when tuning 1 or 2 parameters across a small set of values (such as `top_k ∈ {3, 5, 8, 12}` × `reranker ∈ {off, on}`).
+- **Use random or Bayesian search** for higher-dimensional spaces, but keep the total number of evaluated configurations small to avoid overfitting your `dev` set (§9).
+- **Filter with cheap component metrics first:** Run fast retrieval-only evaluations across the grid and discard configurations that exceed latency budgets. Run expensive end-to-end LLM judges only on the top 2 or 3 candidates.
+- **Select on `dev` and verify once on `test`:** Tune hyperparameters on your `dev` split and evaluate the winning configuration once on your held-out `test` split.
 
 ```python
 import itertools
@@ -317,15 +319,15 @@ def sweep(run_retrieval_eval, dev_items):
 
 ## 9. Avoiding overfitting to the eval set
 
-Every time you look at eval results and adjust a prompt, the eval set leaks a little into the system. After enough iterations, the dev score measures how well you've memorized the dev set.
+Every time you inspect failed items and tweak your prompt to fix them, information from the evaluation dataset leaks into your system. Over time, your `dev` score measures memorization rather than generalization. Prevent evaluation overfitting with these practices:
 
-- [ ] **Split** golden data into **dev** (iterate freely, read failures) and **test** (held out; run only to confirm candidates — e.g. before release). Stratify both by slice.
-- [ ] **Never** put eval items (or close paraphrases) into few-shot examples, system prompts, or fine-tuning data. Deduplicate with near-duplicate detection.
-- [ ] **Refresh** regularly: add newly mined production cases (see [Production data flywheel](../01-datasets/04-production-data-flywheel.md)); retire stale items; version the dataset.
-- [ ] Keep a **"fresh sample"** set — a new random sample of recent production traffic labelled each cycle — as an out-of-sample check.
-- [ ] Watch for **Goodhart's law**: optimizing a judge metric can produce outputs that please the judge (longer, more hedged, more citations) rather than users. Spot-check with humans and online signals.
-- [ ] Be wary of large dev→test gaps; they mean you've overfit or the splits differ in distribution.
-- [ ] For public benchmarks, assume possible **training-data contamination**; rely on private, recent data for decisions.
+- [ ] **Maintain strict `dev` and held-out `test` splits** stratified by slice, and run `test` only on release candidates.
+- [ ] **Never copy evaluation items or close paraphrases** into few-shot prompt examples, system instructions, or fine-tuning datasets.
+- [ ] **Refresh datasets continuously** by adding mined production failures ([Production data flywheel](../01-datasets/04-production-data-flywheel.md)) under a new dataset version tag.
+- [ ] **Grade a periodic fresh sample** of recent production traces as an out-of-sample reality check.
+- [ ] **Guard against Goodhart's law:** Audit responses with humans so prompts do not game judge biases (like length padding).
+- [ ] **Investigate large `dev`-to-`test` score gaps**, which indicate either prompt overfitting or distribution mismatch between splits.
+- [ ] **Treat public benchmarks as contaminated** by pre-training data and rely on private enterprise datasets for shipping decisions.
 
 ---
 
@@ -342,13 +344,13 @@ Every time you look at eval results and adjust a prompt, the eval set leaks a li
 
 ### 10.2 Designing gates
 
-Three kinds of gate, combined:
+Combine three gate types in your CI pipeline:
 
-1. **Critical (zero-tolerance) gates** — any failure blocks: RBAC leakage tests, SQL write/DDL attempts, fabricated citation IDs, prompt-injection must-refuse items, schema-invalid tool calls.
-2. **Absolute thresholds** — floor values: "faithfulness pass rate ≥ 0.85", "execution accuracy ≥ 0.75", "p95 latency ≤ 5 s". Set floors slightly below current performance so they catch real breakage, not noise.
-3. **Relative non-regression** — compared to the baseline run on the same items: "Δ correctness ≥ −0.02" or "upper bound of the 95% CI on the drop must be < 3 points". Set tolerance from measured noise: run the baseline against itself a few times and look at the spread.
+1. **Critical zero-tolerance gates:** Block pull requests on any RBAC leak, unsafe SQL, fabricated citation ID, injection compliance, or invalid schema.
+2. **Absolute floor gates:** Enforce minimum acceptable quality bars (`faithfulness ≥ 0.85`, `execution_accuracy ≥ 0.75`, `p95_latency ≤ 5.0s`) set slightly below baseline to avoid flakiness.
+3. **Relative non-regression gates:** Compare against the baseline on identical items (`Δ answer_correctness ≥ -0.02`, or 95% CI lower bound `≥ -0.03`). Calibrate your tolerance by running the baseline against itself 3 to 5 times to measure natural run-to-run variance.
 
-Practical tips: prefer **failing on critical items + warning on soft thresholds** at the smoke tier (small n makes thresholds noisy); enforce soft thresholds strictly only in the full suite. Post a results table to the PR. Keep the eval budget explicit (max $ per CI run) and cache baseline results keyed by config hash.
+On pull requests (Tier 1), **hard-fail on critical items and post warnings on soft aggregate thresholds** because small smoke-set sample sizes have wide confidence intervals. Enforce strict aggregate non-regression gates in the full suite (Tier 2). Always post a markdown comparison table to the pull request, cap maximum LLM spend per CI run, and cache baseline outputs by config hash.
 
 ### 10.3 Illustrative GitHub Actions workflow
 
@@ -435,11 +437,11 @@ jobs:
           path: evals/out/
 ```
 
-If you use promptfoo, it also ships a GitHub Action for running evals on PRs ([promptfoo-action](https://github.com/promptfoo/promptfoo-action)); most eval platforms provide CI integrations too.
+Tools like promptfoo also provide pre-built GitHub Actions ([promptfoo-action](https://github.com/promptfoo/promptfoo-action)) for pull-request evaluation comments.
 
 ### 10.4 pytest-style eval tests
 
-Use pytest as the runner: per-item tests for **critical** items (each failure is individually visible), and aggregate tests for **thresholds** and **non-regression**.
+Use `pytest` to structure your evaluation suite. Parametrize **critical items** as individual test cases, and run **aggregate threshold and non-regression checks** over session-cached outputs:
 
 ```python
 # evals/test_agent_evals.py — illustrative; `my_app.run_agent` and the dataset format are yours.
@@ -492,13 +494,13 @@ def test_faithfulness_non_regression(faithfulness_results):
         f"faithfulness {rate:.3f} regressed vs baseline {BASELINE['faithfulness']:.3f} (tolerance 0.02)")
 ```
 
-Register the markers in `pytest.ini` / `pyproject.toml` (`markers = smoke: ..., full: ...`). Frameworks such as DeepEval also offer pytest integration with their metrics; the structure above works with any metric implementation.
+Register the custom `smoke` and `full` markers in `pytest.ini` or `pyproject.toml`.
 
 ---
 
 ## 11. Reporting and dashboards
 
-Who reads what:
+Tailor your evaluation reports to each audience:
 
 | Audience | Wants | Format |
 |---|---|---|
@@ -506,41 +508,41 @@ Who reads what:
 | Team lead / weekly review | Trend over time, biggest failure modes, slice health | Dashboard: primary metrics per release, per slice, failure-mode counts |
 | Stakeholders / launch review | Is it good enough and safe? | One page: headline pass rates with CIs, critical-slice results, known limitations, cost |
 
-Dashboard essentials:
+Include five essential views in your evaluation dashboard:
 
-- Primary metrics **over time**, per release, with CIs — and annotations when **dataset or judge versions change** (otherwise you'll misread a step change).
-- **Slice heatmap** (slice × metric).
-- **Failure-mode taxonomy counts** from error analysis (e.g. "wrong fiscal quarter", "missed carry-over rule", "fabricated citation").
-- **Cost and latency** next to quality.
-- Links from every number to the underlying items and traces. A metric you can't click into is a metric nobody will trust.
+- **Primary metrics over time** per release with 95% confidence intervals and vertical annotations marking **dataset or judge version updates**.
+- **A slice-by-metric heatmap** highlighting weak or regressed slices.
+- **Failure-mode taxonomy counts** from error analysis (such as "wrong fiscal quarter", "missed carry-over rule", or "fabricated citation").
+- **Cost and p95 latency trends** plotted alongside quality metrics.
+- **Direct drill-down links** from every aggregate score to the underlying dataset items and execution traces.
 
 ---
 
 ## 12. Checklist: running a good offline experiment
 
-- [ ] Write the hypothesis and the **primary metric(s)** and minimum effect before running.
-- [ ] Change **one thing**; record the full config, dataset version, judge versions, git SHA.
-- [ ] Run baseline and variant on the **same items** at the same time (cache where safe).
-- [ ] Use the **production temperature**; repeat runs if outputs are stochastic; consider pass^k for agents.
-- [ ] Compute **paired** deltas with **CIs** (bootstrap; clustered if items are grouped); McNemar for binary.
-- [ ] Read the **regressions** (pass → fail) and a sample of fixes.
-- [ ] Check **slices**, especially critical ones (RBAC, safety, should-refuse).
-- [ ] Check **cost and latency** budgets.
-- [ ] Decide on **dev**; confirm once on **held-out test** before release.
-- [ ] Record the decision and update the baseline; refresh the dataset with new failure cases.
+- [ ] **Write down your hypothesis, primary metrics, and minimum effect size** before running the experiment.
+- [ ] **Change one variable at a time** and log the full config, dataset hash, judge versions, and git SHA.
+- [ ] **Run the baseline and variant on the exact same items** and reuse cached intermediate steps where valid.
+- [ ] **Evaluate at your production temperature**, run repeats for stochastic tasks, and compute `pass^k` for agent reliability.
+- [ ] **Compute paired deltas with 95% confidence intervals** (using clustered bootstrap or McNemar's test).
+- [ ] **Inspect every regression (`Baseline PASS → Variant FAIL`)** and a sample of fixed items.
+- [ ] **Check slice-level scores**, enforcing zero-tolerance gates on RBAC, safety, and refusal slices.
+- [ ] **Verify that cost and p95 latency stay within budget.**
+- [ ] **Iterate on the `dev` split and validate once on the held-out `test` split** before release.
+- [ ] **Record the shipping decision, update the baseline artifact, and feed new production failures into the next dataset version.**
 
 ---
 
 ## Key takeaways
 
-- Treat every change as an **experiment**: pinned dataset, recorded config, same-item baseline, pre-declared primary metric, explicit gate.
-- Compare **per item**: paired deltas, flips (regressions vs fixes), paired bootstrap CIs, McNemar's test.
-- LLM systems are **non-deterministic**: evaluate at production temperature, repeat runs, and use **pass^k** for reliability — pass@k answers a different question.
-- With ~100 items you can't reliably see small differences; size datasets for the effect you care about and report CIs.
-- **Slice** everything; give critical slices (RBAC, safety) zero-tolerance gates.
-- Ablate **one knob at a time**, use cheap component metrics first, then confirm end-to-end; pick from the quality–cost Pareto frontier.
-- Protect a **held-out test set** and refresh data from production to avoid overfitting your evals.
-- In CI: deterministic tests on every commit, a **smoke eval** with must-pass items on PRs, the **full suite** nightly/pre-release, then online monitoring.
+- **Treat every change as a paired experiment:** Use a pinned dataset, recorded config, same-item baseline, pre-declared primary metrics, and explicit release gates.
+- **Analyze item-level flips and paired statistics** (regressions vs fixes, paired bootstrap confidence intervals, and McNemar's test) instead of raw aggregate averages.
+- **Account for non-determinism:** Evaluate at production temperature, run repeated trials, and use **`pass^k`** to measure user-facing reliability.
+- **Size your dataset for your target effect:** Expect ±5-point noise on 100 items, and use 300–500 paired items for 2–3 point gains.
+- **Break results down by slice** and enforce zero-tolerance gates on critical security and safety slices.
+- **Ablate one knob at a time**, filter sweeps with fast component metrics first, and choose configurations on the quality–cost–latency Pareto frontier.
+- **Protect a held-out test split** and continuously refresh datasets from production traces to prevent overfitting.
+- **Automate tiered CI/CD gates:** Run unit checks on every commit, smoke suites on pull requests, full suites nightly, and sampled judges online.
 
 ## Further reading
 

@@ -1,18 +1,24 @@
 # Retrieval Metrics
 
-> **TL;DR** — Retrieval is the most common root cause of bad RAG answers, and it is the cheapest stage to evaluate: once you have labeled relevant chunks, every metric is deterministic arithmetic over a ranked list. Use **recall@k** to know whether the right evidence reaches the LLM, **nDCG@k / MRR** to know whether it's ranked near the top, and evaluate each stage (query rewrite, hybrid search, reranker) separately to find where lift comes from.
+> **TL;DR**
+> - **Measure recall@k first.** Verify that your retriever passes all required evidence chunks to the generator LLM.
+> - **Use nDCG@k and MRR for ranking.** Evaluate whether your pipeline ranks the most relevant chunks near the top.
+> - **Label at stable span granularity.** Anchor relevance labels to document character spans so re-chunking does not break your evals.
+> - **Evaluate every retrieval stage separately.** Measure query rewriting, hybrid search, RBAC filters, and rerankers on the same queries.
 
-**You'll learn:** hit rate, precision/recall/F1@k, MRR, MAP, nDCG, R-precision — formulas, a single worked example, and pure-Python code; binary vs graded relevance; how to get relevance labels; chunk- vs document-level matching pitfalls; per-stage evaluation of rewriting, hybrid search and reranking; embedding model selection; retrieval latency  ·  **Prerequisites:** [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)  ·  **Related:** [Synthetic datasets](../01-datasets/03-synthetic-datasets.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Retrieval and context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md)
+**You will learn:** Hit rate, precision/recall/F1@k, MRR, MAP, nDCG, and R-precision · Relevance labeling and pooling · Chunk vs document matching · Per-stage retrieval evals  
+**Prerequisites:** [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)  
+**Related:** [Synthetic datasets](../01-datasets/03-synthetic-datasets.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Retrieval and context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md)
 
 ---
 
 ## 1. Setup and notation
 
-For each query `q` in the eval set you need:
+For each query `q` in your evaluation dataset, collect three inputs:
 
-- **Ranked results** `[d_1, d_2, ..., d_n]` — chunk or document IDs your retriever returned, in order.
-- **Relevance judgments** — either a set of relevant IDs `R` (**binary**) or a map `rel(d) ∈ {0,1,2,3}` (**graded**).
-- A cut-off `k` — usually the number of chunks you actually pass to the LLM (e.g. 5 or 10), plus a larger `k` (e.g. 50) for the candidate pool before reranking.
+- **Ranked results** `[d_1, d_2, ..., d_n]`: The ordered list of chunk or document IDs that your retriever returned.
+- **Relevance judgments**: Either a set of relevant IDs `R` (**binary**) or a grade map `rel(d) ∈ {0,1,2,3}` (**graded**).
+- **A cutoff `k`**: Set `k` to the chunk count you pass to the LLM (such as 5 or 10). Also track a larger cutoff (such as 50) for the candidate pool before reranking.
 
 Dataset row shape:
 
@@ -23,14 +29,14 @@ Dataset row shape:
  "tags": {"type": "policy", "source": "it-handbook"}}
 ```
 
-Every metric below is computed **per query**, then **averaged across queries** (macro-average). Always also look at the per-query distribution; a mean recall of 0.8 may be 80% of queries at 1.0 and 20% at 0.0.
+Compute every metric **per query** first, then average the scores across all queries (**macro-average**). Always inspect the per-query distribution alongside the mean. A mean recall of 0.80 can hide 20% of queries scoring 0.0.
 
 ### The running worked example
 
 Query: *"What is the laptop refresh policy for engineers?"*
 
-- Graded relevance labels: `d1 = 3` (the exact policy section), `d3 = 2` (engineering exception), `d5 = 2` (request process), `d4 = 1` (tangential mention). Everything else is 0. So `R = {d1, d3, d4, d5}`, `|R| = 4`.
-- Retriever returns top 5: `[d7, d3, d1, d9, d4]`. Note `d5` was **not** retrieved.
+- Graded relevance labels: `d1 = 3` (exact policy section), `d3 = 2` (engineering exception), `d5 = 2` (request process), `d4 = 1` (tangential mention). All other chunks have grade `0`. Thus `R = {d1, d3, d4, d5}` and `|R| = 4`.
+- The retriever returns top 5: `[d7, d3, d1, d9, d4]`. Notice that the retriever missed `d5`.
 
 | Rank | Doc | Graded rel | Binary rel | Hits so far | precision@rank |
 |---|---|---|---|---|---|
@@ -40,7 +46,7 @@ Query: *"What is the laptop refresh policy for engineers?"*
 | 4 | d9 | 0 | 0 | 2 | 2/4 = 0.50 |
 | 5 | d4 | 1 | 1 | 3 | 3/5 = 0.60 |
 
-We'll compute every metric on this one list.
+We will compute every metric below using this ranked list.
 
 ---
 
@@ -48,94 +54,94 @@ We'll compute every metric on this one list.
 
 ### Hit rate@k
 
-- **What it measures:** Whether **at least one** relevant item appears in the top k. Also called *success@k* or *top-k accuracy*.
-- **Inputs required:** Ranked IDs, relevant set. Ground truth required (relevance labels).
-- **How it's computed:**
+- **What it measures:** Whether **at least one** relevant item appears in the top `k` results (also called *success@k* or *top-k accuracy*).
+- **Inputs required:** Ranked IDs and the relevant set `R`. Requires ground-truth relevance labels.
+- **How to compute it:**
   ```text
   hit@k = 1 if |top_k ∩ R| > 0 else 0
   hit_rate@k = mean over queries of hit@k
   ```
-- **Score range & interpretation:** 0–1. "Fraction of queries where the LLM saw at least some relevant evidence."
-- **Worked example:** hit@1 = 0 (d7 irrelevant); hit@3 = 1; hit@5 = 1.
-- **Pitfalls / gotchas:** Ignores how many relevant items were found — misleading for multi-hop or multi-part questions that need several chunks.
-- **When to use / when not to:** Great headline metric when most questions have a single answer-bearing chunk (typical of synthetic "generate a question from this chunk" datasets). Not sufficient for multi-chunk answers.
-- **Implemented in:** LlamaIndex retrieval evaluator (`hit_rate`), ranx, pytrec_eval-style tooling (as success@k), or trivially by hand.
+- **Score range & interpretation:** 0 to 1. It represents the fraction of queries where the LLM sees at least one relevant chunk.
+- **Worked example:** `hit@1 = 0` (`d7` is irrelevant), `hit@3 = 1`, and `hit@5 = 1`.
+- **Pitfalls and gotchas:** Hit rate ignores how many relevant chunks the retriever found. It can mislead you on multi-hop or multi-part questions that require several chunks.
+- **When to use it:** Use hit rate when each question needs only one source chunk (such as single-chunk synthetic datasets). Do not rely on it alone for multi-chunk questions.
+- **Implemented in:** LlamaIndex (`hit_rate`), `ranx`, `pytrec_eval` (`success@k`), or custom Python.
 
 ### Precision@k
 
-- **What it measures:** The fraction of the top k that is relevant — how much of the context window is signal.
-- **Inputs required:** Ranked IDs, relevant set.
-- **How it's computed:**
+- **What it measures:** The fraction of the top `k` results that are relevant. It measures the signal-to-noise ratio of your context window.
+- **Inputs required:** Ranked IDs and the relevant set `R`.
+- **How to compute it:**
   ```text
   precision@k = |top_k ∩ R| / k
   ```
-- **Score range & interpretation:** 0–1. Upper-bounded by `|R|/k` — if a query has only 1 relevant chunk, precision@5 can never exceed 0.2.
-- **Worked example:** precision@1 = 0; precision@3 = 2/3 ≈ 0.67; precision@5 = 3/5 = 0.60.
-- **Pitfalls / gotchas:** Rank-unaware within the top k; penalises queries with few relevant items. Comparing precision@k across datasets with different `|R|` distributions is meaningless.
-- **When to use / when not to:** Choosing k (how many chunks to stuff into the prompt) and measuring noise. For the "is the evidence there at all" question, use recall.
-- **Implemented in:** ranx, pytrec_eval, LlamaIndex, RAGAS (non-LLM context precision variants), most IR libraries.
+- **Score range & interpretation:** 0 to 1. Note that `|R| / k` caps the maximum possible score. If a query has only 1 relevant chunk, `precision@5` can never exceed `0.20`.
+- **Worked example:** `precision@1 = 0`, `precision@3 = 2/3 ≈ 0.67`, and `precision@5 = 3/5 = 0.60`.
+- **Pitfalls and gotchas:** Precision@k ignores chunk order inside the top `k` and penalizes queries with few relevant items. Never compare `precision@k` across datasets with different `|R|` distributions.
+- **When to use it:** Use it to choose prompt cutoff `k` and control context noise. Pair it with `recall@k` to check evidence coverage.
+- **Implemented in:** `ranx`, `pytrec_eval`, LlamaIndex, RAGAS (non-LLM context precision).
 
 ### Recall@k
 
-- **What it measures:** The fraction of all relevant items that made it into the top k — *"did the LLM get everything it needed?"*
-- **Inputs required:** Ranked IDs, relevant set (must be as **complete** as possible).
-- **How it's computed:**
+- **What it measures:** The fraction of all relevant items that appear in the top `k` results. It answers: *"Did the LLM receive everything it needed?"*
+- **Inputs required:** Ranked IDs and a **complete** relevant set `R`.
+- **How to compute it:**
   ```text
   recall@k = |top_k ∩ R| / |R|
   ```
-- **Score range & interpretation:** 0–1. For RAG, this is usually the **most important retrieval metric**: missing evidence cannot be recovered by the generator.
-- **Worked example:** recall@1 = 0/4 = 0; recall@3 = 2/4 = 0.50; recall@5 = 3/4 = 0.75 (d5 missing).
-- **Pitfalls / gotchas:** Only as good as the completeness of `R`. If labelers only marked one relevant chunk but three exist, you'll underestimate recall for systems that find the others — and may "regress" when you actually improved.
-- **When to use / when not to:** Always. Report at the k you pass to the LLM, and at the candidate-pool k before reranking (recall@50 bounds what a reranker can achieve).
-- **Implemented in:** ranx, pytrec_eval, LlamaIndex, RAGAS (non-LLM context recall), DeepEval (LLM-based contextual recall is the reference-answer analogue).
+- **Score range & interpretation:** 0 to 1. Recall@k is the **most important retrieval metric for RAG** because the generator cannot recover missing evidence.
+- **Worked example:** `recall@1 = 0/4 = 0`, `recall@3 = 2/4 = 0.50`, and `recall@5 = 3/4 = 0.75` (`d5` is missing).
+- **Pitfalls and gotchas:** Recall accuracy depends on the completeness of `R`. If labelers mark only one relevant chunk when three exist, your evaluation penalizes retrievers that find the other valid chunks.
+- **When to use it:** Report `recall@k` at your prompt cutoff `k` and at your pre-rerank candidate cutoff (such as `recall@50`, which caps reranker performance).
+- **Implemented in:** `ranx`, `pytrec_eval`, LlamaIndex, RAGAS (non-LLM context recall), DeepEval (contextual recall).
 
 ### F1@k
 
-- **What it measures:** Harmonic mean of precision@k and recall@k.
-- **How it's computed:**
+- **What it measures:** The harmonic mean of `precision@k` and `recall@k`.
+- **How to compute it:**
   ```text
   F1@k = 2 · P@k · R@k / (P@k + R@k)
   ```
-- **Worked example:** F1@5 = 2 · 0.60 · 0.75 / 1.35 ≈ 0.67.
-- **Pitfalls / gotchas:** Blends two things you usually want to see separately; rank-unaware.
-- **When to use / when not to:** Choosing a dynamic k or a similarity-score cut-off, where you trade precision against recall. Otherwise report P and R separately.
-- **Implemented in:** Trivial to compute; several IR libraries.
+- **Worked example:** `F1@5 = 2 · 0.60 · 0.75 / 1.35 ≈ 0.67`.
+- **Pitfalls and gotchas:** F1@k hides whether a change helped precision or recall, and it ignores chunk order.
+- **When to use it:** Use F1@k when tuning a dynamic `k` or similarity threshold that trades precision against recall. Otherwise, report precision and recall separately.
+- **Implemented in:** Standard IR libraries or custom Python.
 
 ### MRR (Mean Reciprocal Rank)
 
-- **What it measures:** How high the **first** relevant result appears.
-- **How it's computed:**
+- **What it measures:** How high the **first** relevant item appears in the ranked list.
+- **How to compute it:**
   ```text
   RR(q)  = 1 / rank of first relevant item   (0 if none in top k)
   MRR@k  = mean over queries of RR(q)
   ```
-- **Score range & interpretation:** 0–1. MRR = 0.5 ≈ "first relevant result is typically at rank 2".
-- **Worked example:** First relevant is d3 at rank 2 → RR = 0.5. Across three queries with RR = 0.5, 1.0 and 0 (nothing relevant retrieved) → MRR = 0.5.
-- **Pitfalls / gotchas:** Ignores everything after the first hit; dominated by top-1 behaviour.
-- **When to use / when not to:** Single-answer lookups, navigational queries, and evaluating "top-1 citation" behaviour. Not for multi-chunk answers.
-- **Implemented in:** ranx, pytrec_eval, LlamaIndex (`mrr`), most IR libraries.
+- **Score range & interpretation:** 0 to 1. An MRR of `0.50` means the first relevant result typically appears around rank 2.
+- **Worked example:** The first relevant chunk is `d3` at rank 2, so `RR = 0.50`. Across three queries with `RR` values of `0.50`, `1.0`, and `0`, `MRR = 0.50`.
+- **Pitfalls and gotchas:** MRR ignores every relevant chunk after the first hit.
+- **When to use it:** Use MRR for single-fact lookups, navigational queries, and top-1 citation checks. Do not use it as the sole metric for multi-chunk questions.
+- **Implemented in:** `ranx`, `pytrec_eval`, LlamaIndex (`mrr`).
 
 ### MAP (Mean Average Precision)
 
-- **What it measures:** Precision averaged over the positions of all relevant items — rewards getting *all* relevant items *early*.
-- **How it's computed:**
+- **What it measures:** Precision averaged across the ranks of all relevant items. It rewards retrievers that rank *all* relevant items *near the top*.
+- **How to compute it:**
   ```text
   AP(q) = (1 / |R|) · Σ_{k=1..n} precision@k · rel_k        # rel_k ∈ {0,1}
   MAP   = mean over queries of AP(q)
   ```
-  Some implementations (including RAGAS context precision) divide by the number of relevant items **retrieved** instead of `|R|`; that variant ignores missed items. Know which one your library uses.
-- **Score range & interpretation:** 0–1.
-- **Worked example:** Relevant at ranks 2, 3, 5 with precision 0.50, 0.67, 0.60. Sum = 1.767.
-  - Standard AP (÷ |R| = 4): **0.44**
-  - "Retrieved-relevant" variant (÷ 3): **0.59**
-- **Pitfalls / gotchas:** Hard to explain to stakeholders; binary only.
-- **When to use / when not to:** Comparing rankers when queries have multiple relevant items and you lack graded labels.
-- **Implemented in:** ranx, pytrec_eval, trec_eval.
+  Some libraries (such as RAGAS context precision) divide by the number of **retrieved** relevant items instead of `|R|`. Check which denominator your library uses, because dividing by retrieved hits ignores missed items.
+- **Score range & interpretation:** 0 to 1.
+- **Worked example:** Relevant items appear at ranks 2, 3, and 5 with precisions `0.50`, `0.67`, and `0.60` (sum = `1.767`).
+  - Standard AP (dividing by `|R| = 4`): **0.44**
+  - Retrieved-only variant (dividing by `3`): **0.59**
+- **Pitfalls and gotchas:** MAP works only on binary labels and is harder to explain to non-technical stakeholders than recall or nDCG.
+- **When to use it:** Use MAP to compare rankers when queries have multiple relevant chunks and binary relevance labels.
+- **Implemented in:** `ranx`, `pytrec_eval`, `trec_eval`.
 
 ### nDCG@k (normalised Discounted Cumulative Gain)
 
-- **What it measures:** Ranking quality with **graded** relevance: highly relevant items should come first, and the gain from an item is discounted logarithmically by its rank.
-- **How it's computed:**
+- **What it measures:** Ranking quality under **graded** relevance. It rewards placing highly relevant chunks at the top and discounts lower ranks logarithmically.
+- **How to compute it:**
   ```text
   DCG@k  = Σ_{i=1..k} gain(rel_i) / log2(i + 1)
 
@@ -145,32 +151,32 @@ We'll compute every metric on this one list.
   IDCG@k = DCG@k of the ideal ordering (all labeled items sorted by rel, descending)
   nDCG@k = DCG@k / IDCG@k     (define as 0 if IDCG@k = 0)
   ```
-- **Score range & interpretation:** 0–1; 1 = perfect ordering of the labeled relevant items.
+- **Score range & interpretation:** 0 to 1, where 1.0 indicates a perfect ranking of all labeled relevant items.
 - **Worked example (exponential gain):**
   - Grades by rank: `[0, 2, 3, 0, 1]` → gains `[0, 3, 7, 0, 1]`
   - Discounts `log2(i+1)`: `[1, 1.585, 2, 2.322, 2.585]`
-  - DCG@5 = 0 + 3/1.585 + 7/2 + 0 + 1/2.585 = 1.893 + 3.5 + 0.387 = **5.780**
-  - Ideal grades `[3, 2, 2, 1, 0]` → gains `[7, 3, 3, 1, 0]` → IDCG@5 = 7 + 1.893 + 1.5 + 0.431 = **10.823**
-  - nDCG@5 = 5.780 / 10.823 ≈ **0.53** (with linear gain: ≈ 0.55)
-- **Pitfalls / gotchas:**
-  - Exponential vs linear gain gives different numbers — pin it.
-  - IDCG must be computed from **all** labeled relevant items, not just the retrieved ones, otherwise missing `d5` would be invisible.
-  - nDCG on binary labels works but loses its main advantage.
-- **When to use / when not to:** The default ranking metric when you have graded labels (e.g. from an LLM judge on a 0–3 scale) and when evaluating rerankers. It's the primary metric on BEIR and MTEB retrieval tasks (nDCG@10).
-- **Implemented in:** ranx, pytrec_eval, scikit-learn (`ndcg_score`), BEIR/MTEB evaluators.
+  - `DCG@5 = 0 + 3/1.585 + 7/2 + 0 + 1/2.585 = 1.893 + 3.5 + 0.387 =` **5.780**
+  - Ideal grades `[3, 2, 2, 1, 0]` → gains `[7, 3, 3, 1, 0]` → `IDCG@5 = 7 + 1.893 + 1.5 + 0.431 =` **10.823**
+  - `nDCG@5 = 5.780 / 10.823 ≈` **0.53** (or **0.55** with linear gain)
+- **Pitfalls and gotchas:**
+  - **Exponential and linear gain produce different scores.** Document and pin your gain formula.
+  - **Compute IDCG over all labeled items in `R`**, not just the retrieved subset. Computing IDCG over retrieved items hides missed chunks like `d5`.
+  - **Binary labels flatten nDCG's main advantage.**
+- **When to use it:** Use `nDCG@k` as your primary ranking metric when you have graded labels (`0–3` scores) or tune a reranker. BEIR and MTEB use `nDCG@10` as their headline retrieval metric.
+- **Implemented in:** `ranx`, `pytrec_eval`, `scikit-learn` (`ndcg_score`), BEIR/MTEB evaluators.
 
 ### R-precision
 
-- **What it measures:** Precision at `k = |R|` — i.e. "if I retrieve exactly as many items as there are relevant ones, what fraction is relevant?"
-- **How it's computed:**
+- **What it measures:** Precision at `k = |R|`. It measures the relevant fraction when you retrieve exactly `|R|` items.
+- **How to compute it:**
   ```text
   R-precision = |top_|R| ∩ R| / |R|
   ```
-  At this cut-off, precision equals recall.
-- **Worked example:** |R| = 4 → top 4 = `[d7, d3, d1, d9]` contains 2 relevant → **0.50**.
-- **Pitfalls / gotchas:** Requires knowing |R| reliably; uninformative when |R| = 1 (becomes hit@1).
-- **When to use / when not to:** Comparing systems across queries with very different numbers of relevant items. Less common in RAG practice.
-- **Implemented in:** trec_eval, pytrec_eval, ranx.
+  At cutoff `k = |R|`, precision and recall are equal.
+- **Worked example:** Because `|R| = 4`, the top 4 results `[d7, d3, d1, d9]` contain 2 relevant items, giving **0.50**.
+- **Pitfalls and gotchas:** R-precision requires complete `R` sets and collapses to `hit@1` whenever `|R| = 1`.
+- **When to use it:** Use it to compare retrievers across queries that have widely varying numbers of relevant chunks.
+- **Implemented in:** `trec_eval`, `pytrec_eval`, `ranx`.
 
 ### Summary of the worked example
 
@@ -189,7 +195,7 @@ We'll compute every metric on this one list.
 
 ## 3. Pure-Python implementation
 
-Framework-agnostic, no dependencies. Use it as a reference implementation and to sanity-check library outputs.
+Use this dependency-free implementation as a reference and sanity check for third-party libraries.
 
 ```python
 import math
@@ -275,54 +281,54 @@ def evaluate(run: dict[str, list[str]], qrels: dict[str, dict[str, int]],
     return {m: mean(r[m] for r in rows) for m in rows[0]} if rows else {}
 ```
 
-For production use, established libraries such as [ranx](https://github.com/AmenRa/ranx) or [pytrec_eval](https://github.com/cvangysel/pytrec_eval) (a Python wrapper around the TREC evaluation tool) compute these with standard definitions and support significance tests.
+For production pipelines, use established libraries like [ranx](https://github.com/AmenRa/ranx) or [pytrec_eval](https://github.com/cvangysel/pytrec_eval), which also provide built-in statistical significance tests.
 
 ---
 
 ## 4. Choosing concepts: binary vs graded, rank-aware vs rank-unaware
 
-| | Rank-unaware | Rank-aware |
+| Relevance type | Rank-unaware | Rank-aware |
 |---|---|---|
 | **Binary relevance** | hit@k, precision@k, recall@k, F1@k, R-precision | MRR, MAP / AP |
-| **Graded relevance** | (graded recall variants, rarely used) | **nDCG@k** |
+| **Graded relevance** | Graded recall variants (rarely used) | **nDCG@k** |
 
-- **Binary** labels are cheaper and more consistent between labelers. Start here.
-- **Graded** labels (e.g. 0 = irrelevant, 1 = tangential, 2 = partially answers, 3 = fully answers) capture "this chunk answers it vs. merely mentions it" and are worth it once you're tuning rerankers.
-- **Does rank matter for RAG?** Less than for web search — the LLM sees all k chunks — but it still matters: rank affects what survives truncation, what the model attends to (long-context models are known to under-use information in the middle of the context), and which chunk gets cited first. Use recall@k as the primary metric and nDCG@k / MRR as secondary.
+- **Start with binary labels.** Binary relevance is cheaper to collect and produces higher agreement between human labelers.
+- **Upgrade to graded labels for rerankers.** A 0–3 scale (`0` = irrelevant, `1` = tangential, `2` = partial, `3` = complete) separates direct answers from keyword-only matches.
+- **Track chunk rank even when the LLM reads all `k` chunks.** Rank determines which chunks survive token truncation, which facts the model attends to ("lost in the middle"), and which source gets cited first. Use `recall@k` as your primary metric and `nDCG@k` or `MRR` as your secondary metric.
 
 ### Which metric when
 
 | Situation | Primary metric | Secondary | Why |
 |---|---|---|---|
-| "Is the evidence reaching the LLM at all?" | **recall@k** (k = chunks in prompt) | hit@k | Missing evidence is unrecoverable downstream |
-| Synthetic dataset, one source chunk per question | **hit@k**, MRR | recall@k (= hit@k here) | Only one relevant item is known |
-| Tuning a reranker | **nDCG@k** (k = post-rerank count) | MRR, recall@k | Reranking is about order |
-| Choosing k / similarity cut-off | precision@k, recall@k curves | F1@k | Explicit noise vs coverage trade-off |
-| Multi-hop / multi-part questions | recall@k | MAP | Need *all* pieces |
-| Navigational / single-answer lookups ("Where is the VPN guide?") | MRR | hit@1 | Top-1 is what matters |
-| Comparing to public benchmarks (BEIR, MTEB) | nDCG@10 | recall@100 | Their headline metrics |
-| Candidate generation before reranking | recall@50/100 | — | Upper bound on what the reranker can do |
-| No chunk labels, only reference answers | LLM-based context recall / precision ([01](./01-end-to-end-rag-evals.md)) | — | Labels unavailable |
+| Checking if evidence reaches the LLM | **recall@k** (`k` = prompt chunk count) | hit@k | The generator cannot recover missing evidence |
+| Single-chunk synthetic dataset | **hit@k**, MRR | recall@k (equals hit@k here) | Each query has only one known relevant chunk |
+| Tuning a reranker | **nDCG@k** (`k` = post-rerank count) | MRR, recall@k | Reranking optimizes chunk ordering |
+| Choosing `k` or a similarity cutoff | precision@k and recall@k curves | F1@k | Shows the exact noise-versus-coverage trade-off |
+| Multi-hop or multi-part questions | **recall@k** | MAP | The generator needs every supporting piece |
+| Navigational or single-answer lookups | **MRR** | hit@1 | The top-ranked result matters most |
+| Comparing against BEIR or MTEB | **nDCG@10** | recall@100 | Matches standard public benchmark metrics |
+| Evaluating candidate generation before reranking | **recall@50** or **recall@100** | — | Sets the upper bound on reranker performance |
+| Reference answers available, no chunk labels | LLM-based context recall / precision ([01](./01-end-to-end-rag-evals.md)) | — | Evaluates retrieval without chunk ID labels |
 
 ---
 
 ## 5. Getting relevance labels
 
-Retrieval metrics need `qrels` (query → relevant IDs). Three sources, usually combined:
+Retrieval metrics require `qrels` (a mapping from each query to its relevant chunk IDs). Combine three labeling sources to build reliable `qrels`:
 
-| Source | How | Cost | Quality | Main risk |
+| Source | How it works | Cost | Quality | Main risk |
 |---|---|---|---|---|
-| **SME labels** | Experts mark relevant chunks/docs for each query, ideally from a **pooled** candidate list (union of top-k from several retrievers) | High | Highest | Incomplete `R` if labelers only look at one system's results |
-| **LLM-judged relevance** | An LLM grades `(query, chunk)` pairs on a 0–3 rubric; validate on a human-labeled sample | Medium | Good if calibrated | Judge bias toward lexical overlap or verbose chunks; cost scales with pool size |
-| **Synthetic from source chunk** | Generate a question from a chunk; that chunk is the relevant item ([synthetic datasets](../01-datasets/03-synthetic-datasets.md)) | Low | Partial | `R` has exactly one item, but other chunks may also answer → false "misses"; questions overly lexically similar to the chunk inflate BM25 |
+| **SME labels** | Domain experts grade candidate chunks from a **pooled** list across multiple retrievers | High | Highest | Incomplete `R` if labelers inspect output from only one retriever |
+| **LLM-judged relevance** | An LLM judge grades `(query, chunk)` pairs on a 0–3 rubric, calibrated against human labels | Medium | High when calibrated | Judge bias toward keyword overlap or long chunks |
+| **Synthetic from source chunk** | An LLM generates a question from a source chunk, making that chunk the label ([synthetic datasets](../01-datasets/03-synthetic-datasets.md)) | Low | Partial | Other valid chunks count as false misses, and verbatim phrasing inflates BM25 scores |
 
-**Recommended approach (heuristic):**
+**Recommended labeling workflow:**
 
-- [ ] Start with synthetic questions per chunk for a fast hit@k / MRR baseline.
-- [ ] **Pool** the top-20 from 2–3 different retrievers (BM25, dense, hybrid) for each query; have an LLM judge grade each pooled chunk 0–3.
-- [ ] Have SMEs review a sample (e.g. 100 pairs) to measure judge–human agreement (Cohen's κ; see [LLM-as-a-judge](./07-llm-as-a-judge.md)). Fix the rubric if agreement is poor.
-- [ ] Re-pool whenever you add a new retriever — unlabeled-but-relevant chunks from the new system are otherwise counted as misses.
-- [ ] Rewrite synthetic questions to remove verbatim phrases from the source chunk, or the eval will favour lexical search.
+- [ ] Generate synthetic questions per chunk to get a fast initial `hit@k` and `MRR` baseline.
+- [ ] Pool top 20 chunks from 2–3 retrievers (BM25, dense, hybrid) per query. Grade the pool on a 0–3 scale with an LLM judge.
+- [ ] Have SMEs label 100 `(query, chunk)` pairs and compute Cohen's κ against the LLM judge ([LLM-as-a-judge](./07-llm-as-a-judge.md)). Refine the rubric until agreement is strong.
+- [ ] Re-pool and grade newly surfaced chunks whenever you test a new retriever. This prevents unlabeled relevant chunks from counting as misses.
+- [ ] Rewrite synthetic questions to remove verbatim source phrases so your eval does not artificially favor BM25.
 
 LLM relevance prompt sketch:
 
@@ -342,16 +348,16 @@ Reply with JSON: {"reason": "...", "grade": 0|1|2|3}
 
 ## 6. Chunk-level vs document-level matching pitfalls
 
-Your labels and your retriever often disagree on **granularity**, and naive ID matching silently produces wrong numbers.
+When your relevance labels and your retriever use different granularities, naive ID matching silently corrupts your metrics.
 
 | Pitfall | Symptom | Fix |
 |---|---|---|
-| **Re-chunking breaks labels** | You change chunk size from 512 to 256 tokens and recall "drops" to near zero — chunk IDs changed | Label at a stable granularity: (doc_id, character span) or answer-bearing text; map to chunks at eval time by **overlap** |
-| **Labels at doc level, retrieval at chunk level** | Any chunk from the right doc counts as a hit, even if it's the wrong section | Report both doc-level and span-level metrics; for doc-level, dedupe chunks to docs before computing rank metrics |
-| **Duplicate / near-duplicate chunks** | Same text in multiple docs (copied policies, versions); retrieving the "other" copy counts as a miss | Deduplicate the corpus or define equivalence classes of chunk IDs |
-| **Multiple valid sources** | Synthetic data marks one chunk relevant; another chunk answers equally well | Pool + judge (section 5), or use an answer-based criterion (does the chunk contain the answer string/claims?) |
-| **Stale versions** | Old policy version is "relevant" by text but wrong by date | Include version/effective-date in labels; treat superseded docs as grade 0 or a separate "stale" label |
-| **Overlapping chunks (sliding window)** | Neighbouring chunks both contain the answer; counting both inflates precision | Merge overlapping hits or match by span coverage |
+| **Re-chunking breaks chunk IDs** | Changing chunk size from 512 to 256 tokens drops recall near zero because all chunk IDs changed | Label `(doc_id, start_char, end_char)` spans and match retrieved chunks by **character overlap** at eval time |
+| **Doc-level labels vs chunk-level retrieval** | Retrieving an irrelevant section of the right document still counts as a hit | Report both doc-level and span-level metrics, and deduplicate chunks to document IDs before scoring doc-level rank |
+| **Duplicate or near-duplicate chunks** | Boilerplate or copied policy text appears in multiple documents, so retrieving the duplicate counts as a miss | Deduplicate your corpus or group identical chunks into equivalence classes |
+| **Multiple valid sources** | Synthetic generation marks one chunk as relevant, while another chunk answers the query equally well | Pool candidates and grade with an LLM judge (section 5), or check whether the chunk entails the reference claims |
+| **Stale document versions** | An outdated policy matches the query text and inflates recall | Include version metadata in labels and grade superseded documents as `0` |
+| **Overlapping sliding-window chunks** | Adjacent overlapping chunks both match the gold span and inflate precision@k | Merge overlapping chunks or measure total character-span coverage |
 
 Span-overlap matching sketch:
 
@@ -371,7 +377,7 @@ def chunk_is_relevant(chunk: dict, gold_spans: list[dict], min_overlap: float = 
 
 ## 7. Evaluating each retrieval stage
 
-A modern retrieval pipeline has several stages. Measure the **same metrics at the output of each stage** on the same queries, so you can attribute lift.
+Modern retrieval pipelines chain multiple stages. Compute the **same metrics at the output of every stage** on the same query set to isolate where quality gains or losses happen.
 
 ```mermaid
 flowchart LR
@@ -387,15 +393,15 @@ flowchart LR
 
 | Stage | What to compare | Metric | Notes |
 |---|---|---|---|
-| **Query rewriting** (expansion, decomposition, HyDE, conversational rewrite) | Retrieval with original query vs rewritten query, same retriever | recall@k, MRR | Also eval the rewrite itself on multi-turn data: does "what about for contractors?" become a standalone query? An LLM judge can grade rewrite faithfulness. Watch latency. |
-| **Lexical (BM25)** | — | recall@50 | Strong on IDs, error codes, product names, acronyms |
-| **Dense** | Embedding model A vs B | recall@50, nDCG@10 | Strong on paraphrase / semantic queries |
-| **Hybrid fusion** | BM25 alone, dense alone, fused | recall@50, nDCG@10 per **query slice** | Reciprocal Rank Fusion (RRF) is a robust default; tune weights only with enough data. Hybrid usually wins on mixed query sets — verify on yours. |
-| **Filters (metadata, RBAC)** | With vs without filter | recall@k for each role | A filter that's too strict looks like a retrieval failure. Test that restricted docs are **never** returned for unauthorised roles (should be 0, not "low") — see [access control](../04-guardrails/06-access-control-rbac.md). |
-| **Reranker** | Fused top-N in original order vs reranked | nDCG@5, MRR, recall@5 | **Reranker lift** = metric(after) − metric(before). The ceiling is recall@N of the candidate pool. |
-| **Final context** (after dedup/truncation) | — | recall@k at the prompt | What the LLM actually saw |
+| **Query rewriting** (expansion, decomposition, HyDE, multi-turn rewrite) | Original query vs rewritten query on the same retriever | recall@k, MRR | Evaluate multi-turn rewrites ("what about contractors?") to ensure they resolve coreferences without adding latency spikes |
+| **Lexical search (BM25)** | BM25 baseline | recall@50 | Excels on exact IDs, error codes, product names, and acronyms |
+| **Dense search** | Embedding model A vs model B | recall@50, nDCG@10 | Excels on paraphrases and conceptual queries |
+| **Hybrid fusion** | BM25 alone vs dense alone vs fused (such as RRF) | recall@50, nDCG@10 per **query slice** | Reciprocal Rank Fusion (RRF) is a strong zero-tuning baseline |
+| **Metadata and RBAC filters** | Filtered vs unfiltered retrieval per user role | recall@k, unauthorized leak rate | Overly strict filters hurt recall, while leaky filters violate security. Target **0** restricted docs (see [access control](../04-guardrails/06-access-control-rbac.md)) |
+| **Reranker** | Fused top-`N` before vs after reranking | nDCG@5, MRR, recall@5 | **Reranker lift** = `metric(after) - metric(before)`. Candidate pool `recall@N` caps maximum reranker recall |
+| **Final prompt context** (post-dedup and truncation) | Post-rerank list vs final prompt chunks | recall@k at prompt | Measures what the generator LLM actually receives |
 
-**Reranker lift example (illustrative):** if recall@50 of the fused pool is 0.92, recall@5 before reranking is 0.61 and after reranking 0.79, the reranker recovered (0.79 − 0.61) / (0.92 − 0.61) ≈ 58% of the recoverable gap. If recall@50 were 0.65, no reranker could fix it — work on candidate generation instead.
+**Reranker lift example:** Suppose fused candidate pool `recall@50` is `0.92`, pre-rerank `recall@5` is `0.61`, and post-rerank `recall@5` is `0.79`. The reranker closed `(0.79 - 0.61) / (0.92 - 0.61) ≈ 58%` of the recoverable gap. If candidate pool `recall@50` were only `0.65`, no reranker could push `recall@5` above `0.65`. Fix candidate generation first when pool recall is low.
 
 ```python
 def stage_report(stages: dict[str, dict[str, list[str]]], qrels, ks=(5, 10, 50)):
@@ -406,61 +412,61 @@ def stage_report(stages: dict[str, dict[str, list[str]]], qrels, ks=(5, 10, 50))
                                           if k.startswith(("recall", "ndcg"))))
 ```
 
-**Slice the results.** Hybrid and rewriting gains typically concentrate in specific query types (exact identifiers, acronyms, conversational follow-ups). An aggregate +1 point may be +10 on one slice and −2 on another.
+**Break down results by query slice.** Hybrid search and query rewriting often produce large gains on specific slices (like acronym-heavy queries) even when the overall mean shifts by 1–2 points.
 
 ---
 
 ## 8. Embedding model choice: MTEB and BEIR as references
 
-- **[BEIR](https://github.com/beir-cellar/beir)** (Thakur et al., 2021) is a heterogeneous zero-shot retrieval benchmark across many domains; its main finding was that BM25 is a surprisingly strong baseline out-of-domain and that dense models don't automatically generalise.
-- **[MTEB](https://huggingface.co/spaces/mteb/leaderboard)** (Muennighoff et al., 2022) is a broad embedding benchmark that includes BEIR-style retrieval tasks; its leaderboard is the usual starting point for shortlisting embedding models.
+- **[BEIR](https://github.com/beir-cellar/beir)** (Thakur et al., 2021) benchmarks zero-shot retrieval across diverse domains. It showed that BM25 is a tough out-of-domain baseline and that dense embeddings often degrade on unfamiliar domains.
+- **[MTEB](https://huggingface.co/spaces/mteb/leaderboard)** (Muennighoff et al., 2022) benchmarks text embeddings across many tasks, including BEIR retrieval datasets.
 
-Use them to **shortlist**, never to decide:
+Use public leaderboards to **shortlist** candidates, never to make your final production choice:
 
-- [ ] Shortlist 3–4 embedding models from MTEB's *retrieval* tasks (not the overall average), filtered by your constraints: language coverage, max input length, dimension/storage cost, license, hosting (API vs self-hosted), latency.
-- [ ] Evaluate each on **your** labeled queries with recall@k and nDCG@10, alone and in hybrid with BM25.
-- [ ] Check domain-specific slices: internal jargon, acronyms, code, tables, non-English queries.
-- [ ] Factor in the cost of re-embedding the corpus when switching models later.
-- [ ] Be wary of leaderboard overfitting and benchmark contamination; rankings on public benchmarks often don't hold on enterprise data.
+- [ ] Shortlist 3–4 embedding models from MTEB's **Retrieval** tab. Filter by language, context length, vector dimension, license, and hosting constraints.
+- [ ] Benchmark each candidate on **your own labeled queries** using `recall@k` and `nDCG@10`, both standalone and fused with BM25.
+- [ ] Inspect domain-specific slices such as internal acronyms, code snippets, markdown tables, and non-English queries.
+- [ ] Account for the operational cost of re-embedding and re-indexing your corpus when switching models.
+- [ ] Watch out for benchmark contamination, as public leaderboard winners frequently underperform on private enterprise corpora.
 
 ---
 
 ## 9. Retrieval latency and cost
 
-Retrieval quality improvements often add latency (rewriting = an extra LLM call; reranker = a cross-encoder pass over N candidates).
+Every extra retrieval stage adds latency and compute cost (query rewriting adds an LLM call, and reranking runs a cross-encoder over `N` candidates).
 
 | Component | What to measure | Notes |
 |---|---|---|
-| Query rewrite | p50/p95 latency, tokens | Often the most expensive retrieval step if it's an LLM call |
-| Vector search | p50/p95 latency vs index size, recall vs exact search | ANN index parameters trade recall for speed; measure ANN recall against brute-force on a sample |
-| Reranker | latency vs number of candidates N | Roughly linear in N; tune N with the recall@N curve |
-| End-to-end retrieval | p95 latency budget share | Heuristic: keep retrieval to a minority of the total latency budget for chat UX |
+| Query rewrite | p50/p95 latency, token cost | Often the slowest step in retrieval if it calls an LLM |
+| Vector search | p50/p95 latency vs index size, ANN recall vs exact search | Approximate nearest neighbor (ANN) indexes trade recall for speed. Benchmark ANN recall against exact brute-force search |
+| Reranker | Latency vs candidate count `N` | Latency scales linearly with `N`. Pick the smallest `N` where the `recall@N` curve flattens |
+| End-to-end retrieval | Share of total p95 latency budget | Keep total retrieval latency to a small fraction of your overall chat response budget |
 
-Plot quality vs latency for each configuration and pick from the **Pareto frontier** — don't pick the top-quality configuration if a cheaper one is within noise.
+Plot `recall@k` or `nDCG@k` against p95 latency for each pipeline configuration. Select configurations on the **Pareto frontier**, and avoid expensive stages that add negligible quality gains.
 
 ---
 
 ## 10. Checklist
 
-- [ ] Every query has labels at a granularity that survives re-chunking (doc + span).
-- [ ] Labels come from pooled candidates across multiple retrievers.
-- [ ] Unanswerable queries are excluded from recall/MRR and evaluated via abstention ([01](./01-end-to-end-rag-evals.md#311-abstention-correctness-i-dont-know)).
-- [ ] Report recall@k at the prompt k, recall@N at the candidate pool, nDCG@k after reranking, and MRR.
-- [ ] Measure each stage on the same queries; report reranker lift and hybrid lift per slice.
-- [ ] Test RBAC filters: zero leakage of restricted docs per role.
-- [ ] Track retrieval latency p95 alongside quality.
-- [ ] Re-run retrieval evals whenever chunking, embeddings, index parameters or the corpus change significantly.
+- [ ] Anchor relevance labels to document character spans (`doc_id`, `start`, `end`) so labels survive re-chunking.
+- [ ] Pool top candidates across multiple retrievers before labeling to avoid single-retriever bias.
+- [ ] Exclude unanswerable queries from `recall@k` and `MRR`, and evaluate them with [abstention metrics](./01-end-to-end-rag-evals.md#311-abstention-correctness-i-dont-know).
+- [ ] Report `recall@k` at your prompt cutoff, `recall@N` at your candidate pool cutoff, `nDCG@k` after reranking, and `MRR`.
+- [ ] Evaluate every stage on the same queries to measure hybrid lift and reranker lift per slice.
+- [ ] Verify RBAC filters across roles to ensure zero leakage of restricted chunks.
+- [ ] Track p95 retrieval latency alongside retrieval quality metrics.
+- [ ] Re-run your retrieval suite whenever you change chunking, embeddings, index parameters, or corpus documents.
 
 ---
 
 ## Key takeaways
 
-- **Recall@k is the primary RAG retrieval metric** — the generator cannot use evidence it never saw. Add nDCG@k / MRR for ordering.
-- Metrics are only as good as the **completeness of relevance labels**: pool candidates, use calibrated LLM judges, and re-pool when adding systems.
-- **Label at a stable granularity** (doc + span), or chunking changes will silently break your metrics.
-- Evaluate **every stage** (rewrite, BM25, dense, fusion, filters, reranker) on the same queries to attribute lift; the candidate pool's recall bounds the reranker.
-- Use MTEB/BEIR to shortlist embedding models, then decide on **your** data.
-- Track latency alongside quality and choose from the quality–latency Pareto frontier.
+- **Prioritize recall@k.** The generator cannot use evidence that never enters the prompt. Pair `recall@k` with `nDCG@k` or `MRR` to evaluate ranking order.
+- **Build complete relevance sets.** Pool candidates across diverse retrievers, calibrate LLM relevance judges against SMEs, and re-pool when testing new retrievers.
+- **Label character spans instead of chunk IDs.** Span-based labels let you tune chunk sizes and overlap without invalidating your dataset.
+- **Measure every retrieval stage.** Compare query rewriting, BM25, dense search, fusion, filters, and reranking on the same queries.
+- **Validate embeddings on your own data.** Use MTEB and BEIR only to shortlist candidates.
+- **Balance quality against latency.** Pick retrieval configurations from the quality-versus-latency Pareto frontier.
 
 ## Further reading
 

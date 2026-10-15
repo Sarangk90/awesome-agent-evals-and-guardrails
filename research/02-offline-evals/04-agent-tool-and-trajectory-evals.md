@@ -1,14 +1,20 @@
 # Agent Tool and Trajectory Evals
 
-> **TL;DR** — Agents fail in ways a final-answer metric can't localise: wrong tool, wrong arguments, wrong order, redundant calls, no recovery from errors, or a correct-sounding answer while the world state is wrong. Evaluate at three levels: **single tool calls** (selection + arguments), the **trajectory** (sequence of steps), and the **outcome** (final state / task completion) — plus efficiency, routing, and multi-turn behaviour with simulated users.
+> **TL;DR**
+> - **Evaluate agents at three levels.** Test single tool calls for unit accuracy, full trajectories for step efficiency, and final environment states for task outcomes.
+> - **Anchor release gates on final-state checks.** Verify that sandboxed databases and external systems end up in the exact expected state without unwanted side effects.
+> - **Match tool arguments by type and test error recovery.** Apply schema, exact, semantic, or execution matchers per argument, and inject tool faults to catch false-success claims.
+> - **Measure multi-trial reliability with pass^k.** Run stochastic agents across multiple trials and use simulated users to test multi-turn conversations.
 
-**You'll learn:** tool selection and argument accuracy, tool-call precision/recall/F1, ordering and unnecessary-call metrics, error-recovery tests, trajectory match modes (exact, in-order, any-order, superset/subset) and LLM-judged trajectories, final-state checks (τ-bench style) and pass^k, efficiency metrics, planning quality, routing confusion matrices, multi-turn and simulated-user evals — with pure-Python matching code  ·  **Prerequisites:** [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)  ·  **Related:** [Text-to-SQL evals](./05-text-to-sql-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Tool and action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md)
+**You will learn:** Tool selection and argument accuracy · Trajectory matching and judge rubrics · Sandboxed final-state checks and pass^k · Routing confusion matrices and simulated users  
+**Prerequisites:** [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)  
+**Related:** [Text-to-SQL evals](./05-text-to-sql-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Tool and action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Tracing & OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md)
 
 ---
 
 ## 1. What you're evaluating
 
-Running example: the enterprise assistant has tools such as
+Suppose your enterprise assistant has access to five tools:
 
 ```text
 search_docs(query: str, top_k: int = 5)
@@ -18,7 +24,7 @@ create_ticket(title: str, description: str, priority: "low"|"medium"|"high", ass
 update_ticket(ticket_id: str, status: "open"|"in_progress"|"closed")
 ```
 
-An agent run produces a **trace**: a sequence of steps, each an LLM decision followed by zero or more tool calls and their results, ending in a final response (and possibly a changed world state).
+Each agent run produces a **trace**. At each step, the LLM makes a decision, invokes zero or more tools, observes tool outputs, and produces a response (often mutating world state).
 
 ```mermaid
 flowchart TD
@@ -33,13 +39,13 @@ flowchart TD
     L3["Level 3: outcome evals - final state, task completion, response"] -.-> S
 ```
 
-| Level | Question | Needs | Cost | Brittleness |
+| Level | Question answered | Required inputs | Cost | Brittleness |
 |---|---|---|---|---|
-| **1. Single call** | Did it pick the right tool with the right arguments at this step? | Input (+ history) → expected call(s) | Low | Low — great for unit tests |
-| **2. Trajectory** | Was the sequence of steps reasonable? | Input → reference trajectory, or a judge rubric | Medium | **High** — many valid paths exist |
-| **3. Outcome** | Is the world in the right state and was the user told the right thing? | Input + initial state → expected final state / success criteria | Medium–high (needs sandbox) | Low — path-independent |
+| **1. Single call** | Did the agent pick the right tool and arguments at this step? | Prompt (+ history) → expected tool call(s) | Low | Low — ideal for fast unit tests |
+| **2. Trajectory** | Did the agent take a reasonable sequence of steps? | Prompt → reference trajectory or judge rubric | Medium | **High** — many valid paths exist |
+| **3. Outcome** | Did the environment reach the right final state and did the user get the right answer? | Prompt + initial state fixture → expected final state | Medium to high (requires sandbox) | Low — completely path-independent |
 
-**Opinion:** anchor on **outcome** evals (they're path-independent and reflect what users care about), use **single-call** evals as fast unit tests for tool descriptions and schemas, and use **trajectory** evals mainly for diagnosis, efficiency, and safety-critical orderings — not as a strict gate.
+**Recommendation:** Gate releases on **outcome** evals because they are path-independent and measure real user impact. Use **single-call** evals as fast unit tests when editing tool schemas or descriptions. Use **trajectory** evals for debugging, cost efficiency, and safety-critical ordering rules rather than strict exact-path gates.
 
 ### Dataset row shape
 
@@ -61,7 +67,7 @@ flowchart TD
 }
 ```
 
-Note `optional_calls` and `forbidden_calls`: strict reference trajectories punish valid alternatives, so encode what's **required**, what's **allowed**, and what's **forbidden**. See [SME golden datasets](../01-datasets/02-sme-golden-datasets.md) for how to author these.
+Include `optional_calls` and `forbidden_calls` in every test case. Strict reference trajectories penalize valid alternative paths, so explicitly separate **required**, **allowed**, and **forbidden** tool calls (see [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)).
 
 ---
 
@@ -69,109 +75,109 @@ Note `optional_calls` and `forbidden_calls`: strict reference trajectories punis
 
 ### 2.1 Tool selection accuracy
 
-- **What it measures:** Whether the agent chose the correct tool (or correctly chose **no** tool) at a decision point.
-- **Inputs required:** Input + conversation state; expected tool name(s). Ground truth required.
-- **How it's computed:**
+- **What it measures:** Whether the agent selects the right tool (or correctly chooses **no tool**) at a single decision step.
+- **Inputs required:** User input, conversation state, and expected tool name(s). Requires ground truth.
+- **How to compute it:**
   ```text
   tool_selection_accuracy = |cases where predicted tool set == expected tool set| / |cases|
   ```
-  Include **no-tool** cases ("Thanks!", "What can you do?") and **ambiguous** cases where the right move is a clarifying question.
-- **Score range & interpretation:** 0–1. Break down by tool with a confusion matrix (section 6) — errors concentrate between tools with overlapping descriptions (e.g. `search_docs` vs `run_sql` for "how many open tickets?").
-- **Pitfalls / gotchas:** With many tools (dozens+), selection accuracy degrades; measure as you add tools. Tool **descriptions** are prompts — version them and re-run this eval on every edit.
-- **When to use / when not to:** Always; it's the cheapest agent eval (one LLM call per case, no tool execution needed).
-- **Implemented in:** DeepEval (`ToolCorrectnessMetric`), RAGAS (`ToolCallAccuracy`), promptfoo (`is-valid-openai-tools-call`, `javascript`/`python` assertions on tool calls), LangChain `agentevals`.
+  Include **no-tool** inputs ("Thanks!", "What can you help with?") and **ambiguous** inputs where the agent should ask a clarifying question first.
+- **Score range & interpretation:** 0 to 1. Inspect a tool confusion matrix (section 6). Selection errors usually cluster between tools with overlapping descriptions (like `search_docs` vs `run_sql` on "how many open tickets?").
+- **Pitfalls and gotchas:** Selection accuracy drops as your tool catalog grows past 15–20 tools. Treat tool **names and descriptions** as system prompts: version them and re-run selection evals whenever you edit a schema.
+- **When to use it:** Run tool selection evals on every pull request. They require only a single LLM call per test case and no live tool execution.
+- **Implemented in:** DeepEval (`ToolCorrectnessMetric`), RAGAS (`ToolCallAccuracy`), promptfoo (`is-valid-openai-tools-call`, custom assertions), LangChain `agentevals`.
 
 ### 2.2 Tool argument correctness
 
-Arguments are where most tool-call bugs live. Use the right matcher **per argument**:
+Most tool-calling bugs happen inside the arguments. Select the appropriate matcher **for each argument**:
 
-| Matcher | Use for | Example |
+| Matcher | Best used for | Example |
 |---|---|---|
-| **Schema validity** | Every call — gate before anything else | `priority` ∈ enum; required fields present; types correct |
-| **Exact match** (after normalisation) | IDs, enums, booleans, numbers | `ticket_id == "INC-1042"`, `priority == "high"` |
-| **Normalised match** | Dates, case-insensitive strings, whitespace, units | `"2026-10-15"` vs `"15 Oct 2026"` |
-| **Numeric tolerance** | Floats, amounts | `abs(a - b) <= 0.01` |
-| **Set/unordered match** | List arguments where order doesn't matter | `cc=["a","b"] == ["b","a"]` |
-| **Semantic match** | Free text: titles, descriptions, search queries | Embedding similarity ≥ τ, or an LLM judge: "does this title describe a laptop boot failure?" |
-| **Execution-based match** | Code/SQL arguments | Run both and compare results — see [text-to-SQL evals](./05-text-to-sql-evals.md) |
-| **Don't care** | Arguments with many valid values | `top_k` |
+| **Schema validity** | Every tool call (run before all other checks) | `priority` ∈ enum, required keys present, valid parameter types |
+| **Exact match** (normalized) | IDs, enums, booleans, exact integers | `ticket_id == "INC-1042"`, `priority == "high"` |
+| **Normalised string match** | Dates, case-insensitive strings, whitespace, units | `"2026-10-15"` vs `"15 Oct 2026"` |
+| **Numeric tolerance** | Floating-point values and currency amounts | `abs(a - b) <= 0.01` |
+| **Set / unordered match** | List arguments where element order does not matter | `cc=["a","b"] == ["b","a"]` |
+| **Semantic match** | Free-text fields such as ticket titles, descriptions, or search queries | Embedding similarity ≥ `τ` or an LLM judge checking *"Does this title describe a laptop boot failure?"* |
+| **Execution-based match** | Code or SQL query strings | Execute both queries and compare result sets ([text-to-SQL evals](./05-text-to-sql-evals.md)) |
+| **Don't care** | Tuning parameters with multiple acceptable values | `top_k` |
 
-- **What it measures:** Whether the arguments of the correct tool call are valid and correct.
-- **Inputs required:** Predicted call, expected call with per-argument matchers, JSON schema of the tool.
-- **How it's computed:**
+- **What it measures:** Whether the arguments passed to a selected tool are schema-valid and match expected values.
+- **Inputs required:** Predicted call, expected call with per-argument matchers, and the tool's JSON Schema.
+- **How to compute it:**
   ```text
   schema_validity_rate = |calls passing JSON-schema validation| / |calls|
   arg_accuracy(call)   = |expected args matched| / |expected args|
   call_exact_correct   = tool name matches AND all required args matched
   ```
-  BFCL popularised **AST-based** matching: parse the call and compare function name, required parameters, and parameter values against a set of acceptable values per parameter — a structured version of the table above.
-- **Score range & interpretation:** 0–1. Schema validity should be ~100% with modern structured-output/function-calling APIs; if not, fix that first (it's an integration bug, not a model-quality issue).
-- **Pitfalls / gotchas:**
-  - **Hallucinated arguments:** the model invents a `user_id` or `ticket_id` that wasn't in context. Check that ID-like arguments appear in the conversation or prior tool results (a **provenance check**).
-  - **Over-specified arguments:** the model fills optional fields with guesses. Decide whether extra optional args are errors.
-  - Semantic-match thresholds need calibration on human-labeled pairs.
-- **When to use / when not to:** Always, for every tool with side effects. For read-only search tools, prefer judging *outcome* (did retrieval succeed — see [retrieval metrics](./02-retrieval-metrics.md)) over exact query strings.
-- **Implemented in:** DeepEval (`ToolCorrectnessMetric` can compare input parameters), RAGAS (`ToolCallAccuracy` with argument comparison), BFCL (AST evaluation), promptfoo (custom assertions), custom.
+  The Berkeley Function Calling Leaderboard (BFCL) uses **AST-based matching**. It parses each call into an abstract syntax tree and validates the function name, required keys, and allowed parameter values.
+- **Score range & interpretation:** 0 to 1. With constrained structured outputs, `schema_validity_rate` should stay near 100%. Any schema failure indicates an integration bug that you should fix immediately.
+- **Pitfalls and gotchas:**
+  - **Check argument provenance to catch hallucinated IDs.** Verify that any `user_id` or `ticket_id` argument actually appeared in the user prompt or a prior tool response.
+  - **Decide how to score guessed optional arguments.** Specify whether filling optional fields with unrequested guesses counts as an error.
+  - **Calibrate semantic argument matchers** against human labels before gating releases.
+- **When to use it:** Validate arguments on every side-effecting tool call. For read-only search queries, evaluate retrieval outcome ([retrieval metrics](./02-retrieval-metrics.md)) rather than matching exact query strings.
+- **Implemented in:** DeepEval (`ToolCorrectnessMetric`), RAGAS (`ToolCallAccuracy`), BFCL (AST evaluation), promptfoo.
 
 ### 2.3 Tool-call precision, recall and F1
 
-When a task needs **several** calls, treat the expected calls as a set and compute precision/recall over matched calls.
+When a task requires **multiple** tool calls, compare the predicted calls against the expected call set using one-to-one matching.
 
-- **What it measures:** Coverage of required calls (recall) and avoidance of wrong/unnecessary calls (precision).
-- **Inputs required:** Predicted calls (from the trace), expected calls, matchers. Ground truth required.
-- **How it's computed:**
+- **What it measures:** Coverage of required tool calls (recall) and avoidance of wrong or redundant calls (precision).
+- **Inputs required:** Predicted calls from the trace, expected calls, allowed optional tools, and argument matchers.
+- **How to compute it:**
   ```text
-  matched = one-to-one matching between predicted and expected calls (name + args)
+  matched   = one-to-one matching between predicted and expected calls (name + args)
   precision = |matched| / |predicted calls|            (excluding allowed optional calls)
   recall    = |matched| / |expected calls|
   F1        = 2PR / (P + R)
   ```
-- **Worked example:** Expected `{create_ticket(high, IT-Hardware)}`, optional `{search_docs}`. Predicted: `search_docs(...)`, `get_user_profile(u_381)`, `create_ticket(medium, IT-Hardware)`, `create_ticket(high, IT-Hardware)`.
-  - `search_docs` is optional → ignored. `get_user_profile` — if listed as optional, ignored; otherwise unnecessary.
-  - `create_ticket(medium, ...)` doesn't match (wrong priority) → FP; `create_ticket(high, ...)` matches → TP.
-  - With `get_user_profile` optional: P = 1/2, R = 1/1 → F1 = 0.67. And a **duplicate ticket was created** — the outcome check should also fail.
-- **Pitfalls / gotchas:** Matching must be **one-to-one** (one predicted call can't satisfy two expected calls). Retries after an error are not "unnecessary" — handle them via error-recovery evals.
-- **When to use / when not to:** Multi-call tasks where order is irrelevant. For order-sensitive tasks add the ordering metric below.
-- **Implemented in:** RAGAS (`ToolCallF1`), DeepEval (`ToolCorrectnessMetric`), Vertex AI Gen AI evaluation service (trajectory precision/recall), custom.
+- **Worked example:** Suppose `expected = {create_ticket(high, IT-Hardware)}` and `optional = {search_docs, get_user_profile}`. The agent calls `search_docs(...)`, `get_user_profile(u_381)`, `create_ticket(medium, IT-Hardware)`, and `create_ticket(high, IT-Hardware)`.
+  - Ignore the allowed optional calls `search_docs` and `get_user_profile`.
+  - Score `create_ticket(medium, ...)` as a false positive (wrong priority) and `create_ticket(high, ...)` as a true positive.
+  - Result: `precision = 1/2 = 0.50`, `recall = 1/1 = 1.0`, and `F1 = 0.67`. Note that the agent **created a duplicate ticket**, so the final-state outcome check in section 4.1 must also fail.
+- **Pitfalls and gotchas:** Enforce strict **one-to-one** matching so a single predicted call cannot satisfy two expected calls. Exclude valid error-recovery retries from false-positive counts and evaluate retries separately in section 2.6.
+- **When to use it:** Use tool-call F1 for multi-call tasks where execution order does not matter. Add precedence constraints (section 2.4) when order matters.
+- **Implemented in:** RAGAS (`ToolCallF1`), DeepEval (`ToolCorrectnessMetric`), Vertex AI Gen AI evaluation service.
 
 ### 2.4 Ordering and dependencies
 
-- **What it measures:** Whether calls that must happen in sequence did (e.g. `get_user_profile` before `create_ticket` that needs the user's location; **confirmation before** a destructive action).
-- **How it's computed:** Specify ordering **constraints** rather than a full order: `A before B`. Then:
+- **What it measures:** Whether dependent tool calls execute in the required sequence (like calling `get_user_profile` before `create_ticket`, or confirming before a destructive write).
+- **How to compute it:** Define pairwise precedence constraints (`A before B`) instead of locking the entire sequence:
   ```text
   ordering_accuracy = |satisfied precedence constraints| / |precedence constraints|
   ```
-  Or use the in-order trajectory match (section 3).
-- **Pitfalls / gotchas:** Over-constraining order makes evals brittle when the agent parallelises independent calls. Only encode true dependencies.
-- **Implemented in:** LangChain `agentevals` (trajectory match modes), Vertex AI (in-order match), custom.
+  You can also use the `in_order` subsequence match mode described in section 3.1.
+- **Pitfalls and gotchas:** Encoding a rigid total order breaks evaluations whenever the agent runs independent lookups in parallel. Encode only true data or safety dependencies.
+- **Implemented in:** LangChain `agentevals`, Vertex AI evaluation (`in_order` match), custom assertions.
 
 ### 2.5 Unnecessary and forbidden calls
 
-- **What it measures:** Wasted or dangerous actions — redundant searches, repeated identical calls, calls to tools not needed for the task, or calls the user's role must not trigger.
-- **How it's computed:**
+- **What it measures:** Wasted or unsafe tool invocations, including repeated identical calls, irrelevant lookups, and unauthorized tool calls.
+- **How to compute it:**
   ```text
   unnecessary_call_rate = |calls not matched to expected and not in optional| / |calls|
   duplicate_call_rate   = |calls identical (name+args) to an earlier call in the same run| / |calls|
   forbidden_call_rate   = |runs with ≥1 forbidden call| / |runs|          # target 0
   ```
-- **Pitfalls / gotchas:** A forbidden call that the **tool layer** correctly rejected (permission denied) is still an agent-behaviour bug worth counting — but it's also proof your [tool guardrail](../04-guardrails/05-tool-and-action-guardrails.md) works. Track both.
-- **When to use / when not to:** Always count duplicates and forbidden calls; they're cheap and catch loops and policy breaches.
-- **Implemented in:** Custom (trivial over traces); LLM-judged trajectory rubrics can flag them qualitatively.
+- **Pitfalls and gotchas:** Even when a runtime [tool guardrail](../04-guardrails/05-tool-and-action-guardrails.md) blocks a forbidden call, count the attempt as an agent failure in offline evals.
+- **When to use it:** Track duplicate and forbidden call rates on every agent run to catch retry loops and policy violations cheaply.
+- **Implemented in:** Custom trace assertions and LLM-judged trajectory rubrics.
 
 ### 2.6 Error recovery
 
-- **What it measures:** Whether the agent handles tool failures gracefully: retries sensibly, fixes bad arguments after a validation error, falls back to an alternative, or tells the user — rather than looping, hallucinating a result, or claiming success.
-- **Inputs required:** Test cases with **injected faults** (mocked tools that time out, return 500, return a validation error, return empty results, or return a permission error).
-- **How it's computed:** Per fault type, label the desired behaviour and check it:
+- **What it measures:** How gracefully the agent handles tool failures. Check whether it fixes invalid arguments, retries transient errors within budget, uses a fallback tool, or reports the failure honestly.
+- **Inputs required:** Fault-injection test cases where mocked tools return HTTP 500 timeouts, schema validation errors, empty results, or permission-denied errors.
+- **How to compute it:** Label the expected recovery behavior for each injected fault and compute:
   ```text
-  recovery_rate          = |fault runs ending in correct recovery behaviour| / |fault runs|
-  false_success_rate     = |fault runs where the agent claims success| / |fault runs|     # worst failure
-  max_retries_exceeded   = |runs exceeding retry budget|
+  recovery_rate        = |fault runs ending in correct recovery behaviour| / |fault runs|
+  false_success_rate   = |fault runs where the agent claims success| / |fault runs|     # worst failure
+  max_retries_exceeded = |runs exceeding retry budget|
   ```
-- **Worked example:** `create_ticket` returns `{"error": "assignee_group 'IT Hardware' not found; valid: IT-Hardware, IT-Software"}`. Good: one retry with `IT-Hardware`. Bad: telling the user "Ticket created!" (false success), or retrying the same invalid value five times.
-- **Pitfalls / gotchas:** Mock faults must look like your real tool errors. Don't forget **partial** failures (one of three calls fails).
-- **When to use / when not to:** Every agent with side-effecting tools. False-success rate is one of the highest-value agent metrics.
-- **Implemented in:** Mostly custom (fault-injection mocks + assertions); judges can grade the final message.
+- **Worked example:** Suppose `create_ticket` returns `{"error": "assignee_group 'IT Hardware' not found. Valid: IT-Hardware, IT-Software"}`. A good agent retries once with `IT-Hardware`. A failing agent tells the user "I created your ticket!" (**false success**) or retries the broken argument five times in a loop.
+- **Pitfalls and gotchas:** Match mocked error payloads to your real production error strings. Also test **partial failures** where one tool succeeds and a second tool fails.
+- **When to use it:** Run fault-injection tests on every agent with write tools. Target a **false-success rate of 0**.
+- **Implemented in:** Custom fault-injection wrappers plus final-response LLM judges.
 
 ```python
 import random
@@ -190,20 +196,20 @@ def flaky(tool_fn, fail_rate: float = 1.0, error: dict | None = None):
 
 ## 3. Trajectory evaluation
 
-A trajectory is the ordered list of tool calls (optionally with intermediate reasoning and results). Compare the predicted trajectory `P` with a reference trajectory `E`.
+A trajectory is the ordered sequence of tool calls (and optionally reasoning steps and tool outputs) in a run. Compare the predicted trajectory `P` against an expected reference trajectory `E`.
 
 ### 3.1 Match modes
 
-| Mode | Passes when | Use for |
+| Mode | Passes when | Best used for |
 |---|---|---|
-| **Exact (strict)** | `P == E` element-wise (same calls, same order, same length) | Deterministic workflows, regression tests of a fixed pipeline |
-| **In-order** | All of `E` appear in `P` in the same relative order; extra calls allowed | Required sequences with tolerated detours |
-| **Any-order (unordered)** | `P` and `E` contain the same calls, any order | Independent calls (parallel lookups) |
-| **Superset** | `P ⊇ E` — all expected calls present, extras allowed | "Must at least do X and Y" |
-| **Subset** | `P ⊆ E` — no calls outside the reference | "Must not do anything else" (safety, cost) |
-| **Precision / recall** | Fractional scores rather than pass/fail | Dashboards and trend lines |
+| **Exact (strict)** | `P == E` element-by-element (same calls, same order, same length) | Deterministic workflows and fixed-pipeline regression tests |
+| **In-order** | All calls in `E` appear in `P` in the same relative order (extra calls allowed) | Required multi-step sequences that tolerate optional lookups |
+| **Any-order (unordered)** | `P` and `E` contain the exact same set of calls in any order | Independent parallel tool calls |
+| **Superset** | `P ⊇ E` — every expected call appears in `P` (extra calls allowed) | Verifying that required actions happened at least once |
+| **Subset** | `P ⊆ E` — every predicted call is in the allowed reference set | Enforcing strict safety or cost ceilings |
+| **Precision / recall** | Computes fractional overlap scores instead of binary pass/fail | Tracking aggregate trends across experiments |
 
-Names vary by tool: LangChain's `agentevals` offers `strict`, `unordered`, `subset`, `superset` modes; Vertex AI's evaluation service names them exact match, in-order match, any-order match, plus trajectory precision/recall. Always state how **arguments** are compared inside each mode (name-only, exact args, or per-argument matchers).
+Framework naming varies. LangChain `agentevals` provides `strict`, `unordered`, `subset`, and `superset` modes, while Vertex AI provides exact, in-order, and any-order match plus trajectory precision and recall. Always specify how your chosen mode compares **arguments** (tool-name only, exact arguments, or per-argument matchers).
 
 ### 3.2 Pure-Python tool-call and trajectory matching
 
@@ -299,7 +305,7 @@ assert not trajectory_match(pred, exp, "subset", matchers=m)
 assert not trajectory_match(pred, exp, "exact", matchers=m)
 ```
 
-Schema validation (use the same JSON Schema you give the model):
+Validate tool arguments against the same JSON Schema you pass to the model:
 
 ```python
 from jsonschema import Draft202012Validator  # pip install jsonschema
@@ -311,15 +317,15 @@ def schema_errors(call: Call, schemas: dict[str, dict]) -> list[str]:
     return [e.message for e in v.iter_errors(call.get("args", {}))]
 ```
 
-For free-text arguments, plug in a semantic matcher (embedding similarity with a calibrated threshold, or an LLM judge call) as an entry in `matchers`.
+For free-text arguments, pass an embedding-similarity function or LLM-judge callable inside the `matchers` dictionary.
 
 ### 3.3 LLM-judged trajectory
 
-When many trajectories are valid, a reference-free judge is more robust than matching.
+When a task admits many valid tool sequences, use a rubric-based LLM judge instead of rigid trajectory matching.
 
-- **What it measures:** Whether the sequence of steps was reasonable, efficient, safe and consistent with the tools' results.
-- **Inputs required:** Full trace (input, each tool call + result, final response), tool descriptions, optionally a reference trajectory "for guidance".
-- **How it's computed:** Judge with a rubric of **binary** checks, not a single 1–10 score:
+- **What it measures:** Whether the agent's step sequence was logical, efficient, safe, and faithful to the returned tool outputs.
+- **Inputs required:** The full execution trace (user prompt, each tool call and result, and final answer), tool schemas, and optionally a reference trajectory for guidance.
+- **How to compute it:** Prompt an LLM judge with a checklist of **binary** questions rather than a single 1–10 rating:
   ```text
   Given the USER REQUEST, the AVAILABLE TOOLS, and the AGENT TRACE, answer each:
   1. Did the agent use tool results correctly (no ignoring or misreading results)?   yes/no
@@ -329,10 +335,10 @@ When many trajectories are valid, a reference-free judge is more robust than mat
   5. Does the final response accurately reflect what actually happened?              yes/no
   Give a one-line reason per item. Output JSON.
   ```
-- **Score range & interpretation:** Per-check pass rates. Check 5 ("final response matches what happened") catches false-success claims and is especially valuable.
-- **Pitfalls / gotchas:** Long traces exceed judge attention; truncate tool results sensibly but keep error messages. Judges are lenient about inefficiency. Validate against human-labeled traces ([LLM-as-a-judge](./07-llm-as-a-judge.md)).
-- **When to use / when not to:** Open-ended agents, research-style multi-step tasks, and online sampling where references don't exist.
-- **Implemented in:** LangChain `agentevals` (LLM-as-judge trajectory evaluator), DeepEval (`TaskCompletionMetric` is judge-based over the trace), Vertex AI evaluation, Phoenix (agent/tool-calling eval templates), custom.
+- **Score range & interpretation:** Report the pass rate for each binary check. Check 5 (*"Does the final response accurately reflect what actually happened?"*) directly catches false-success hallucinations.
+- **Pitfalls and gotchas:** Long tool outputs can overflow or distract the judge. Truncate large read payloads while keeping all error messages intact, and validate judge verdicts against human-reviewed traces ([LLM-as-a-judge](./07-llm-as-a-judge.md)).
+- **When to use it:** Use LLM trajectory judges for open-ended research agents and sampled online production traces where no reference trajectory exists.
+- **Implemented in:** LangChain `agentevals` (trajectory LLM judge), DeepEval (`TaskCompletionMetric`), Vertex AI evaluation, Phoenix agent eval templates.
 
 ---
 
@@ -340,20 +346,20 @@ When many trajectories are valid, a reference-free judge is more robust than mat
 
 ### 4.1 Final-state checks (τ-bench style)
 
-- **What it measures:** Whether the environment ends up in the correct state — the strongest, path-independent signal for side-effecting agents.
-- **Inputs required:** Initial state fixture, sandboxed tools that mutate a real (test) store, expected final state (or assertions on it). Ground truth required.
-- **How it's computed:** Run the agent against a fresh copy of the state; afterwards query the state and compare to the expected state or assertions. **τ-bench** (Yao et al., 2024) does exactly this: tasks in simulated retail/airline domains with a database, an LLM-simulated user, and domain policies; success means the final database state matches the annotated goal state (plus required information conveyed to the user).
+- **What it measures:** Whether the external environment reaches the exact expected state at the end of the run. This is the strongest, most path-independent metric for action-taking agents.
+- **Inputs required:** Initial state fixture, sandboxed tools connected to an isolated test database, and state assertions. Requires ground truth.
+- **How to compute it:** Reset the sandbox to the initial fixture, run the agent, and run assertions against the resulting database state. **τ-bench** (Yao et al., 2024) popularized this pattern. A run succeeds only when the final database state matches the goal state and the response includes required user details:
   ```text
   task_success = final_state satisfies all assertions AND response contains required info
   success_rate = mean(task_success)
   ```
-- **Worked example:** After the laptop request, assert: exactly one new ticket; `priority == "high"`; `assignee_group == "IT-Hardware"`; `requester == "u_381"`; no other tables changed. The duplicate-ticket run from 2.3 **fails** ("exactly one new ticket") even though tool-call recall was 1.0.
-- **Pitfalls / gotchas:**
-  - Compare only relevant fields; ignore generated IDs and timestamps.
-  - Assert on **absence** of side effects too (no extra tickets, no updates to other records).
-  - Requires investment in sandboxes/fixtures — worth it for any agent that writes.
-- **When to use / when not to:** Any agent with write actions. For read-only Q&A agents, the "state" is the answer — use [answer correctness](./01-end-to-end-rag-evals.md#33-answer-correctness).
-- **Implemented in:** τ-bench (benchmark harness), custom harnesses; most eval platforms let you write a custom scorer that queries state.
+- **Worked example:** After the laptop ticket request, assert that `tickets` has one new row (`priority == "high"`, `assignee_group == "IT-Hardware"`, `requester == "u_381"`) and no other tables changed. The duplicate-ticket run from section 2.3 **fails** this assertion even though its tool-call recall was `1.0`.
+- **Pitfalls and gotchas:**
+  - **Ignore volatile fields** such as auto-generated UUIDs and timestamps when diffing database state.
+  - **Assert the absence of unintended side effects** (verify that no extra tickets were created and no unrelated rows were modified).
+  - **Invest in deterministic sandboxes.** Sandboxed state fixtures take engineering effort to build, but they pay for themselves on every write-capable agent.
+- **When to use it:** Use final-state checks for every agent that mutates external state. For read-only Q&A agents, evaluate the final response with [answer correctness](./01-end-to-end-rag-evals.md#33-answer-correctness).
+- **Implemented in:** τ-bench and custom sandbox assertions in promptfoo, Braintrust, LangSmith, or pytest.
 
 ```python
 def state_diff(before: dict[str, list[dict]], after: dict[str, list[dict]],
@@ -381,7 +387,7 @@ def assert_one_ticket(diff: dict, **expected) -> bool:
 
 ### 4.2 Task completion (judge-based)
 
-When there's no checkable state (e.g. "find and summarise the three most relevant policies"), use a judge with explicit success criteria per task:
+When a task has no database state to diff (like *"Summarize the top three travel policies"*), grade the trace with an LLM judge against task-specific criteria:
 
 ```text
 TASK: {input}
@@ -390,11 +396,11 @@ TRACE: {trace}
 For each criterion: met / not met + evidence from the trace. Then: task_completed = all met.
 ```
 
-DeepEval (`TaskCompletionMetric`) and RAGAS (`AgentGoalAccuracy`, with or without reference) implement variants. Prefer dataset-specific criteria over a generic "was the task completed?".
+DeepEval (`TaskCompletionMetric`) and RAGAS (`AgentGoalAccuracy`) provide built-in implementations. Always supply explicit per-sample success criteria from your dataset rather than asking a generic *"Was the task completed?"* prompt.
 
 ### 4.3 Reliability across trials: pass^k
 
-Agents are stochastic; one successful run doesn't mean the task is reliably solved. τ-bench introduced **pass^k**: the probability that **all k** independent trials of a task succeed (contrast with pass@k, where *any* success counts).
+Because agent runs are stochastic, passing a test once does not guarantee reliable production behavior. τ-bench introduced **pass^k**: the probability that **all `k`** independent trials succeed (unlike `pass@k` in code generation, where *at least one* success out of `k` counts).
 
 ```text
 For a task with n trials and c successes:
@@ -413,7 +419,7 @@ print(pass_hat_k([(4, 4), (3, 4), (2, 4)], k=1))  # 0.75 (= average success rate
 print(pass_hat_k([(4, 4), (3, 4), (2, 4)], k=4))  # 0.333...
 ```
 
-**Use it** for any agent that acts on behalf of users: a task that succeeds 75% of the time fails users regularly. Heuristic: run each task 3–5 times for important suites and report pass^1 and pass^k.
+**When to use it:** Track `pass^k` for any agent that executes actions for users. An agent with a 75% single-run success rate (`pass^1 = 0.75`) might succeed on all 4 trials only 33% of the time (`pass^4 = 0.33`). Run critical test suites 3–5 times and report both `pass^1` and `pass^k`.
 
 ---
 
@@ -421,58 +427,58 @@ print(pass_hat_k([(4, 4), (3, 4), (2, 4)], k=4))  # 0.333...
 
 ### 5.1 Step efficiency
 
-- **What it measures:** Cost of getting to the outcome: steps (LLM turns), tool calls, tokens, latency, $.
-- **Inputs required:** Traces. Optional reference "optimal" step count.
-- **How it's computed:**
+- **What it measures:** The resource cost required to complete a task: LLM turns, tool calls, total tokens, p50/p95 latency, and dollar cost.
+- **Inputs required:** Execution traces, plus an optional optimal step count per task.
+- **How to compute it:**
   ```text
   steps_per_task, tool_calls_per_task, tokens_per_task, cost_per_task, latency p50/p95
   step_efficiency = optimal_steps / actual_steps        (cap at 1; only for tasks with known optimum)
   cost_per_successful_task = total cost / successful tasks
   ```
-- **Pitfalls / gotchas:** Only compare efficiency among **successful** runs, or a variant that gives up early looks efficient. Watch the tail: runaway loops show up in p99 steps, not the mean.
-- **When to use / when not to:** Always report alongside success rate; gate on regressions (e.g. +25% tokens per success).
-- **Implemented in:** Tracing platforms (Langfuse, LangSmith, Phoenix, Braintrust) capture token/latency; step metrics are easy to compute from traces.
+- **Pitfalls and gotchas:** Compute step and token efficiency **only across successful runs**. Otherwise, a broken agent that aborts on turn 1 looks artificially cheap. Monitor **p99 step counts** to catch runaway retry loops.
+- **When to use it:** Report efficiency metrics alongside task success on every scorecard. Gate releases on cost regressions (such as >25% more tokens per successful task).
+- **Implemented in:** Langfuse, LangSmith, Phoenix, Braintrust, and custom trace aggregators.
 
 ### 5.2 Planning quality
 
-- **What it measures:** For plan-then-execute agents: is the plan complete, correctly ordered, feasible with available tools, and minimal? Does execution follow the plan, and is the plan revised when results invalidate it?
-- **How it's computed:** LLM judge with binary checks on the **plan artefact** (coverage of the user's sub-goals, feasibility per step, unnecessary steps), plus a plan-adherence check comparing plan steps to executed steps.
+- **What it measures:** For plan-then-execute agents, whether the explicit plan covers all sub-goals, orders steps validly, uses real tools, and adapts when tool outputs change.
+- **How to compute it:** Prompt an LLM judge with binary checks on the **generated plan artefact** and compare the planned steps against executed steps:
   ```text
   plan_coverage  = |user sub-goals addressed by plan| / |user sub-goals|
   plan_adherence = |plan steps executed (or explicitly revised)| / |plan steps|
   ```
-- **Pitfalls / gotchas:** Good plans with bad execution and lucky execution with bad plans both exist; evaluate plan and outcome separately.
-- **Implemented in:** DeepEval (plan quality and plan adherence agentic metrics — check current docs for API), custom judges.
+- **Pitfalls and gotchas:** A good plan can still fail during execution, and an agent can recover from a bad initial plan. Evaluate plan quality and final task outcome separately.
+- **Implemented in:** DeepEval (`PlanQualityMetric`, `PlanAdherenceMetric`) and custom judges.
 
 ---
 
 ## 6. Routing and intent classification
 
-The assistant first routes: *docs Q&A* vs *data question (text-to-SQL)* vs *action (ticket)* vs *chit-chat* vs *out-of-scope*. Routing is a **classification** problem — evaluate it like one, deterministically.
+Most enterprise assistants start with a router that dispatches the user prompt to *docs Q&A*, *text-to-SQL*, *ticket actions*, *chit-chat*, or *out-of-scope*. Treat routing as a **multi-class classification** problem and evaluate it deterministically.
 
-- **What it measures:** Whether each input reaches the right handler/agent/tool family.
-- **Inputs required:** Input → expected route label. Ground truth required (cheap to label; SMEs or production samples).
-- **How it's computed:** Confusion matrix, per-class precision/recall/F1, macro-F1, and overall accuracy.
+- **What it measures:** Whether each user input reaches the right sub-agent, skill, or tool family.
+- **Inputs required:** User input and expected route label. Ground-truth labels are fast and cheap for SMEs to create.
+- **How to compute it:** Compute the confusion matrix, per-class precision/recall/F1, macro-F1, and overall accuracy:
   ```text
   precision_c = TP_c / (TP_c + FP_c)      recall_c = TP_c / (TP_c + FN_c)
   macro_F1 = mean_c F1_c                   accuracy = Σ TP_c / N
   ```
-- **Worked example (illustrative counts, 100 inputs):**
+- **Worked example (100 labeled queries):**
 
-  | true \ predicted | docs | sql | action | out_of_scope |
+  | True \ Predicted | docs | sql | action | out_of_scope |
   |---|---|---|---|---|
   | **docs** | 38 | 4 | 0 | 0 |
   | **sql** | 6 | 24 | 0 | 0 |
   | **action** | 1 | 0 | 17 | 0 |
   | **out_of_scope** | 3 | 0 | 0 | 7 |
 
-  Accuracy = 86/100. `out_of_scope` recall = 7/10 = 0.70 — three out-of-scope questions were sent to docs Q&A (risking hallucinated answers). `sql` recall = 24/30 = 0.80 — "how many..." questions misrouted to docs. The matrix tells you exactly which descriptions/examples to fix.
-- **Pitfalls / gotchas:**
-  - Accuracy hides minority-class failures; use macro-F1 and per-class recall.
-  - Misroutes have **asymmetric costs** (routing an action request to docs is annoying; routing a docs question to an action is dangerous). Weight accordingly.
-  - Multi-intent inputs ("what's the refund policy and open a ticket") need multi-label evaluation.
-- **When to use / when not to:** Any multi-agent or multi-skill system. It's cheap, deterministic, and catches a large share of E2E failures early.
-- **Implemented in:** scikit-learn (`confusion_matrix`, `classification_report`), or the pure-Python version below.
+  Overall accuracy is `86/100 = 0.86`. However, `out_of_scope` recall is only `7/10 = 0.70` (3 out-of-scope queries went to `docs`, risking hallucinations), and `sql` recall is `24/30 = 0.80` (6 data queries went to `docs`). The confusion matrix pinpoints exactly which route descriptions need clearer boundaries.
+- **Pitfalls and gotchas:**
+  - **Overall accuracy hides minority-class failures.** Gate on macro-F1 and per-class recall floors instead.
+  - **Misroutes carry asymmetric business costs.** Sending a policy question to an action tool is far riskier than sending an action request to docs search. Weight your gates by risk.
+  - **Use multi-label metrics for compound prompts** like *"What is the refund policy, and open a support ticket for me."*
+- **When to use it:** Run routing evals on every multi-agent or multi-skill system. They execute in seconds and prevent downstream E2E failures.
+- **Implemented in:** `scikit-learn` (`confusion_matrix`, `classification_report`) or the pure-Python function below.
 
 ```python
 from collections import defaultdict
@@ -501,21 +507,21 @@ def confusion_and_report(y_true: list[str], y_pred: list[str]) -> dict:
 
 ## 7. Multi-turn conversation evals
 
-Single-turn evals miss failures that only appear over a conversation: forgetting earlier facts, drifting out of role, or never actually finishing the user's goal.
+Single-turn evals miss multi-turn failures such as forgetting user constraints from turn 1, drifting out of persona, or failing to close out a multi-step workflow.
 
-| Metric | What it measures | How | Implemented in |
+| Metric | What it measures | How to compute it | Implemented in |
 |---|---|---|---|
-| **Goal / conversation completion** | Did the user's goal get satisfied by the end of the conversation? | Judge over the full transcript against per-scenario success criteria; or final-state check | DeepEval (`ConversationCompletenessMetric`), RAGAS (`AgentGoalAccuracy`), τ-bench (state-based) |
-| **Knowledge retention** | Does the assistant remember facts the user stated earlier (e.g. "I'm in the Pune office", "I'm a contractor")? | Judge checks later turns for contradictions with / re-asking of earlier user-provided facts | DeepEval (`KnowledgeRetentionMetric`) |
-| **Role adherence** | Does it stay in its defined persona and scope across turns, including under pressure? | Judge per assistant turn against the role description | DeepEval (`RoleAdherenceMetric`) |
-| **Topic adherence** | Does it stay within allowed domains? | Judge classifies each turn's topic vs allowed list | RAGAS (`TopicAdherenceScore`) |
-| **Turn relevancy** | Is each turn relevant to the recent context? | Sliding-window judge | DeepEval (`TurnRelevancyMetric`; formerly conversation relevancy) |
-| **Clarification behaviour** | Asks clarifying questions when needed, not otherwise | Labeled ambiguous vs clear scenarios; judge or classifier | Custom |
-| **Context carry-over in retrieval** | Follow-ups ("what about contractors?") retrieve correctly | Query-rewrite eval + recall@k on rewritten queries ([02](./02-retrieval-metrics.md)) | Custom |
+| **Goal / conversation completion** | Whether the assistant satisfied the user's overall goal by the end of the dialogue | Run an LLM judge over the full transcript with scenario criteria, or check final sandbox state | DeepEval (`ConversationCompletenessMetric`), RAGAS (`AgentGoalAccuracy`), τ-bench |
+| **Knowledge retention** | Whether the assistant remembers facts the user stated in earlier turns ("I work in Pune", "I am a contractor") | Prompt a judge to flag later turns that contradict or re-ask facts already provided | DeepEval (`KnowledgeRetentionMetric`) |
+| **Role adherence** | Whether the assistant stays within its assigned persona and scope across turns | Score each assistant turn against the system role description | DeepEval (`RoleAdherenceMetric`) |
+| **Topic adherence** | Whether the conversation stays inside approved business domains | Classify each turn's topic against your allowed topic list | RAGAS (`TopicAdherenceScore`) |
+| **Turn relevancy** | Whether each assistant reply addresses the immediate conversation context | Run a sliding-window relevance judge across turns | DeepEval (`TurnRelevancyMetric`) |
+| **Clarification behaviour** | Whether the agent asks clarifying questions on ambiguous prompts and acts directly on clear prompts | Test labeled ambiguous vs clear prompts with a classifier or judge | Custom |
+| **Context carry-over in retrieval** | Whether follow-up turns ("what about contractors?") retrieve the right chunks | Measure query-rewrite quality and `recall@k` on rewritten follow-up queries ([02](./02-retrieval-metrics.md)) | Custom |
 
 ### 7.1 Simulated users
 
-Static multi-turn transcripts go stale the moment your assistant replies differently from the recorded turn. **Simulated users** — an LLM playing a user with a hidden goal and persona — let you evaluate live conversations at scale.
+Static multi-turn test transcripts break as soon as your assistant phrases a reply differently on turn 2. **Simulated users** use an LLM with a persona, hidden facts, and a goal to converse dynamically with your agent in a sandbox.
 
 ```mermaid
 sequenceDiagram
@@ -532,7 +538,7 @@ sequenceDiagram
     Note over Env: Final-state check + transcript judges
 ```
 
-Scenario spec:
+Scenario specification:
 
 ```json
 {"persona": "Contractor in Pune, terse, not technical",
@@ -543,23 +549,23 @@ Scenario spec:
  "max_turns": 10}
 ```
 
-**Pitfalls:** simulators are too cooperative and articulate compared with real users; they may leak the goal or drift from the persona; and simulator randomness adds variance (run multiple seeds). Validate a sample of simulated conversations by hand, and seed personas from real production conversations ([production data flywheel](../01-datasets/04-production-data-flywheel.md)). τ-bench uses an LLM-simulated user; DeepEval provides a conversation simulator (check current API).
+**Pitfalls and gotchas:** LLM user simulators are often more polite and articulate than real users, and they sometimes leak `hidden_facts` unprompted. Run multiple random seeds per scenario, inspect a sample of transcripts manually, and seed user personas from real production logs ([production data flywheel](../01-datasets/04-production-data-flywheel.md)). Both τ-bench and DeepEval (`ConversationSimulator`) support simulated-user evaluations.
 
 ---
 
 ## 8. Public benchmarks — context only
 
-Public agent benchmarks are useful for **model selection** and for borrowing **methodology**. They don't replace evals on your tools, data and policies.
+Use public agent benchmarks to **shortlist base models** and borrow **evaluation patterns**, never as a substitute for evaluating your own tools and policies.
 
 | Benchmark | What it tests | Methodology worth borrowing |
 |---|---|---|
-| **[τ-bench](https://github.com/sierra-research/tau-bench)** (Yao et al., 2024) | Tool-agent-user interaction in retail/airline domains with policies | Simulated users, database final-state checks, pass^k reliability |
-| **[BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html)** (Berkeley Function Calling Leaderboard) | Function-calling accuracy: simple, multiple, parallel calls, relevance detection (when *not* to call), multi-turn, and agentic tasks in later versions | AST-based argument matching, executable evaluation, irrelevance detection |
-| **[AgentBench](https://github.com/THUDM/AgentBench)** (Liu et al., 2023) | LLMs as agents across environments (OS, database, knowledge graph, games, web) | Multi-environment, interactive evaluation |
-| **[GAIA](https://huggingface.co/gaia-benchmark)** (Mialon et al., 2023) | General assistant questions requiring reasoning, browsing, tool use | Short unambiguous final answers enable exact-match scoring of complex tasks |
-| **[SWE-bench](https://www.swebench.com/)** (Jimenez et al., 2023) | Resolving real GitHub issues in Python repos | Outcome verified by executing tests — the archetype of final-state evaluation |
+| **[τ-bench](https://github.com/sierra-research/tau-bench)** (Yao et al., 2024) | Tool-agent-user interaction in retail and airline domains under policy rules | Simulated users, database final-state diffs, and `pass^k` reliability across trials |
+| **[BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html)** (Berkeley Function Calling Leaderboard) | Function calling across simple, parallel, multi-turn, and irrelevance (no-tool) cases | AST-based argument matching, executable validation, and explicit no-tool abstention tests |
+| **[AgentBench](https://github.com/THUDM/AgentBench)** (Liu et al., 2023) | LLMs acting across OS, database, knowledge graph, game, and web environments | Interactive multi-environment sandbox harnesses |
+| **[GAIA](https://huggingface.co/gaia-benchmark)** (Mialon et al., 2023) | Multi-step reasoning, web browsing, and tool use | Complex multi-step tasks designed with short, unambiguous final answers for exact-match grading |
+| **[SWE-bench](https://www.swebench.com/)** (Jimenez et al., 2023) | Resolving real GitHub issues in Python repositories | Verifying outcomes by running unit tests against the modified codebase |
 
-Takeaways to copy: verify **outcomes** by execution or state, design tasks with **unambiguous success criteria**, include **"should not call a tool"** cases, and measure **reliability** across repeated trials.
+Adopt four habits from these benchmarks. Verify **outcomes** via state or execution, write **unambiguous success criteria**, include **no-tool** test cases, and measure **multi-trial reliability (`pass^k`)**.
 
 ---
 
@@ -567,39 +573,39 @@ Takeaways to copy: verify **outcomes** by execution or state, design tasks with 
 
 ### 9.1 Agent eval suite layout
 
-| Suite | Size (heuristic start) | Runs | Gate |
+| Suite | Starting size (heuristic) | When to run | Release gate |
 |---|---|---|---|
-| Routing (classification) | 200–500 labeled inputs | Every PR (fast, no tools executed) | macro-F1 no regression; per-class recall floors |
-| Single-call tool selection + args | 100–300 cases incl. no-tool and ambiguous | Every PR (mock tools) | schema validity ≈ 100%; selection/args no regression |
-| Fault-injection | 30–100 cases across fault types | Every PR | false-success rate ≈ 0 |
-| Outcome (sandboxed, final-state) | 50–200 tasks × 3 trials | Nightly / pre-release | success rate and pass^k no regression |
-| Multi-turn simulated | 30–100 scenarios × seeds | Nightly / pre-release | goal completion, retention, role adherence |
-| Efficiency | From the above traces | Always | tokens/cost per success ≤ baseline + 25% |
+| Routing (classification) | 200–500 labeled prompts | Every PR (fast, no tool execution) | Macro-F1 no regression and per-class recall floors |
+| Single-call selection + arguments | 100–300 cases (including no-tool and ambiguous) | Every PR (mocked tools) | Schema validity ≈ 100% and selection/arg accuracy no regression |
+| Fault injection | 30–100 cases across error types | Every PR | False-success rate = 0 |
+| Outcome (sandboxed final state) | 50–200 tasks × 3–5 trials | Nightly and pre-release | Task success rate and `pass^k` no regression |
+| Multi-turn simulated users | 30–100 scenarios × multiple seeds | Nightly and pre-release | Goal completion, knowledge retention, and role adherence |
+| Step efficiency | Computed from all suite traces above | Every run | Tokens and dollar cost per successful task ≤ baseline + 25% |
 
 ### 9.2 Checklist
 
-- [ ] Encode **required, optional and forbidden** calls per case — not just one reference path.
-- [ ] Choose a matcher **per argument** (exact, normalised, numeric, set, semantic, execution).
-- [ ] Validate every call against the tool's JSON Schema; add provenance checks for ID arguments.
-- [ ] Build sandboxed tools + fixtures and assert on final state, including absence of side effects.
-- [ ] Inject faults; track false-success rate.
-- [ ] Run outcome suites multiple times; report pass^k.
-- [ ] Evaluate routing with a confusion matrix; weight asymmetric misroute costs.
-- [ ] Add multi-turn scenarios with simulated users seeded from real conversations.
-- [ ] Report efficiency only among successful runs; watch p99 steps for loops.
-- [ ] Re-run selection evals every time a tool description or the tool set changes.
-- [ ] Cross-check that blocked/forbidden actions are also enforced by [tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) and [RBAC](../04-guardrails/06-access-control-rbac.md).
+- [ ] Specify **required, optional, and forbidden** tool calls for every test case rather than a single rigid path.
+- [ ] Assign an explicit matcher **per argument** (schema, exact, normalized, numeric tolerance, set, semantic, or execution).
+- [ ] Validate every tool call against its JSON Schema and check provenance on ID arguments to catch hallucinated IDs.
+- [ ] Build sandboxed tools with database fixtures and assert both expected state changes and zero unintended side effects.
+- [ ] Inject tool timeouts, validation errors, and 500s to verify that the agent's false-success rate stays at zero.
+- [ ] Run outcome suites across 3–5 trials per task and report `pass^k`.
+- [ ] Evaluate intent routing with a confusion matrix and weight misroutes by business risk.
+- [ ] Test multi-turn conversations with simulated users seeded from real production personas.
+- [ ] Compute token and step efficiency only over successful runs, and monitor p99 step counts for infinite loops.
+- [ ] Re-run tool-selection evals whenever you edit a tool description or add a new tool.
+- [ ] Verify that forbidden actions are also blocked at runtime by [tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) and [RBAC](../04-guardrails/06-access-control-rbac.md).
 
 ---
 
 ## Key takeaways
 
-- Evaluate agents at three levels: **single calls** (fast unit tests), **trajectories** (diagnosis, efficiency, safety ordering), and **outcomes** (path-independent, what users care about).
-- Prefer **final-state checks** in a sandbox for any agent that writes; assert on what *shouldn't* have changed too.
-- Use **per-argument matchers** and **one-to-one matching** for tool-call precision/recall/F1; strict trajectory matching is brittle.
-- **False success** after tool errors is one of the most damaging failures — test it with fault injection.
-- Agents are stochastic: measure **pass^k**, not just single-run success.
-- Treat **routing** as classification with a confusion matrix, and test **multi-turn** behaviour with simulated users.
+- **Evaluate agents at three complementary levels.** Run single-call unit tests for speed, trajectory checks for step efficiency and safety orderings, and final-state checks for true user outcomes.
+- **Anchor release gates on sandboxed final-state diffs.** Verify both that required writes succeeded and that no other records changed.
+- **Match arguments by type and one-to-one pairing.** Combine schema validation, exact matchers, and semantic matchers instead of brittle string equality.
+- **Test error recovery with fault injection.** Never ship an agent that hallucinates success when a tool call fails.
+- **Measure reliability across trials with `pass^k`.** Single-run pass rates hide stochastic flakiness on action-taking agents.
+- **Evaluate routing with confusion matrices and multi-turn flows with simulated users.**
 
 ## Further reading
 
