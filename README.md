@@ -29,9 +29,9 @@ This repository synthesizes the answers into a navigable knowledge base with dec
 
 Corrections and additions are welcome — especially new metrics, tools, and real-world lessons. Please keep the existing page structure (TL;DR → content → Key takeaways → Further reading) and cite sources.
 
-The docs site is built from `research/` with [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/) and deployed to GitHub Pages on every push to `main`. Just add or edit markdown files; navigation is generated from the folder and file names. To preview locally:
+The docs site is built from `research/` with [Zensical](https://zensical.org) and deployed to GitHub Pages on every push to `main`. Just add or edit markdown files; navigation is generated from the folder and file names (section titles come from each folder's `README.md` heading). To preview locally:
 
 ```bash
 pip install -r requirements-docs.txt
-mkdocs serve   # http://127.0.0.1:8000
+python scripts/docs.py serve   # http://localhost:8000
 ```
