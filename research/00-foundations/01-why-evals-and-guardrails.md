@@ -1,22 +1,26 @@
 # Why Evals and Guardrails
 
-> **TL;DR** — Getting an agentic RAG demo to work takes days; making it reliable takes months, and the gap is closed by evals (which *measure* behavior) and guardrails (which *enforce* behavior at runtime). Both are built from the same checks, and both only work if you start by looking at real failures — error analysis first, metrics second.
+> **TL;DR**
+> - **Demos are easy, but reliability is hard.** You can build an agentic RAG prototype in days. Making it safe and accurate in production takes months.
+> - **Evals measure; guardrails enforce.** Evals score system quality on datasets or traffic samples. Guardrails block or fix unsafe behavior on live requests.
+> - **One check powers both.** You write a check once (such as *"Is this answer supported by retrieved docs?"*) and run it offline, online, or at runtime.
+> - **Start with error analysis, not metrics.** Read real traces first, group your actual failures, and build checks only for what breaks.
 
-**You'll learn:** why reliability is the hard part · how non-determinism and multi-step compounding break naive testing · the difference (and overlap) between evals and guardrails · the eval-driven development loop (analyze → measure → improve) · what "a successful, reliable agent" actually means · who owns what
- · **Prerequisites:** none — start here
- · **Related:** [The evals & guardrails map](./02-the-evals-and-guardrails-map.md) · [Failure modes](./03-agentic-rag-failure-modes.md) · [Glossary](./04-glossary.md) · [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)
+- **You will learn:** Why prototypes fail in production · How evals and guardrails share checks · How to run the **Analyze → Measure → Improve** loop · What makes an agent reliable · Who owns what on the team
+- **Prerequisites:** None — start here
+- **Related guides:** [The Evals & Guardrails Map](./02-the-evals-and-guardrails-map.md) · [Failure Modes](./03-agentic-rag-failure-modes.md) · [Glossary](./04-glossary.md) · [Implementation Playbook](../05-decision-framework/04-implementation-playbook.md)
 
 ---
 
 ## 1. The running example
 
-Throughout this repo we use one concrete system so that abstract ideas stay grounded:
+Abstract rules are hard to remember. To keep every concept concrete, this guide uses one example system throughout:
 
-> **Acme Internal Assistant** — an internal enterprise assistant that:
-> 1. answers questions over company documents (policies, wikis, runbooks) using **vector search + reranking**,
-> 2. answers analytical questions by **generating SQL** against a data warehouse,
-> 3. can **take actions** via tools (e.g. `create_ticket`, `lookup_employee`),
-> 4. serves users in **different roles** (Employee, Manager, HR, Finance, Admin) with **RBAC** on documents, tables, and tools.
+> **Acme Internal Assistant** — an enterprise agent that does four jobs:
+> 1. **Answers document questions** over company policies, wikis, and runbooks using **vector search + reranking**.
+> 2. **Answers data questions** by **generating SQL** and running it against a data warehouse.
+> 3. **Takes actions** by calling tools such as `create_ticket` and `lookup_employee`.
+> 4. **Enforces role-based access control (RBAC)** across roles (Employee, Manager, HR, Finance, Admin) for every document, table, and tool.
 
 ```mermaid
 flowchart LR
@@ -34,262 +38,263 @@ flowchart LR
     OG --> U
 ```
 
-Every box in this diagram can fail independently, and every arrow is a place where an error can propagate. That is the core of why reliability is hard.
+How to read this diagram:
+- **Every box can fail on its own.** The router can pick the wrong path, the retriever can miss a policy doc, or the SQL generator can join the wrong table.
+- **Every arrow passes errors downstream.** If the retriever fetches an outdated 2022 policy, the generator will confidently state the wrong rule.
 
 ---
 
 ## 2. Why reliability is the hard part
 
-### 2.1 The demo-to-production gap
+### 2.1 The gap between a demo and production
 
-A RAG prototype that answers ten hand-picked questions correctly is easy. What's hard:
+Building a prototype that answers ten hand-picked questions is easy. Running that same system for thousands of real users is much harder:
 
 | Prototype reality | Production reality |
 |---|---|
-| 10–20 questions the builder wrote | Thousands of questions with long-tail phrasing, typos, mixed languages, follow-ups |
-| Clean, curated documents | Stale, duplicated, contradictory, access-restricted documents |
-| One user, one role | Many roles, each allowed to see different data |
-| Happy path tool calls | Malformed arguments, API timeouts, partial failures, retries |
-| Builder judges by eye ("looks good") | Users judge by outcomes ("it told me the wrong PTO policy") |
-| No adversaries | Curious and malicious users, poisoned documents, injected instructions |
-| Cost and latency ignored | Cost per query and p95 latency are product requirements |
+| 10–20 clear questions written by the developer | Thousands of messy questions with typos, slang, and follow-ups |
+| Clean, hand-picked documents | Stale, duplicated, contradictory, and permission-restricted files |
+| One test user with full access | Many user roles, each allowed to see different data |
+| Happy-path tool calls | Bad arguments, API timeouts, partial failures, and retries |
+| Developer checks answers by eye ("looks good") | Users act on wrong answers ("it gave me the wrong parental leave rule") |
+| Friendly testers | Curious users, malicious attackers, and poisoned documents |
+| Cost and latency do not matter | Cost per query and p95 latency are strict product limits |
 
-The model is rarely the bottleneck. The bottleneck is **knowing whether the system works**, **knowing when it stops working**, and **stopping it from doing harm while it doesn't**.
+The LLM itself is rarely your main bottleneck. Your real bottleneck is **knowing whether the system works**, **knowing when it breaks**, and **preventing harm when it fails**.
 
-### 2.2 Non-determinism
+### 2.2 Non-determinism (the same input gives different outputs)
 
-LLM-based systems are non-deterministic in several layers:
+Traditional software returns the same output for the same input. LLM systems change their behavior across four layers:
 
-- **Sampling**: temperature > 0 produces different outputs for the same input. Even at temperature 0, many hosted APIs do not guarantee bit-identical outputs (batching, hardware, and model updates can change results).
-- **Model drift**: the provider silently updates a model alias; your prompts behave differently.
-- **Data drift**: the document index changes daily; the same question retrieves different chunks.
-- **Path dependence**: in an agent, a slightly different first step (e.g. a different tool choice) leads to an entirely different trajectory.
+- **Sampling:** At `temperature > 0`, the model samples different tokens on each run. Even at `temperature = 0`, hosted APIs are rarely bit-identical because of hardware batching.
+- **Model drift:** Cloud providers update model weights behind an alias, which can silently change how your prompts behave.
+- **Data drift:** Your document index and database change daily. The same question retrieves different chunks tomorrow than it did today.
+- **Path dependence:** In a multi-step agent, a small change in step 1 (such as picking a different tool) creates a completely different path.
 
-Consequences for testing:
+What this means for how you test:
+1. **One test case proves almost nothing.** You need a **dataset** of many inputs—and sometimes multiple runs per input—to measure behavior reliably. See [Running Offline Experiments](../02-offline-evals/08-running-offline-experiments.md).
+2. **Exact string matching fails on free text.** Instead, use **structural checks** (JSON schema, SQL results) or **semantic checks** (LLM-as-a-judge, embeddings).
+3. **Report pass rates, not single pass/fail booleans.** Measure percentages (such as *92% faithfulness*) and track how they move over time.
 
-- A single run of a single test proves very little. You need **datasets** (many inputs) and sometimes **repeated trials** (multiple samples per input) to estimate behavior. See [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md).
-- Exact-match assertions on free text are mostly useless; you need **semantic** checks (embedding similarity, LLM-as-a-judge) or **structural** checks (JSON schema, SQL result sets).
-- You report **rates** (pass rate, hallucination rate) with uncertainty, not booleans.
+### 2.3 Errors compound across steps
 
-### 2.3 Compounding error in multi-step agents
-
-In a pipeline, the end-to-end success probability is roughly the product of per-step success probabilities (if failures are independent — they usually aren't, but the intuition holds):
+When an agent runs multiple steps in sequence, small error rates multiply fast:
 
 ```text
-P(success) ≈ p_route × p_retrieve × p_generate × p_cite × ...
+P(end-to-end success) ≈ P(route) × P(retrieve) × P(generate) × P(cite) ...
 
-Illustrative (not measured) numbers:
-  5 steps each at 95%  → 0.95^5  ≈ 0.77
-  10 steps each at 95% → 0.95^10 ≈ 0.60
-  10 steps each at 99% → 0.99^10 ≈ 0.90
+Illustrative math (assuming independent steps):
+  5 steps at 95% reliability each  → 0.95^5  ≈ 77% end-to-end success
+  10 steps at 95% reliability each → 0.95^10 ≈ 60% end-to-end success
+  10 steps at 99% reliability each → 0.99^10 ≈ 90% end-to-end success
 ```
 
-Implications:
+Four rules follow from this math:
+1. **Measure individual components.** An end-to-end score of 77% tells you the system is broken. Component evals tell you *which step* broke it. See [The Map — Scope](./02-the-evals-and-guardrails-map.md#2-axis-b--scope-end-to-end-vs-component).
+2. **Catch silent errors.** A bad retrieval does not throw an exception. Instead, the generator writes a confident, wrong answer from the wrong chunk.
+3. **Evaluate the trajectory, not just the final answer.** A good agent recovers from a tool error; a bad agent loops forever. See [Agent, Tool & Trajectory Evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md).
+4. **Place guardrails between steps.** Do not wait until the final output. Filter documents by role before generation, and validate SQL before execution.
 
-1. **Component evals matter.** A 77% end-to-end number tells you something is wrong; component evals tell you *where*. See [the map](./02-the-evals-and-guardrails-map.md#2-axis-b--scope-end-to-end-vs-component).
-2. **Errors propagate silently.** A wrong retrieval doesn't raise an exception — the generator confidently answers from the wrong chunk. A wrong SQL filter returns a plausible-looking number.
-3. **Agents can recover — or spiral.** A good agent notices a failed tool call and retries; a bad one loops. You need **trajectory** evals, not only final-answer evals. See [Agent tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md).
-4. **Guardrails between steps** (not only at input/output) cut the propagation chain: validating SQL before execution, checking tool arguments before calling, filtering retrieved chunks by ACL before generation.
+### 2.4 Your data is part of the attack surface
 
-### 2.4 The attack surface is the input *and* the data
+In classic web apps, you validate untrusted input at the API boundary. In agentic RAG, untrusted text also enters the prompt from retrieved documents, database rows, and tool outputs.
 
-Classic apps have an input-validation boundary. Agentic RAG apps blur it: retrieved documents, tool outputs, and database rows all flow back into the prompt, and any of them can carry instructions (**indirect prompt injection**). An agent that can call tools turns a text-generation bug into an *action* bug. This is why guardrails are not optional for agents. See [Threat model & OWASP](../04-guardrails/07-threat-model-owasp.md).
+If an attacker hides malicious instructions inside a wiki page or support ticket, the LLM may read that page and obey the attacker (**indirect prompt injection**). When your agent can call tools or run SQL, a text bug becomes an unauthorized action. That is why every agent needs runtime guardrails. See [Threat Model & OWASP](../04-guardrails/07-threat-model-owasp.md).
 
 ---
 
-## 3. Evals vs guardrails
+## 3. Evals vs. guardrails
 
-### 3.1 Definitions
+### 3.1 How they differ
 
-| | **Evals** | **Guardrails** |
+**Evals** measure system quality so your team can make decisions. **Guardrails** enforce safety and policy rules on a single live request.
+
+| Dimension | Evals (Measure) | Guardrails (Enforce) |
 |---|---|---|
-| Purpose | **Measure** quality/safety so you can decide and improve | **Enforce** policy on a live request so harm doesn't happen |
-| When | Offline (pre-deploy on datasets) and online (on production traffic, usually async) | Runtime, in the request path (or right beside it) |
-| Output | Scores, pass rates, dashboards, regressions | Allow / deny / modify / escalate decisions, plus logs |
-| Latency budget | Seconds to hours — doesn't block users | Milliseconds to ~1–2s — directly adds to user latency |
-| Cost tolerance | Can use expensive LLM judges, humans | Must be cheap per request (or sampled / tiered) |
-| Error tolerance | False positives just add noise to a dashboard | False positives block legitimate users; false negatives let harm through |
-| Who consumes the result | Engineers, PMs, SMEs | The application itself (and security / ops) |
+| **Goal** | Measure quality and safety across many inputs | Stop harm on one live request right now |
+| **When it runs** | Offline (before deploy) or online (async on live traffic) | Inline during the live request path |
+| **Output** | Pass rates, scores, dashboards, CI pass/fail | Allow, deny, modify, escalate, or flag |
+| **Time budget** | Seconds to hours (does not slow down users) | Milliseconds to ~1 second (users wait for it) |
+| **Cost budget** | Can use slower, stronger LLM judges or human reviewers | Must be cheap enough to run on 100% of traffic |
+| **Cost of a mistake** | Adds noise to a dashboard or blocks a PR | False positive blocks a real user; false negative leaks data |
+| **Consumer** | Engineers, product managers, and domain experts | The application itself (plus security and ops logs) |
 
-### 3.2 They share the same checks
+### 3.2 How they share the same checks
 
-The most important insight: **a check is a function `f(input, context, output, trace) → verdict`. Where you run it determines whether it's an eval or a guardrail.**
+Here is the most important pattern in this repository: **a check is a single function `f(input, context, output, trace) → verdict`.**
+
+Whether that check is an **eval** or a **guardrail** depends only on **where you run it**:
 
 ```mermaid
 flowchart TD
-    C["One check: e.g. 'Is the answer grounded in retrieved context?'"]
+    C["One check: 'Is the answer supported by retrieved context?'"]
     C --> O["Offline eval: run on golden dataset in CI, report faithfulness rate"]
     C --> M["Online eval: run async on 5% of prod traces, alert if rate drops"]
     C --> G["Guardrail: run sync before responding, block or regenerate if ungrounded"]
 ```
 
-| Check | As offline eval | As online monitor | As runtime guardrail |
+| Check | Used as an offline eval | Used as an online monitor | Used as a runtime guardrail |
 |---|---|---|---|
-| PII detector | % of test outputs leaking PII | PII leak rate per day | Redact PII before returning |
-| Faithfulness / groundedness | Faithfulness score on golden set | Sampled faithfulness trend | Block/regenerate ungrounded answers (if latency allows) |
-| SQL safety (read-only, allowed tables) | % of generated SQL violating policy | Violation count by role | Reject non-`SELECT`, unauthorized tables before execution |
-| Tool-argument schema validation | Tool-call correctness rate | Malformed-call rate | Reject + re-prompt on invalid args |
-| Prompt-injection classifier | Detection rate on attack set (red-team) | Attack attempts per day | Block or sandbox the request |
-| Citation check | Citation precision/recall | Uncited-claim rate | Strip or flag uncited claims |
+| **PII detector** | % of test answers that leak PII | Daily PII leak rate in production | Mask PII before showing the answer |
+| **Faithfulness check** | Faithfulness score on golden dataset | Rolling faithfulness score on 5% of traffic | Regenerate or abstain if answer is unsupported |
+| **SQL safety parser** | % of test SQL queries that break rules | Count of blocked queries by role | Reject non-`SELECT` or forbidden tables before running |
+| **Tool schema validator** | Tool-call accuracy rate | Rate of malformed tool calls | Reject bad arguments and ask the model to retry |
+| **Prompt-injection scanner** | Recall on red-team attack dataset | Daily count of injection attempts | Block the request before calling the agent |
+| **Citation validator** | Citation precision and recall scores | Rate of uncited claims in production | Strip invalid citations before returning the answer |
 
-Practical consequences:
-
-- **Build checks once, deploy them in three places.** Keep them in a shared library with a stable interface.
-- **Evaluate your guardrails with evals.** A guardrail is itself a classifier with precision and recall; measure its false-positive rate on legitimate traffic and its false-negative rate on attack datasets. See [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md).
-- **Guardrail decisions are eval signals.** A spike in blocks is either an attack or a regression — both are worth an alert. See [Monitoring, alerting & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md).
-- **Not every eval can be a guardrail.** Reference-based metrics (answer correctness vs a gold answer) need ground truth that doesn't exist at runtime. Only **reference-free** checks transfer to online/runtime use. See [the map, axis (d)](./02-the-evals-and-guardrails-map.md#4-axis-d--ground-truth-reference-based-vs-reference-free).
+What this means in practice:
+- **Write each check once and reuse it in three places.** Keep your check functions in a shared library.
+- **Evaluate your guardrails using offline evals.** Every guardrail is a classifier. Measure its false-positive rate on normal user questions and its recall on attack datasets before turning it on. See [Guardrails Architecture](../04-guardrails/01-guardrails-architecture.md).
+- **Use guardrail triggers as monitoring signals.** A sudden spike in blocked requests means you are either under attack or shipping a bug.
+- **Remember that reference-based checks cannot be guardrails.** A check that compares an answer against a human-written reference answer can only run offline. Online monitors and runtime guardrails must use **reference-free** checks. See [The Map — Ground Truth](./02-the-evals-and-guardrails-map.md#4-axis-d--ground-truth-reference-based-vs-reference-free).
 
 ---
 
 ## 4. Vibes-based vs systematic evaluation
 
-Most teams start with "vibe checks": the developer tries a few prompts after each change and eyeballs the output. This is a fine *first* step and a terrible *only* step.
+Most teams start with **vibe checks**: a developer changes a prompt, tries five questions by hand, and eyeballs the output. Vibe checks are fine on day one, but they fail as soon as your system grows.
 
-| Vibes-based | Systematic |
+| Vibe checks | Systematic evaluation |
 |---|---|
-| A handful of memorable prompts | A versioned dataset that covers real usage and known failure modes |
-| "It looks better now" | "Faithfulness went 0.81 → 0.88; tool-call accuracy unchanged; p95 latency +200ms" |
-| Regressions discovered by users | Regressions caught in CI before merge |
-| Changes are arguments of opinion | Changes are decisions backed by data |
-| Can't compare models/prompts fairly | Side-by-side experiments on identical inputs |
-| Doesn't scale past one developer | Shared ground truth across eng, product, SMEs |
+| 5–10 questions the developer remembers to try | A versioned dataset covering real user intents and past bugs |
+| *"It looks better to me now"* | *"Faithfulness rose from 81% to 88%, and p95 latency stayed flat"* |
+| Users discover regressions in production | CI catches regressions before code merges |
+| Prompt changes turn into opinion debates | Prompt changes are tested with data |
+| Hard to compare two models fairly | Side-by-side runs on the exact same inputs |
+| Breaks when a second engineer joins | Shared definition of "good" across engineering, product, and SMEs |
 
-> Heuristic: once more than one person is changing prompts, retrieval settings, or models, you need systematic evals. Once real users are on the system, you need online evals and guardrails.
+> **Rule of thumb:** As soon as more than one person edits prompts, retrieval, or models, build offline evals. As soon as real users touch the system, add runtime guardrails and online monitoring.
 
-Systematic does **not** mean "adopt 30 generic metrics from a framework". Generic metrics (e.g. a generic "helpfulness" score) often correlate poorly with what your users care about. The systematic approach starts from **your** failures.
+Note that systematic evaluation does **not** mean turning on 30 generic metrics from a library. Generic scores (like a vague 1–5 *"helpfulness"* rating) rarely match what your users care about. Always build evals around **your system's actual failures**.
 
 ---
 
 ## 5. The eval-driven development loop
 
-The most effective practitioners (see Hamel Husain's and Shreya Shankar's writing in [Further reading](#further-reading)) converge on a loop:
+High-performing AI teams follow a three-step loop (popularized by practitioners like Hamel Husain and Shreya Shankar):
 
 ```mermaid
 flowchart LR
-    A["1. Analyze: look at traces, find and categorize failures"] --> B["2. Measure: build evals for the failure modes that matter"]
-    B --> C["3. Improve: change prompt, retrieval, model, tools, guardrails"]
-    C --> D["Ship behind evals + guardrails, collect new traces"]
+    A["1. Analyze: read traces and group real failures"] --> B["2. Measure: build checks for top failures"]
+    B --> C["3. Improve: fix prompts, retrieval, tools, or guardrails"]
+    C --> D["Ship behind CI gates + guardrails, collect new traces"]
     D --> A
 ```
 
 ### 5.1 Analyze — error analysis first
 
-**Look at your data.** Before writing a single metric, read real (or realistic) traces end-to-end: the user question, the plan, retrieved chunks, SQL, tool calls, final answer.
+**Look at your data before writing code.** Do not write a single metric until you have read real traces end-to-end (question, router choice, retrieved chunks, SQL query, tool calls, and final answer).
 
-A practical procedure, adapted from qualitative research and popularized for LLM apps by Hamel Husain and Shreya Shankar:
+Follow this five-step procedure to run error analysis:
 
-1. **Collect ~100 diverse traces.** From production if you have it, otherwise from a synthetic set that varies persona, intent, and difficulty (see [Synthetic datasets](../01-datasets/03-synthetic-datasets.md)). "~100" is a heuristic starting point — keep going until new traces stop revealing new failure types (*theoretical saturation*).
-2. **Open coding.** For each trace, write a short free-text note on the *first* thing that went wrong (the most upstream error). Don't use a predefined taxonomy yet. Examples:
-   - "Retrieved 2023 PTO policy instead of 2024."
-   - "SQL filtered on `created_at` instead of `closed_at`."
-   - "Answer cites doc #3, but claim is from doc #1."
-   - "Called `create_ticket` without confirming priority with user."
-3. **Axial coding.** Cluster the open codes into categories (failure modes), e.g. *stale retrieval*, *wrong SQL filter column*, *citation mismatch*, *action without confirmation*. Merge, split, and rename until categories are crisp and mutually exclusive enough to count.
-4. **Count.** Tally traces per category. This gives you a prioritized, data-driven list of what's actually broken. Often 2–3 categories account for most failures.
-5. **Decide per category:** is it a quick fix (obvious prompt bug — just fix it), or does it need an eval to track (subjective, recurring, or regression-prone)?
+1. **Collect ~100 diverse traces.** Pull them from production logs if you have users, or generate realistic test conversations across different roles and topics (see [Synthetic Datasets](../01-datasets/03-synthetic-datasets.md)). Keep reading traces until you stop finding new ways the system breaks (**theoretical saturation**).
+2. **Label the first error (open coding).** Read each failed trace and write a short, plain-English note on the *first* upstream step that went wrong. Do not invent abstract categories yet. Write concrete notes:
+   - *"Retrieved the 2023 PTO policy instead of the 2024 policy."*
+   - *"SQL filtered on `created_at` instead of `closed_at`."*
+   - *"Answer cited doc #3, but the fact came from doc #1."*
+   - *"Called `create_ticket` without asking the user to confirm priority."*
+3. **Group notes into failure modes (axial coding).** Cluster your notes into 5–10 clear failure categories, such as *Stale policy retrieved*, *Wrong SQL date column*, *Citation mismatch*, or *Action without confirmation*.
+4. **Count and rank.** Count how many traces fall into each category. Usually, 2 or 3 failure modes cause most of your bad answers.
+5. **Choose your response.** If a failure is a simple bug (like a typo in a tool description), just fix it and add one regression test. If a failure is common, subtle, or likely to come back, build a dedicated eval for it.
 
-Use a simple annotation tool — a spreadsheet works; a custom trace viewer that shows the whole trace on one screen with keyboard shortcuts works better. The person doing the coding should have **domain expertise** (or be paired with an SME): a policy question needs someone who knows the policy.
+> **Tip:** Do this review in a simple spreadsheet or trace viewer alongside a **Subject-Matter Expert (SME)**. An engineer can spot a broken SQL join, but only an HR expert will notice an outdated parental-leave rule.
 
-### 5.2 Measure — build targeted evals
+### 5.2 Step 2: Measure — build targeted checks
 
-For each failure mode worth tracking, pick the cheapest reliable check:
+For each top failure mode, pick the simplest check that can catch it reliably:
 
-1. **Code-based / deterministic** first: regex, schema validation, SQL parse + allowlist, exact match on structured outputs, "did it call tool X". Cheap, fast, unambiguous.
-2. **Reference-based metrics** when you have ground truth: retrieval recall@k against labeled relevant docs, SQL execution accuracy against a gold query.
-3. **LLM-as-a-judge** for subjective or semantic criteria: faithfulness, tone, "did it ask for confirmation before acting". Make judges **binary pass/fail with a critique**, scoped to *one* failure mode, and **validate them against human labels** (agreement, TPR/TNR) before trusting them. See [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md).
-4. **Human review** for the highest-stakes decisions and to calibrate everything else.
+1. **Use deterministic code first.** If you can check a rule with a regex, JSON schema, SQL parser, or ID check, use code. Code is free, instant, and 100% repeatable.
+2. **Use reference-based metrics when you have labeled data.** Measure retrieval with `Recall@k` against labeled document IDs, or measure SQL with execution accuracy against a reference query.
+3. **Use an LLM-as-a-judge for semantic rules.** When checking faithfulness, tone, or completeness, use an LLM judge. Keep each judge **binary (Pass / Fail)**, test **one criterion per judge**, and **validate the judge against human labels** before trusting its score. See [LLM-as-a-Judge](../02-offline-evals/07-llm-as-a-judge.md).
+4. **Use human review as your anchor.** Use domain experts to label your golden dataset and verify that your automated checks agree with human judgment.
 
-Then assemble a dataset whose shape matches the eval (see [Dataset strategy](../01-datasets/01-dataset-strategy.md)) and get a **baseline**.
+Once your checks are ready, run them on your dataset (see [Dataset Strategy](../01-datasets/01-dataset-strategy.md)) and record your **baseline score**.
 
-### 5.3 Improve — change one thing, re-measure
+### 5.3 Step 3: Improve — change one thing and re-measure
 
-- Change one variable at a time (prompt, chunking, embedding model, reranker, top-k, LLM, tool schema).
-- Re-run the relevant evals and the full regression suite.
-- Look at the *diff in traces*, not only the aggregate score — a score improvement can hide new failure types.
-- Watch for overfitting to the eval set; keep a held-out set and keep feeding in fresh production samples.
+1. **Change one variable at a time** (such as chunk size, reranker model, system prompt, or tool schema).
+2. **Run your eval suite** and compare the new score against your baseline.
+3. **Inspect the changed traces.** Even when the overall score goes up, read the traces that flipped from Pass to Fail to make sure you did not introduce a new bug.
+4. **Feed production failures back into your dataset.** Every bug you fix in production should become a permanent test row. See [Production Data Flywheel](../01-datasets/04-production-data-flywheel.md).
 
-### 5.4 Close the loop — the data flywheel
+### 5.4 Common traps to avoid
 
-Production traces → error analysis → new dataset rows → new/updated evals and guardrails → better system → new production traces. See [Production data flywheel](../01-datasets/04-production-data-flywheel.md).
-
-### 5.5 Anti-patterns
-
-- [ ] ❌ Starting with an off-the-shelf metric suite before reading a single trace.
-- [ ] ❌ 1–10 Likert scores from an LLM judge with no rubric and no human calibration.
-- [ ] ❌ One giant "quality" judge that checks ten things at once.
-- [ ] ❌ Optimizing a metric nobody has shown correlates with user outcomes.
-- [ ] ❌ Evaluating only the final answer of a multi-step agent.
-- [ ] ❌ Treating the eval dataset as frozen forever.
-- [ ] ❌ Delegating error analysis entirely to people without domain context (or entirely to an LLM).
+- ❌ **Installing 20 generic metrics before reading a single trace.** You will waste weeks optimizing numbers that do not fix user complaints.
+- ❌ **Using 1-to-5 or 1-to-10 rating scales with an uncalibrated LLM judge.** Neither humans nor LLMs agree on the difference between a 3 and a 4. Use binary Pass/Fail instead.
+- ❌ **Building one "overall quality" judge that checks ten rules at once.** When it fails, you will not know why.
+- ❌ **Scoring only the final answer in a multi-step agent.** You will miss broken tool calls, infinite loops, and lucky guesses.
+- ❌ **Freezing your dataset forever.** User questions and company documents change every month; your dataset must grow with them.
+- ❌ **Doing error analysis without domain experts.** Engineers often mark wrong domain answers as "Pass" because the prose sounds fluent.
 
 ---
 
-## 6. What a "successful, reliable agent" means
+## 6. What "reliable" actually means
 
-Reliability is multi-dimensional. A system that is accurate but leaks salary data, or safe but takes 40 seconds and costs $2 per question, is not successful.
+An agent that gives accurate answers is still a failure if it leaks executive salaries, takes 45 seconds to respond, or costs $3 per question. Reliability has eight dimensions:
 
-| Dimension | Question it answers | Typical measures | Where covered |
+| Dimension | Question it answers | Key metrics | Where to learn more |
 |---|---|---|---|
-| **Quality / correctness** | Does it give right, complete, useful answers and take the right actions? | Answer correctness, faithfulness, context recall/precision, tool-call accuracy, SQL execution accuracy, task success rate | [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md), [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md), [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md) |
-| **Safety** | Does it avoid harmful, toxic, biased, or inappropriate content? | Toxicity/bias rates, refusal appropriateness | [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md), [Output guardrails](../04-guardrails/04-output-guardrails.md) |
-| **Security & privacy** | Can it be manipulated, and does it respect who may see/do what? | Injection resistance, PII leak rate, RBAC violations, unsafe action rate | [Threat model & OWASP](../04-guardrails/07-threat-model-owasp.md), [Access control](../04-guardrails/06-access-control-rbac.md) |
-| **Instruction adherence** | Does it follow system/policy instructions, format, and cite sources? | Instruction-following pass rate, citation precision/recall | [Instruction & citation adherence](../02-offline-evals/06-instruction-and-citation-adherence.md) |
-| **Cost** | Is cost per task sustainable at scale? | Tokens per task, $ per successful task, tool calls per task | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
-| **Latency** | Is it fast enough for the use case? | Time to first token, p50/p95 end-to-end, steps per task | [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md) |
-| **Robustness** | Does it degrade gracefully on paraphrases, typos, missing data, tool errors? | Pass rate on perturbed sets, "I don't know" correctness | [Synthetic datasets](../01-datasets/03-synthetic-datasets.md) |
-| **Trust & UX** | Do users rely on it appropriately and come back? | Thumbs up/down, escalation rate, retention, answer acceptance | [User feedback](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
+| **1. Quality & correctness** | Does it give accurate answers and run the right actions? | Answer correctness, faithfulness, context recall, SQL accuracy, task success | [End-to-End RAG Evals](../02-offline-evals/01-end-to-end-rag-evals.md), [Retrieval Metrics](../02-offline-evals/02-retrieval-metrics.md), [Text-to-SQL Evals](../02-offline-evals/05-text-to-sql-evals.md) |
+| **2. Safety** | Does it avoid toxic, biased, or harmful outputs? | Toxicity rate, bias score, refusal accuracy | [Generation Quality & Safety](../02-offline-evals/03-generation-quality-and-safety-evals.md), [Output Guardrails](../04-guardrails/04-output-guardrails.md) |
+| **3. Security & privacy** | Does it resist attacks and enforce user permissions? | Injection block rate, PII leak rate, RBAC violation count | [Threat Model & OWASP](../04-guardrails/07-threat-model-owasp.md), [Access Control & RBAC](../04-guardrails/06-access-control-rbac.md) |
+| **4. Instruction & citation adherence** | Does it follow formatting rules and back up claims with citations? | Format pass rate, citation precision, citation recall | [Instruction & Citation Adherence](../02-offline-evals/06-instruction-and-citation-adherence.md) |
+| **5. Cost** | Can you afford to run it at scale? | Tokens per task, cost per successful task, tool calls per task | [Monitoring, Alerting & Drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
+| **6. Latency** | Is it fast enough for the user's workflow? | Time to first token (TTFT), p50 and p95 latency | [Observability & Tracing](../03-online-evals-and-observability/02-observability-and-tracing.md) |
+| **7. Robustness** | Does it handle typos, vague questions, missing docs, and API errors gracefully? | Pass rate on perturbed inputs, abstention accuracy | [Synthetic Datasets](../01-datasets/03-synthetic-datasets.md) |
+| **8. Calibrated user trust** | Do users know when to trust the answer and when to verify it? | Thumbs-up/down rate, escalation rate, citation click rate | [User Feedback & Implicit Signals](../03-online-evals-and-observability/03-user-feedback-and-implicit-signals.md) |
 
-A useful framing: **"$ per correct, safe, policy-compliant task, within latency budget"** is the business metric; everything else decomposes it.
+> **The ultimate business metric:** Measure **cost per correct, safe, policy-compliant task within your latency budget**. Every other metric helps you diagnose that number.
 
-### 6.1 Trust is calibrated, not maximized
+### 6.1 Aim for calibrated trust, not blind trust
 
-A reliable assistant is one users trust *the right amount*: it says "I don't know" or "I couldn't find that in documents you have access to" when appropriate, shows citations so users can verify, and asks for confirmation before consequential actions. Over-trust (users acting on hallucinations) is as dangerous as under-trust (users ignoring correct answers).
+You do not want users to trust the agent 100% of the time. You want **calibrated trust**:
+- When the documents have the answer, the agent answers clearly and cites the exact source so the user can verify it.
+- When the documents do not have the answer, the agent **abstains** (*"I could not find this in the documents you can access"*).
+- Before the agent runs an important action (such as filing a high-priority ticket), it asks the user to confirm.
 
-### 6.2 Reliability is a property of the system, not the model
+### 6.2 Reliability is a system property, not a model property
 
-Swapping in a stronger model rarely fixes retrieval misses, ACL bugs, or bad tool schemas. Reliability comes from: good data and retrieval, constrained interfaces (structured outputs, typed tools, read-only SQL), defense-in-depth guardrails, observability, and a steady eval-driven improvement loop.
+Upgrading to a newer LLM will not fix missing document permissions, broken SQL joins, or bad chunking. Reliable agents combine clean retrieval, strict tool schemas, deterministic access control, layered guardrails, and continuous evaluation.
 
 ---
 
-## 7. Roles and responsibilities
+## 7. Who owns what on the team
 
-Evals are a team sport. The most common failure is "the engineers own evals" with no domain or product input.
+Evals fail when they are treated as "just an engineering chore." Building a reliable agent requires collaboration across roles:
 
-| Role | Owns / contributes | Typical artifacts |
+| Role | What they own | Key deliverables |
 |---|---|---|
-| **AI / ML engineers** | Pipelines, eval harness, metrics, judges, CI gates, tracing | Eval code, experiment reports, dashboards |
-| **Subject-matter experts (SMEs)** — HR, Finance, Legal, domain owners | What "correct" means; golden answers; labeling; judge calibration; error analysis of domain failures | Golden datasets, rubrics, labeled traces |
-| **Product managers** | Which failure modes matter most, acceptable trade-offs, launch criteria, user-facing behavior (refusals, confirmations) | Quality bars, prioritized failure taxonomy, release decisions |
-| **Security / privacy / compliance** | Threat model, access policy, PII rules, red-teaming, audit requirements | Threat model, policy-as-code, red-team datasets, audit logs |
-| **Data / platform engineers** | Document ingestion, ACL metadata propagation, warehouse schemas, semantic layer | Index pipelines, data contracts |
-| **SRE / ops** | Online monitoring, alerting, incident response, rollback | Alerts, runbooks, SLOs |
-| **End users** | Implicit and explicit feedback | Thumbs, comments, escalations |
+| **AI / ML Engineers** | Eval harness, automated checks, judge prompts, CI gates, and tracing | Eval code, experiment reports, trace pipelines |
+| **Subject-Matter Experts (SMEs)** | Defining what "correct" means in the domain (HR, Finance, Legal) | Golden dataset answers, grading rubrics, labeled traces |
+| **Product Managers** | Prioritizing failure modes, setting launch bars, designing refusal UX | Acceptance criteria, launch sign-off |
+| **Security & Compliance** | Threat modeling, RBAC rules, PII policies, red-teaming | Security rules, attack datasets, audit logs |
+| **Data & Platform Engineers** | Document indexing, permission metadata, database schemas | Search indexes, row-level security (RLS) policies |
+| **SRE / Operations** | Production dashboards, latency/cost alerts, incident response | SLO alerts, rollback runbooks |
 
-> Opinion: appoint one **"benevolent dictator" for quality** per product area — usually a domain expert or PM — who has final say on what counts as a pass. Committees produce inconsistent labels.
+> **Assign one "benevolent dictator" per domain.** Pick one person (usually lead SME or PM) to make the final call when labelers disagree on what counts as a Pass. Committees create inconsistent labels.
 
 ---
 
-## 8. What to do first (if you're starting today)
+## 8. Your first-week checklist
 
-- [ ] Instrument tracing for every step (LLM calls, retrieval, SQL, tools) — you can't analyze what you can't see. → [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md)
-- [ ] Put cheap, deterministic guardrails in place for the obvious risks: RBAC filtering at retrieval, read-only SQL with table allowlists, tool-argument schemas, PII redaction. → [Guardrails](../04-guardrails/README.md)
-- [ ] Gather ~100 diverse traces and do open + axial coding with an SME. → §5.1
-- [ ] Turn the top 3–5 failure modes into evals; build a small golden dataset (50–200 rows is a reasonable start, heuristic). → [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)
-- [ ] Wire evals into CI as a regression gate. → [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md)
-- [ ] After launch, sample production traffic into online evals and route failures back into datasets. → [Online evals](../03-online-evals-and-observability/01-online-evals.md)
-- [ ] Revisit the [maturity model](../05-decision-framework/05-maturity-model.md) quarterly.
+If you are starting from zero today, do these six steps in order:
+
+- [ ] **Turn on full tracing** so you log every user input, retrieved chunk, SQL query, tool call, and final answer. → [Observability & Tracing](../03-online-evals-and-observability/02-observability-and-tracing.md)
+- [ ] **Add deterministic guardrails for high-severity risks:** enforce RBAC filters at retrieval, restrict SQL to read-only `SELECT` queries, validate tool JSON schemas, and mask PII. → [Guardrails](../04-guardrails/README.md)
+- [ ] **Read 50–100 traces with an SME** and group the failures you see (open and axial coding). → [Analyze — error analysis first](#51-analyze--error-analysis-first)
+- [ ] **Build a 50-row golden dataset** and write 3–5 checks that catch your top failure modes. → [SME Golden Datasets](../01-datasets/02-sme-golden-datasets.md)
+- [ ] **Run those checks in CI** so every pull request is tested against your baseline. → [Running Offline Experiments](../02-offline-evals/08-running-offline-experiments.md)
+- [ ] **Sample live production traces** after launch and feed failed traces back into your golden dataset. → [Online Evals](../03-online-evals-and-observability/01-online-evals.md)
 
 ---
 
 ## Key takeaways
 
-- Reliability — not capability — is the hard part of agentic RAG; it's undermined by non-determinism, compounding multi-step errors, and an attack surface that includes your own data.
-- **Evals measure; guardrails enforce.** They are the same checks deployed at different points (offline, online, in-path). Build checks once and reuse them; measure guardrails like any classifier.
-- Only reference-free checks can run online or as guardrails; reference-based metrics need datasets.
-- Start with **error analysis**: read traces, open-code, axial-code, count. Build evals for the failure modes that matter, not generic metric suites.
-- Prefer deterministic checks; use binary, single-purpose, human-validated LLM judges for the rest.
-- "Reliable" spans quality, safety, security, instruction adherence, cost, latency, robustness, and calibrated trust.
-- Evals need SMEs, product, and security in the loop — not only engineers.
+- **Reliability is the bottleneck.** Non-determinism, multi-step error compounding, and untrusted data make naive testing useless.
+- **Evals measure; guardrails enforce.** Both use the exact same underlying checks—build your checks once and reuse them offline, online, and inline.
+- **Only reference-free checks can run online or as guardrails.** Reference-based checks require labeled datasets and run offline.
+- **Always start with error analysis.** Read ~100 traces, label the first upstream error, group the failures, and count them before choosing metrics.
+- **Prefer code over judges, and binary over stars.** Use deterministic code checks whenever possible. When you need an LLM judge, make it binary (Pass/Fail) and calibrate it against human labels.
 
 ## Further reading
 
@@ -298,11 +303,11 @@ Evals are a team sport. The most common failure is "the engineers own evals" wit
 - Hamel Husain — [Using LLM-as-a-Judge For Evaluation: A Complete Guide](https://hamel.dev/blog/posts/llm-judge/)
 - Hamel Husain & Shreya Shankar — [AI Evals FAQ](https://hamel.dev/blog/posts/evals-faq/)
 - Shankar et al., 2024 — [Who Validates the Validators? Aligning LLM-Assisted Evaluation of LLM Outputs with Human Preferences](https://arxiv.org/abs/2404.12272)
-- Shreya Shankar — [homepage & writing](https://www.sh-reya.com/)
+- Shreya Shankar — [Homepage & writing](https://www.sh-reya.com/)
 - Eugene Yan — [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
 - Yan, Bischof, Frye, Husain, Liu, Shankar — [What We've Learned From A Year of Building with LLMs](https://applied-llms.org/)
 - Anthropic — [Building effective agents](https://www.anthropic.com/research/building-effective-agents)
 - Anthropic — [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
 - Barnett et al., 2024 — [Seven Failure Points When Engineering a Retrieval Augmented Generation System](https://arxiv.org/abs/2401.05856)
 - NIST — [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)
-- Next in this section: [The evals & guardrails map](./02-the-evals-and-guardrails-map.md)
+- **Next guide:** [The Evals & Guardrails Map](./02-the-evals-and-guardrails-map.md)

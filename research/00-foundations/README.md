@@ -1,17 +1,23 @@
 # 00 · Foundations
 
-Start here. This section builds the mental model the rest of the repo relies on: why agentic RAG applications are hard to make reliable, how every kind of eval and guardrail fits on one map, what actually breaks in these systems, and the vocabulary used everywhere else.
+> **TL;DR**
+> - **Start here.** This section builds the core mental model for the entire guide.
+> - **Separate measurement from enforcement.** Learn why demos fail in production and how evals and guardrails share the same checks.
+> - **Classify every check on 5 axes.** If you only read one page, read [The Evals & Guardrails Map](./02-the-evals-and-guardrails-map.md).
+> - **Debug systematically.** Use the failure taxonomy and glossary to diagnose errors at any step of an agentic RAG pipeline.
 
-If you only read one file in the whole repo, read [The evals & guardrails map](./02-the-evals-and-guardrails-map.md).
+---
 
-## Files
+## Guides in this section
 
-| File | What it covers | Read when… |
+| Guide | What you will learn | Read this when… |
 |---|---|---|
-| [01 · Why evals and guardrails](./01-why-evals-and-guardrails.md) | Why reliability is the hard part; non-determinism and compounding error; evals (measure) vs guardrails (enforce) and how they share checks; the eval-driven development loop with error analysis (open/axial coding); what "reliable" means across quality, safety, security, cost, latency, trust; roles | You're new to the topic, or need to convince your team to invest in evals |
-| [02 · The evals & guardrails map](./02-the-evals-and-guardrails-map.md) | The master mental model: five axes (when, scope, method, ground truth, guardrail mode), a big matrix placing every eval and guardrail with links, dataset shapes, the production flywheel, and one check deployed three ways | You want the big picture or need to find where a specific eval/guardrail lives |
-| [03 · Agentic RAG failure modes](./03-agentic-rag-failure-modes.md) | Stage-by-stage taxonomy (query, routing, retrieval, generation, citations, tools, text-to-SQL, security, multi-turn) incl. Barnett et al.'s seven failure points — each with symptom, root cause, detecting eval, mitigating guardrail | You're debugging bad outputs, doing error analysis, or deciding what to measure |
-| [04 · Glossary](./04-glossary.md) | ~90 alphabetical terms with short definitions and links to deep dives | You hit an unfamiliar term anywhere in the repo |
+| [01 · Why Evals and Guardrails](./01-why-evals-and-guardrails.md) | Why demos fail in production, how evals and guardrails share the same checks, and how to run the **Analyze → Measure → Improve** loop. | You are new to evals, or you need to convince your team to invest in them. |
+| [02 · The Evals & Guardrails Map](./02-the-evals-and-guardrails-map.md) | The five axes that classify every check, a master lookup table, and how one check works offline, online, and at runtime. | You want the big picture, or you need to pick the right guide for a specific task. |
+| [03 · Agentic RAG Failure Modes](./03-agentic-rag-failure-modes.md) | Every common failure across queries, routing, retrieval, generation, citations, tools, SQL, and security—plus how to detect and fix each one. | You are debugging bad answers, reviewing traces, or deciding what to measure first. |
+| [04 · Glossary](./04-glossary.md) | Clear, plain-English definitions for ~90 terms used across this guide, with links to deeper pages. | You see an unfamiliar term anywhere in the repository. |
+
+---
 
 ## Suggested reading order
 
@@ -23,13 +29,23 @@ flowchart LR
     G["04 Glossary"] -.->|"reference, any time"| B
 ```
 
-1. **[01 · Why evals and guardrails](./01-why-evals-and-guardrails.md)** — motivation and the analyze → measure → improve loop.
-2. **[02 · The evals & guardrails map](./02-the-evals-and-guardrails-map.md)** — the framework every other section plugs into.
-3. **[03 · Agentic RAG failure modes](./03-agentic-rag-failure-modes.md)** — what you're actually trying to catch and prevent.
-4. **[04 · Glossary](./04-glossary.md)** — keep open as a reference.
+1. **Read [01 · Why Evals and Guardrails](./01-why-evals-and-guardrails.md)** to understand the core problem and the **Analyze → Measure → Improve** workflow.
+2. **Read [02 · The Evals & Guardrails Map](./02-the-evals-and-guardrails-map.md)** to see how every piece fits together.
+3. **Skim [03 · Agentic RAG Failure Modes](./03-agentic-rag-failure-modes.md)** to learn what breaks in real systems and how to spot it.
+4. **Bookmark [04 · Glossary](./04-glossary.md)** as a quick reference while you read the rest of the guide.
 
-Then continue to [01 · Datasets](../01-datasets/README.md), or jump straight to the [decision framework](../05-decision-framework/README.md) if you need to make choices for a system today.
+When you finish this section, continue to [01 · Datasets](../01-datasets/README.md). If you need to choose metrics or guardrails for a live project today, jump straight to [05 · Decision Framework](../05-decision-framework/README.md).
 
-## Running example
+---
 
-All sections use the same running example: an **internal enterprise assistant** that answers questions over company docs (vector search + reranking), queries a data warehouse via text-to-SQL, calls tools (e.g. `create_ticket`), and serves users in different roles under RBAC. It's introduced in [01 · Why evals and guardrails](./01-why-evals-and-guardrails.md#1-the-running-example).
+## The running example
+
+Every guide in this repository uses the same concrete system: **Acme Internal Assistant**.
+
+Acme Internal Assistant is an enterprise agent that does four things:
+1. **Answers document questions** over company policies and wikis using vector search and reranking.
+2. **Answers data questions** by generating SQL and querying a data warehouse (text-to-SQL).
+3. **Takes actions** by calling tools such as `create_ticket` and `lookup_employee`.
+4. **Enforces role-based access control (RBAC)** for Employees, Managers, HR, Finance, and Admins.
+
+We introduce the full architecture in [01 · Why Evals and Guardrails](./01-why-evals-and-guardrails.md#1-the-running-example).
