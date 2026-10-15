@@ -1,14 +1,19 @@
 # Retrieval Metrics
 
 > **TL;DR**
+>
 > - **Measure recall@k first.** Verify that your retriever passes all required evidence chunks to the generator LLM.
 > - **Use nDCG@k and MRR for ranking.** Evaluate whether your pipeline ranks the most relevant chunks near the top.
 > - **Label at stable span granularity.** Anchor relevance labels to document character spans so re-chunking does not break your evals.
 > - **Evaluate every retrieval stage separately.** Measure query rewriting, hybrid search, RBAC filters, and rerankers on the same queries.
 
-**You will learn:** Hit rate, precision/recall/F1@k, MRR, MAP, nDCG, and R-precision · Relevance labeling and pooling · Chunk vs document matching · Per-stage retrieval evals  
-**Prerequisites:** [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)  
-**Related:** [Synthetic datasets](../01-datasets/03-synthetic-datasets.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Retrieval and context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md)
+- **You will learn:**
+    - Hit rate, precision/recall/F1@k, MRR, MAP, nDCG, and R-precision
+    - Relevance labeling and pooling
+    - Chunk vs document matching
+    - Per-stage retrieval evals
+- **Prerequisites:** [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)
+- **Related:** [Synthetic datasets](../01-datasets/03-synthetic-datasets.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Retrieval and context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md)
 
 ---
 
@@ -57,10 +62,12 @@ We will compute every metric below using this ranked list.
 - **What it measures:** Whether **at least one** relevant item appears in the top `k` results (also called *success@k* or *top-k accuracy*).
 - **Inputs required:** Ranked IDs and the relevant set `R`. Requires ground-truth relevance labels.
 - **How to compute it:**
-  ```text
-  hit@k = 1 if |top_k ∩ R| > 0 else 0
-  hit_rate@k = mean over queries of hit@k
-  ```
+
+    ```text
+    hit@k = 1 if |top_k ∩ R| > 0 else 0
+    hit_rate@k = mean over queries of hit@k
+    ```
+
 - **Score range & interpretation:** 0 to 1. It represents the fraction of queries where the LLM sees at least one relevant chunk.
 - **Worked example:** `hit@1 = 0` (`d7` is irrelevant), `hit@3 = 1`, and `hit@5 = 1`.
 - **Pitfalls and gotchas:** Hit rate ignores how many relevant chunks the retriever found. It can mislead you on multi-hop or multi-part questions that require several chunks.
@@ -72,9 +79,11 @@ We will compute every metric below using this ranked list.
 - **What it measures:** The fraction of the top `k` results that are relevant. It measures the signal-to-noise ratio of your context window.
 - **Inputs required:** Ranked IDs and the relevant set `R`.
 - **How to compute it:**
-  ```text
-  precision@k = |top_k ∩ R| / k
-  ```
+
+    ```text
+    precision@k = |top_k ∩ R| / k
+    ```
+
 - **Score range & interpretation:** 0 to 1. Note that `|R| / k` caps the maximum possible score. If a query has only 1 relevant chunk, `precision@5` can never exceed `0.20`.
 - **Worked example:** `precision@1 = 0`, `precision@3 = 2/3 ≈ 0.67`, and `precision@5 = 3/5 = 0.60`.
 - **Pitfalls and gotchas:** Precision@k ignores chunk order inside the top `k` and penalizes queries with few relevant items. Never compare `precision@k` across datasets with different `|R|` distributions.
@@ -86,9 +95,11 @@ We will compute every metric below using this ranked list.
 - **What it measures:** The fraction of all relevant items that appear in the top `k` results. It answers: *"Did the LLM receive everything it needed?"*
 - **Inputs required:** Ranked IDs and a **complete** relevant set `R`.
 - **How to compute it:**
-  ```text
-  recall@k = |top_k ∩ R| / |R|
-  ```
+
+    ```text
+    recall@k = |top_k ∩ R| / |R|
+    ```
+
 - **Score range & interpretation:** 0 to 1. Recall@k is the **most important retrieval metric for RAG** because the generator cannot recover missing evidence.
 - **Worked example:** `recall@1 = 0/4 = 0`, `recall@3 = 2/4 = 0.50`, and `recall@5 = 3/4 = 0.75` (`d5` is missing).
 - **Pitfalls and gotchas:** Recall accuracy depends on the completeness of `R`. If labelers mark only one relevant chunk when three exist, your evaluation penalizes retrievers that find the other valid chunks.
@@ -99,9 +110,11 @@ We will compute every metric below using this ranked list.
 
 - **What it measures:** The harmonic mean of `precision@k` and `recall@k`.
 - **How to compute it:**
-  ```text
-  F1@k = 2 · P@k · R@k / (P@k + R@k)
-  ```
+
+    ```text
+    F1@k = 2 · P@k · R@k / (P@k + R@k)
+    ```
+
 - **Worked example:** `F1@5 = 2 · 0.60 · 0.75 / 1.35 ≈ 0.67`.
 - **Pitfalls and gotchas:** F1@k hides whether a change helped precision or recall, and it ignores chunk order.
 - **When to use it:** Use F1@k when tuning a dynamic `k` or similarity threshold that trades precision against recall. Otherwise, report precision and recall separately.
@@ -111,10 +124,12 @@ We will compute every metric below using this ranked list.
 
 - **What it measures:** How high the **first** relevant item appears in the ranked list.
 - **How to compute it:**
-  ```text
-  RR(q)  = 1 / rank of first relevant item   (0 if none in top k)
-  MRR@k  = mean over queries of RR(q)
-  ```
+
+    ```text
+    RR(q)  = 1 / rank of first relevant item   (0 if none in top k)
+    MRR@k  = mean over queries of RR(q)
+    ```
+
 - **Score range & interpretation:** 0 to 1. An MRR of `0.50` means the first relevant result typically appears around rank 2.
 - **Worked example:** The first relevant chunk is `d3` at rank 2, so `RR = 0.50`. Across three queries with `RR` values of `0.50`, `1.0`, and `0`, `MRR = 0.50`.
 - **Pitfalls and gotchas:** MRR ignores every relevant chunk after the first hit.
@@ -125,15 +140,18 @@ We will compute every metric below using this ranked list.
 
 - **What it measures:** Precision averaged across the ranks of all relevant items. It rewards retrievers that rank *all* relevant items *near the top*.
 - **How to compute it:**
-  ```text
-  AP(q) = (1 / |R|) · Σ_{k=1..n} precision@k · rel_k        # rel_k ∈ {0,1}
-  MAP   = mean over queries of AP(q)
-  ```
-  Some libraries (such as RAGAS context precision) divide by the number of **retrieved** relevant items instead of `|R|`. Check which denominator your library uses, because dividing by retrieved hits ignores missed items.
+
+    ```text
+    AP(q) = (1 / |R|) · Σ_{k=1..n} precision@k · rel_k        # rel_k ∈ {0,1}
+    MAP   = mean over queries of AP(q)
+    ```
+
+    Some libraries (such as RAGAS context precision) divide by the number of **retrieved** relevant items instead of `|R|`. Check which denominator your library uses, because dividing by retrieved hits ignores missed items.
+
 - **Score range & interpretation:** 0 to 1.
 - **Worked example:** Relevant items appear at ranks 2, 3, and 5 with precisions `0.50`, `0.67`, and `0.60` (sum = `1.767`).
-  - Standard AP (dividing by `|R| = 4`): **0.44**
-  - Retrieved-only variant (dividing by `3`): **0.59**
+    - Standard AP (dividing by `|R| = 4`): **0.44**
+    - Retrieved-only variant (dividing by `3`): **0.59**
 - **Pitfalls and gotchas:** MAP works only on binary labels and is harder to explain to non-technical stakeholders than recall or nDCG.
 - **When to use it:** Use MAP to compare rankers when queries have multiple relevant chunks and binary relevance labels.
 - **Implemented in:** `ranx`, `pytrec_eval`, `trec_eval`.
@@ -142,26 +160,28 @@ We will compute every metric below using this ranked list.
 
 - **What it measures:** Ranking quality under **graded** relevance. It rewards placing highly relevant chunks at the top and discounts lower ranks logarithmically.
 - **How to compute it:**
-  ```text
-  DCG@k  = Σ_{i=1..k} gain(rel_i) / log2(i + 1)
 
-  gain(rel) = 2^rel − 1      # "exponential" gain — emphasises highly relevant items (common default)
-  gain(rel) = rel            # "linear" gain — also common
+    ```text
+    DCG@k  = Σ_{i=1..k} gain(rel_i) / log2(i + 1)
 
-  IDCG@k = DCG@k of the ideal ordering (all labeled items sorted by rel, descending)
-  nDCG@k = DCG@k / IDCG@k     (define as 0 if IDCG@k = 0)
-  ```
+    gain(rel) = 2^rel − 1      # "exponential" gain: emphasises highly relevant items (common default)
+    gain(rel) = rel            # "linear" gain: also common
+
+    IDCG@k = DCG@k of the ideal ordering (all labeled items sorted by rel, descending)
+    nDCG@k = DCG@k / IDCG@k     (define as 0 if IDCG@k = 0)
+    ```
+
 - **Score range & interpretation:** 0 to 1, where 1.0 indicates a perfect ranking of all labeled relevant items.
 - **Worked example (exponential gain):**
-  - Grades by rank: `[0, 2, 3, 0, 1]` → gains `[0, 3, 7, 0, 1]`
-  - Discounts `log2(i+1)`: `[1, 1.585, 2, 2.322, 2.585]`
-  - `DCG@5 = 0 + 3/1.585 + 7/2 + 0 + 1/2.585 = 1.893 + 3.5 + 0.387 =` **5.780**
-  - Ideal grades `[3, 2, 2, 1, 0]` → gains `[7, 3, 3, 1, 0]` → `IDCG@5 = 7 + 1.893 + 1.5 + 0.431 =` **10.823**
-  - `nDCG@5 = 5.780 / 10.823 ≈` **0.53** (or **0.55** with linear gain)
+    - Grades by rank: `[0, 2, 3, 0, 1]` → gains `[0, 3, 7, 0, 1]`
+    - Discounts `log2(i+1)`: `[1, 1.585, 2, 2.322, 2.585]`
+    - `DCG@5 = 0 + 3/1.585 + 7/2 + 0 + 1/2.585 = 1.893 + 3.5 + 0.387 =` **5.780**
+    - Ideal grades `[3, 2, 2, 1, 0]` → gains `[7, 3, 3, 1, 0]` → `IDCG@5 = 7 + 1.893 + 1.5 + 0.431 =` **10.823**
+    - `nDCG@5 = 5.780 / 10.823 ≈` **0.53** (or **0.55** with linear gain)
 - **Pitfalls and gotchas:**
-  - **Exponential and linear gain produce different scores.** Document and pin your gain formula.
-  - **Compute IDCG over all labeled items in `R`**, not just the retrieved subset. Computing IDCG over retrieved items hides missed chunks like `d5`.
-  - **Binary labels flatten nDCG's main advantage.**
+    - **Exponential and linear gain produce different scores.** Document and pin your gain formula.
+    - **Compute IDCG over all labeled items in `R`**, not just the retrieved subset. Computing IDCG over retrieved items hides missed chunks like `d5`.
+    - **Binary labels flatten nDCG's main advantage.**
 - **When to use it:** Use `nDCG@k` as your primary ranking metric when you have graded labels (`0–3` scores) or tune a reranker. BEIR and MTEB use `nDCG@10` as their headline retrieval metric.
 - **Implemented in:** `ranx`, `pytrec_eval`, `scikit-learn` (`ndcg_score`), BEIR/MTEB evaluators.
 
@@ -169,10 +189,13 @@ We will compute every metric below using this ranked list.
 
 - **What it measures:** Precision at `k = |R|`. It measures the relevant fraction when you retrieve exactly `|R|` items.
 - **How to compute it:**
-  ```text
-  R-precision = |top_|R| ∩ R| / |R|
-  ```
-  At cutoff `k = |R|`, precision and recall are equal.
+
+    ```text
+    R-precision = |top_|R| ∩ R| / |R|
+    ```
+
+    At cutoff `k = |R|`, precision and recall are equal.
+
 - **Worked example:** Because `|R| = 4`, the top 4 results `[d7, d3, d1, d9]` contain 2 relevant items, giving **0.50**.
 - **Pitfalls and gotchas:** R-precision requires complete `R` sets and collapses to `hit@1` whenever `|R| = 1`.
 - **When to use it:** Use it to compare retrievers across queries that have widely varying numbers of relevant chunks.
@@ -307,8 +330,8 @@ For production pipelines, use established libraries like [ranx](https://github.c
 | Multi-hop or multi-part questions | **recall@k** | MAP | The generator needs every supporting piece |
 | Navigational or single-answer lookups | **MRR** | hit@1 | The top-ranked result matters most |
 | Comparing against BEIR or MTEB | **nDCG@10** | recall@100 | Matches standard public benchmark metrics |
-| Evaluating candidate generation before reranking | **recall@50** or **recall@100** | — | Sets the upper bound on reranker performance |
-| Reference answers available, no chunk labels | LLM-based context recall / precision ([01](./01-end-to-end-rag-evals.md)) | — | Evaluates retrieval without chunk ID labels |
+| Evaluating candidate generation before reranking | **recall@50** or **recall@100** | None | Sets the upper bound on reranker performance |
+| Reference answers available, no chunk labels | LLM-based context recall / precision ([01](./01-end-to-end-rag-evals.md)) | None | Evaluates retrieval without chunk ID labels |
 
 ---
 
@@ -470,10 +493,14 @@ Plot `recall@k` or `nDCG@k` against p95 latency for each pipeline configuration.
 
 ## Further reading
 
-- Thakur et al., *BEIR: A Heterogenous Benchmark for Zero-shot Evaluation of Information Retrieval Models* — [arXiv:2104.08663](https://arxiv.org/abs/2104.08663)
-- Muennighoff et al., *MTEB: Massive Text Embedding Benchmark* — [arXiv:2210.07316](https://arxiv.org/abs/2210.07316) · [Leaderboard](https://huggingface.co/spaces/mteb/leaderboard)
-- Liu et al., *Lost in the Middle: How Language Models Use Long Contexts* — [arXiv:2307.03172](https://arxiv.org/abs/2307.03172)
+- Thakur et al., *BEIR: A Heterogenous Benchmark for Zero-shot Evaluation of Information Retrieval Models*, [arXiv:2104.08663](https://arxiv.org/abs/2104.08663)
+- Muennighoff et al., *MTEB: Massive Text Embedding Benchmark*, [arXiv:2210.07316](https://arxiv.org/abs/2210.07316) · [Leaderboard](https://huggingface.co/spaces/mteb/leaderboard)
+- Liu et al., *Lost in the Middle: How Language Models Use Long Contexts*, [arXiv:2307.03172](https://arxiv.org/abs/2307.03172)
 - Cormack, Clarke & Büttcher, *Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods* (SIGIR 2009)
-- Manning, Raghavan & Schütze, *Introduction to Information Retrieval*, ch. 8 "Evaluation in information retrieval" — [online book](https://nlp.stanford.edu/IR-book/)
+- Manning, Raghavan & Schütze, *Introduction to Information Retrieval*, ch. 8 "Evaluation in information retrieval", [online book](https://nlp.stanford.edu/IR-book/)
 - [ranx](https://github.com/AmenRa/ranx) · [pytrec_eval](https://github.com/cvangysel/pytrec_eval)
-- Within this repo: [End-to-end RAG evals](./01-end-to-end-rag-evals.md) · [Synthetic datasets](../01-datasets/03-synthetic-datasets.md) · [Retrieval and context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md) · [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
+- **Within this repo:**
+    - [End-to-end RAG evals](./01-end-to-end-rag-evals.md)
+    - [Synthetic datasets](../01-datasets/03-synthetic-datasets.md)
+    - [Retrieval and context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md)
+    - [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)

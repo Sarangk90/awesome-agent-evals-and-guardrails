@@ -1,14 +1,20 @@
 # Online Evals: Scoring Production Traffic
 
 > **TL;DR**
+>
 > - **Check every request deterministically.** Validate schema compliance, citation resolution, SQL syntax, retrieval counts, and latency budgets on 100% of traffic.
 > - **Run LLM judges asynchronously on samples.** Evaluate reference-free faithfulness, answer relevance, and SQL alignment off the critical user path.
 > - **Separate reporting samples from triage samples.** Use uniform random samples for dashboard KPIs and risk-triggered samples for bug hunting.
 > - **Validate rollouts and feed datasets.** Confirm offline wins through shadow runs, canaries, or A/B tests, and turn failures into regression cases.
 
-**You will learn:** Offline vs online differences · 100% deterministic checks vs sampled LLM judges · Sync vs async architecture · Sampling, shadow mode, canaries, A/B tests, and interleaving · Offline-to-online metric mapping and dataset flywheels  
-**Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)  
-**Related:** [Observability & tracing](./02-observability-and-tracing.md), [User feedback](./03-user-feedback-and-implicit-signals.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
+- **You will learn:**
+    - Offline vs online differences
+    - 100% deterministic checks vs sampled LLM judges
+    - Sync vs async architecture
+    - Sampling, shadow mode, canaries, A/B tests, and interleaving
+    - Offline-to-online metric mapping and dataset flywheels
+- **Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
+- **Related:** [Observability & tracing](./02-observability-and-tracing.md), [User feedback](./03-user-feedback-and-implicit-signals.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Production data flywheel](../01-datasets/04-production-data-flywheel.md)
 
 ---
 
@@ -29,12 +35,12 @@ Offline evals ask: *"Does version B beat version A on our golden dataset?"* Onli
 
 | Dimension | Offline evals | Online evals |
 |---|---|---|
-| Data | Curated datasets (golden, synthetic, replayed) — see [Dataset strategy](../01-datasets/01-dataset-strategy.md) | Live traffic, real users, real query distribution |
-| Ground truth | Usually available (reference answers, relevant doc IDs, gold SQL) | Usually **absent** — requires reference-free metrics, proxies, and feedback |
+| Data | Curated datasets (golden, synthetic, replayed); see [Dataset strategy](../01-datasets/01-dataset-strategy.md) | Live traffic, real users, real query distribution |
+| Ground truth | Usually available (reference answers, relevant doc IDs, gold SQL) | Usually **absent** (requires reference-free metrics, proxies, and feedback) |
 | When | Before release (CI gates and experiments) | During and after release, continuously |
 | Coverage | Only scenarios you anticipated and added | Everything users actually ask, including the long tail |
 | Repeatability | High (fixed inputs and pinned versions) | Low (inputs, corpus, and provider behavior change) |
-| Cost model | Bounded per test run | Scales with traffic — requires sampling |
+| Cost model | Bounded per test run | Scales with traffic (requires sampling) |
 | Latency constraints | None | Sync checks add user latency, while async checks do not |
 | Main purpose | Compare variants and prevent regressions | Detect live issues, validate offline gains, and discover new failure modes |
 | Typical failure | Dataset does not represent production reality | Metric is noisy, biased, or too sparse for action |
@@ -75,7 +81,7 @@ Group online evals into three families based on cost and latency.
 
 Human review sits above all three families. Use sampled human review to calibrate Family B judges and label new dataset rows (see [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)).
 
-### 2.1 Family A — deterministic checks on every request
+### 2.1 Family A: deterministic checks on every request
 
 Deterministic checks are fast, cheap, and unambiguous. Run them on **every** request because they do not depend on a model or suffer from judge drift.
 
@@ -95,18 +101,18 @@ Deterministic checks are fast, cheap, and unambiguous. Run them on **every** req
 - **Inputs required:** Answer text (parsed citations), retrieved document IDs, and the user's ACL. **No ground truth required.**
 - **How to compute it:**
 
-  ```text
-  cited      = set(citations parsed from answer)
-  retrieved  = set(doc_ids in context window)
-  allowed    = set(doc_ids user may read)
-  dangling   = cited - retrieved          # hallucinated or stale citation
-  leaked     = cited - allowed            # RBAC violation (should be impossible)
-  citation_resolves = (len(dangling) == 0)
-  has_citation      = (len(cited) > 0)    # for answers that require citations
-  ```
+    ```text
+    cited      = set(citations parsed from answer)
+    retrieved  = set(doc_ids in context window)
+    allowed    = set(doc_ids user may read)
+    dangling   = cited - retrieved          # hallucinated or stale citation
+    leaked     = cited - allowed            # RBAC violation (should be impossible)
+    citation_resolves = (len(dangling) == 0)
+    has_citation      = (len(cited) > 0)    # for answers that require citations
+    ```
 
 - **Score range & interpretation:** Binary flag per request. Treat `leaked > 0` as a **sev-1 incident** and page on-call immediately.
-- **Pitfalls:** Citation formats drift when prompts change, so use a strict parser and alert on parse failures. A resolving citation does not prove the chunk supports the claim — use a Family B citation-support judge to verify factual support.
+- **Pitfalls:** Citation formats drift when prompts change, so use a strict parser and alert on parse failures. A resolving citation does not prove the chunk supports the claim; use a Family B citation-support judge to verify factual support.
 - **When to use:** Every RAG answer that includes citations. See [Instruction & citation adherence](../02-offline-evals/06-instruction-and-citation-adherence.md).
 - **Implemented in:** Custom parser matching your citation format.
 
@@ -127,10 +133,10 @@ Deterministic checks are fast, cheap, and unambiguous. Run them on **every** req
 - **Inputs required:** Retrieved document IDs and scores before and after reranking. **No ground truth required.**
 - **How to compute it:**
 
-  ```text
-  empty_retrieval = (len(docs_after_filters) == 0)
-  weak_retrieval  = (max(rerank_scores) < τ)   # τ calibrated offline, heuristic start: inspect the score distribution, pick ~p10 of known-good queries
-  ```
+    ```text
+    empty_retrieval = (len(docs_after_filters) == 0)
+    weak_retrieval  = (max(rerank_scores) < τ)   # τ calibrated offline, heuristic start: inspect the score distribution, pick ~p10 of known-good queries
+    ```
 
 - **Score range & interpretation:** Track rates over time and per slice (role, topic, data source). A rising weak-retrieval rate is an early warning of **query drift** or index corruption.
 - **Pitfalls:** Raw cosine similarity is not comparable across embedding models, so recalibrate $\tau$ whenever you change the embedder or reranker. Log document counts before and after ACL filtering separately so permission blocks do not look like retriever failures.
@@ -146,7 +152,7 @@ Deterministic checks are fast, cheap, and unambiguous. Run them on **every** req
 - **Pitfalls:** Many refusals are valid, such as RBAC denials or out-of-scope requests. Break down the refusal rate by reason (`no_context`, `policy`, `rbac`, `out_of_scope`) rather than treating all refusals as errors.
 - **When to use:** Every assistant response.
 
-#### Card: Operational thresholds — latency, tokens, cost, loop length
+#### Card: Operational thresholds (latency, tokens, cost, loop length)
 
 - **What it measures:** Whether the turn stayed within latency, token, cost, and step-count budgets.
 - **Inputs required:** Trace timing, token counts, model price table, and agent step/tool call counts.
@@ -206,7 +212,7 @@ def deterministic_checks(trace: dict) -> dict:
 
 Attach these check results to the trace as scores or attributes so you can filter and aggregate them in dashboards (see [Observability & tracing](./02-observability-and-tracing.md)).
 
-### 2.2 Family B — sampled, asynchronous model-based evals
+### 2.2 Family B: sampled, asynchronous model-based evals
 
 Model-based online evals are the reference-free counterparts of offline RAG metrics. Because LLM judges add cost and latency, run them **asynchronously** on a **sample** of production traffic.
 
@@ -245,7 +251,7 @@ CONTEXT: {contexts}
 ANSWER: {answer}
 ```
 
-### 2.3 Family C — guardrail outcomes as online signals
+### 2.3 Family C: guardrail outcomes as online signals
 
 Every guardrail decision is also an online measurement. Log each check as a structured event (`{guardrail, stage, decision, score, reason, latency_ms}`) and track four aggregates:
 
@@ -330,7 +336,7 @@ Judging roughly 500 traces per day (per critical slice) gives a reliable daily e
 |---|---|---|---|
 | **Uniform random** | `hash(trace_id) % 1000 < k` | Unbiased population metrics for dashboards | Rare slices receive too few samples |
 | **Stratified** | Fixed quota per slice (role, intent, data source, language) | Comparing slices and covering small critical groups | Must **re-weight** slices to compute overall population metrics |
-| **Risk-/signal-triggered** | Sample whenever a cheap signal fires (weak retrieval, refusal, thumbs-down, retry, high cost) | Finding failures quickly and feeding error analysis | **Heavily biased** — never report triggered samples as overall quality |
+| **Risk-/signal-triggered** | Sample whenever a cheap signal fires (weak retrieval, refusal, thumbs-down, retry, high cost) | Finding failures quickly and feeding error analysis | **Heavily biased** (never report triggered samples as overall quality) |
 | **Novelty-based** | Sample queries far from known embedding cluster centroids | Discovering new topics and query drift | Requires embedding cluster infrastructure |
 | **Version-aware** | Oversample new prompt or model versions during rollout | Getting fast confidence intervals on a canary | Re-weight when combining with control traffic |
 | **Session-level** | Sample complete conversations instead of single turns | Evaluating multi-turn task completion | Higher token cost per sample |
@@ -379,10 +385,10 @@ In shadow mode, you run the candidate version in parallel on live requests and l
 - **Best for:** Model or provider migrations, new retrievers, new guardrails (to measure block rates before enforcement), and text-to-SQL changes (to compare result sets against production SQL).
 - **What to compare:** Deterministic check rates, LLM judge scores, latency, token cost, and pairwise judge preferences between the live and shadow outputs.
 - **Pitfalls to avoid:**
-  - **Side effects:** Never allow a shadow agent to execute write tools like `create_ticket`. Stub write tools or route them to a sandbox.
-  - **Doubled inference cost:** Shadow a percentage of traffic rather than 100% during the test window.
-  - **Zero user feedback:** Shadow mode measures output quality and system performance, not user behavior.
-  - **Privacy compliance:** Apply the same PII redaction and retention rules to shadow traces as production traces.
+    - **Side effects:** Never allow a shadow agent to execute write tools like `create_ticket`. Stub write tools or route them to a sandbox.
+    - **Doubled inference cost:** Shadow a percentage of traffic rather than 100% during the test window.
+    - **Zero user feedback:** Shadow mode measures output quality and system performance, not user behavior.
+    - **Privacy compliance:** Apply the same PII redaction and retention rules to shadow traces as production traces.
 
 ### 5.2 Canary releases
 
@@ -441,7 +447,7 @@ For background, see Chapelle et al., ["Large-scale validation and analysis of in
 | **Faithfulness / groundedness** | No (reference-free) | Same LLM judge run asynchronously on a sample | **Yes** | Highest-value online judge for RAG systems |
 | **Answer relevancy** | No | Same LLM judge on a sample, plus rephrase/retry rates | **Yes** | Inexpensive and correlates with retry signals |
 | **Context precision** | Usually yes (or judge-based) | LLM-judged context relevance per retrieved chunk | **Yes (judge variant)** | Reference-based precision is not feasible online |
-| **Context recall** | Yes (reference answer / contexts) | Proxies only: weak/empty retrieval rate, `no_context` refusals, unsupported-claim rate | **No (proxies only)** | You cannot measure missed documents without ground truth — sample traces for SME labeling |
+| **Context recall** | Yes (reference answer / contexts) | Proxies only: weak/empty retrieval rate, `no_context` refusals, unsupported-claim rate | **No (proxies only)** | You cannot measure missed documents without ground truth; sample traces for SME labeling |
 | **precision@k, MAP, nDCG** | Yes (relevance labels) | Judge-labeled relevance of top-$k$ chunks on a sample, or interleaving click data | **Partially** | Judge labels approximate relevance, while clicks carry position bias |
 | **recall@k, hit rate** | Yes | Delayed SME labeling on a sample | **No** | Cannot know total relevant documents in corpus at request time |
 | **MRR** | Yes | Rank of first clicked or cited source (biased proxy) | **Partially** | Heavy position bias |
@@ -539,14 +545,14 @@ Follow this checklist when promoting traces to datasets:
 
 ## Further reading
 
-- Hamel Husain — [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) and [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
-- Hamel Husain — [Creating a LLM-as-a-Judge That Drives Business Results](https://hamel.dev/blog/posts/llm-judge/)
-- Eugene Yan — [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/) and [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/)
-- Shreya Shankar et al. — [Who Validates the Validators? Aligning LLM-Assisted Evaluation of LLM Outputs with Human Preferences](https://arxiv.org/abs/2404.12272)
-- Shreya Shankar — [Data Flywheels for LLM Applications](https://www.sh-reya.com/blog/ai-engineering-flywheel/)
-- Kohavi, Tang & Xu — [Trustworthy Online Controlled Experiments](https://experimentguide.com/)
-- Evan Miller — [How Not To Run an A/B Test](https://www.evanmiller.org/how-not-to-run-an-ab-test.html) and [Sample Size Calculator](https://www.evanmiller.org/ab-testing/sample-size.html)
-- Chapelle, Joachims, Radlinski, Yue — [Large-scale validation and analysis of interleaved search evaluation](https://www.cs.cornell.edu/people/tj/publications/chapelle_etal_12a.pdf)
-- Netflix Tech Blog — [Innovating Faster on Personalization Algorithms at Netflix Using Interleaving](https://netflixtechblog.com/interleaving-in-online-experiments-at-netflix-a04ee392ec55)
-- Applied LLMs — [What We've Learned From A Year of Building with LLMs](https://applied-llms.org/)
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) and [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
+- Hamel Husain, [Creating a LLM-as-a-Judge That Drives Business Results](https://hamel.dev/blog/posts/llm-judge/)
+- Eugene Yan, [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/) and [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/)
+- Shreya Shankar et al., [Who Validates the Validators? Aligning LLM-Assisted Evaluation of LLM Outputs with Human Preferences](https://arxiv.org/abs/2404.12272)
+- Shreya Shankar, [Data Flywheels for LLM Applications](https://www.sh-reya.com/blog/ai-engineering-flywheel/)
+- Kohavi, Tang & Xu, [Trustworthy Online Controlled Experiments](https://experimentguide.com/)
+- Evan Miller, [How Not To Run an A/B Test](https://www.evanmiller.org/how-not-to-run-an-ab-test.html) and [Sample Size Calculator](https://www.evanmiller.org/ab-testing/sample-size.html)
+- Chapelle, Joachims, Radlinski, Yue, [Large-scale validation and analysis of interleaved search evaluation](https://www.cs.cornell.edu/people/tj/publications/chapelle_etal_12a.pdf)
+- Netflix Tech Blog, [Innovating Faster on Personalization Algorithms at Netflix Using Interleaving](https://netflixtechblog.com/interleaving-in-online-experiments-at-netflix-a04ee392ec55)
+- Applied LLMs, [What We've Learned From A Year of Building with LLMs](https://applied-llms.org/)
 - Within this repo: [Production data flywheel](../01-datasets/04-production-data-flywheel.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md), [Tooling landscape](../06-tooling-landscape/01-eval-and-observability-tools.md)

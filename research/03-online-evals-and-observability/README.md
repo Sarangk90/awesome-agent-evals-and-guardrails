@@ -1,14 +1,19 @@
 # 03 · Online Evals & Observability
 
 > **TL;DR**
+>
 > - **Instrument full traces first.** Capture every retrieval, rerank, LLM call, tool call, SQL query, and guardrail decision in production.
 > - **Evaluate live traffic without ground truth.** Run deterministic checks on 100% of requests and reference-free LLM judges on samples.
 > - **Combine user signals with monitoring.** Link explicit and implicit feedback to traces, track segmented KPIs, and detect drift early.
 > - **Close the production flywheel.** Route production failures and incident findings back into your offline evaluation datasets.
 
-**You will learn:** Production tracing · Online evaluation pipelines · User feedback signals · Monitoring, alerting, and drift response  
-**Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [Offline evals](../02-offline-evals/README.md)  
-**Related:** [Production data flywheel](../01-datasets/04-production-data-flywheel.md), [Guardrails](../04-guardrails/README.md), [Eval selection decision tree](../05-decision-framework/01-eval-selection-decision-tree.md)
+- **You will learn:**
+    - Production tracing
+    - Online evaluation pipelines
+    - User feedback signals
+    - Monitoring, alerting, and drift response
+- **Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [Offline evals](../02-offline-evals/README.md)
+- **Related:** [Production data flywheel](../01-datasets/04-production-data-flywheel.md), [Guardrails](../04-guardrails/README.md), [Eval selection decision tree](../05-decision-framework/01-eval-selection-decision-tree.md)
 
 ---
 

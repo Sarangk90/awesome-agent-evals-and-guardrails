@@ -1,14 +1,21 @@
 # Instruction & Citation Adherence Evals
 
 > **TL;DR**
+>
 > - **Treat your system prompt as a testable contract.** Decompose complex system prompts into atomic instructions and assign a checker to each one.
 > - **Run deterministic checks before calling an LLM judge.** Validate length, format, JSON schemas, citation IDs, and exact quotes in code.
 > - **Use binary judges or NLI models for semantic rules.** Evaluate tone, policy compliance, and citation entailment with single-requirement binary checks.
 > - **Measure both refusal recall and false-refusal rate.** Test must-refuse inputs alongside benign look-alikes so safety rules do not block legitimate users.
 
-**You will learn:** Decomposing system prompts into testable checks · IFEval-style verifiable instruction checks · JSON and Pydantic schema validation · Persona, policy, and refusal-policy evals · Citation format, coverage, ALCE recall/precision, and quote verification · Deterministic checkers vs LLM judges  
-**Prerequisites:** [Evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [End-to-end RAG evals](./01-end-to-end-rag-evals.md)  
-**Related:** [LLM-as-a-judge](./07-llm-as-a-judge.md), [Generation quality & safety evals](./03-generation-quality-and-safety-evals.md), [Output guardrails](../04-guardrails/04-output-guardrails.md), [Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md)
+- **You will learn:**
+    - Decomposing system prompts into testable checks
+    - IFEval-style verifiable instruction checks
+    - JSON and Pydantic schema validation
+    - Persona, policy, and refusal-policy evals
+    - Citation format, coverage, ALCE recall/precision, and quote verification
+    - Deterministic checkers vs LLM judges
+- **Prerequisites:** [Evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [End-to-end RAG evals](./01-end-to-end-rag-evals.md)
+- **Related:** [LLM-as-a-judge](./07-llm-as-a-judge.md), [Generation quality & safety evals](./03-generation-quality-and-safety-evals.md), [Output guardrails](../04-guardrails/04-output-guardrails.md), [Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md)
 
 ---
 
@@ -44,7 +51,7 @@ flowchart LR
 |---|---|---|---|
 | I1 | Answer in ≤ 150 words unless the user asks for detail | Length | Word count (verifiable) |
 | I2 | Respond in the user's language | Language | Language-ID model (verifiable-ish) |
-| I3 | Cite every factual claim as `[doc:<id>]` | Citation format | Regex + ID lookup (verifiable) — see §4 |
+| I3 | Cite every factual claim as `[doc:<id>]` | Citation format | Regex + ID lookup (verifiable; see §4) |
 | I4 | Use bullet points for lists of 3+ items | Format | Judge (needs "is this a list?" understanding) |
 | I5 | Never mention internal codenames from `restricted_terms` | Must-avoid | Substring / regex (verifiable) |
 | I6 | End with a "Sources" section | Structure | Regex (verifiable) |
@@ -61,12 +68,13 @@ flowchart LR
 - **Inputs required:** Model output and the list of parameterized instructions. You do not need a reference answer.
 - **How to compute it:** Run each instruction checker and aggregate the results in two ways:
 
-  ```text
-  instruction_level_acc = (# instructions followed) / (# instructions across all prompts)
-  prompt_level_acc      = (# prompts where ALL instructions followed) / (# prompts)
-  ```
+    ```text
+    instruction_level_acc = (# instructions followed) / (# instructions across all prompts)
+    prompt_level_acc      = (# prompts where ALL instructions followed) / (# prompts)
+    ```
 
-  IFEval also computes **strict** and **loose** scores. The loose score re-checks outputs after stripping markdown emphasis or conversational preambles ("Sure, here is...") to reduce false negatives.
+    IFEval also computes **strict** and **loose** scores. The loose score re-checks outputs after stripping markdown emphasis or conversational preambles ("Sure, here is...") to reduce false negatives.
+
 - **Score range & interpretation:** 0 to 1. Use **prompt-level accuracy** as your main user-facing metric because a single violated rule fails the turn. Use **instruction-level accuracy** to diagnose which specific rule needs prompt work.
 - **Pitfalls / gotchas:** Word counting varies across tokenizers and languages without spaces (such as Chinese or Japanese). Simple keyword checks are vulnerable to keyword stuffing. Conditional instructions ("≤ 150 words *unless* the user asks for detail") require encoding the condition in your test metadata.
 - **When to use / when not to:** Always use deterministic checks for code-verifiable rules. Reuse them as online monitors or blocking output guardrails.
@@ -117,17 +125,17 @@ evaluate("The PTO policy allows 25 days [doc:hr-12].\n\nSources:\n- [doc:hr-12]"
 - **Inputs required:** Atomic instruction, user input, and assistant output. You do not need a reference answer.
 - **How to compute it:** Run **one binary yes/no judge per instruction** instead of a single 1–10 holistic score. [InFoBench](https://arxiv.org/abs/2401.03601) formalizes this as the Decomposed Requirements Following Ratio (DRFR), which evaluates each decomposed requirement separately and reports the fraction satisfied.
 
-  ```text
-  You are checking ONE requirement.
-  REQUIREMENT: "When listing 3 or more items, use bullet points."
-  USER MESSAGE: {input}
-  ASSISTANT RESPONSE: {output}
-  Is the requirement applicable to this response? If not applicable, answer "n/a".
-  If applicable, think step by step about whether it is satisfied, then answer.
-  Output JSON: {"reasoning": "...", "verdict": "pass" | "fail" | "n/a"}
-  ```
+    ```text
+    You are checking ONE requirement.
+    REQUIREMENT: "When listing 3 or more items, use bullet points."
+    USER MESSAGE: {input}
+    ASSISTANT RESPONSE: {output}
+    Is the requirement applicable to this response? If not applicable, answer "n/a".
+    If applicable, think step by step about whether it is satisfied, then answer.
+    Output JSON: {"reasoning": "...", "verdict": "pass" | "fail" | "n/a"}
+    ```
 
-- **Score range & interpretation:** 0 to 1 per instruction. Exclude `n/a` verdicts from the denominator, but monitor your `n/a` rate—an instruction that is always `n/a` has zero test coverage in your dataset.
+- **Score range & interpretation:** 0 to 1 per instruction. Exclude `n/a` verdicts from the denominator, but monitor your `n/a` rate; an instruction that is always `n/a` has zero test coverage in your dataset.
 - **Pitfalls / gotchas:** Judges often mark inapplicable rules as `fail` unless you provide an explicit `n/a` option. Evaluating too many requirements in one prompt hurts accuracy, so batch at most 3 to 5 closely related checks. Validate every judge against human labels (see [LLM-as-a-judge](./07-llm-as-a-judge.md)).
 - **When to use / when not to:** Use binary judges for high-value instructions that code cannot verify. Skip rules that users do not care about.
 - **Implemented in:** DeepEval `PromptAlignmentMetric` and `GEval`, promptfoo `llm-rubric`, or custom judge prompts.
@@ -172,15 +180,15 @@ A refusal policy defines what the assistant must decline (such as salary data fo
 - **Inputs required:** User input, user role, assistant output, and a ground-truth label `should_refuse ∈ {true, false}`.
 - **How to compute it:** Classify each response as a refusal or compliance using keyword heuristics or an LLM judge. Track partial compliance separately and build the confusion matrix:
 
-  |  | Agent refused | Agent complied |
-  |---|---|---|
-  | **Should refuse** | ✅ correct refusal (TP) | ❌ **under-refusal** / policy breach (FN) |
-  | **Should answer** | ❌ **over-refusal** (FP) | ✅ helpful (TN) |
+    |  | Agent refused | Agent complied |
+    |---|---|---|
+    | **Should refuse** | ✅ correct refusal (TP) | ❌ **under-refusal** / policy breach (FN) |
+    | **Should answer** | ❌ **over-refusal** (FP) | ✅ helpful (TN) |
 
-  ```text
-  refusal_recall      = TP / (TP + FN)   # how many must-refuse cases were refused   → safety
-  false_refusal_rate  = FP / (FP + TN)   # how many legit requests were blocked      → helpfulness
-  ```
+    ```text
+    refusal_recall      = TP / (TP + FN)   # how many must-refuse cases were refused   → safety
+    false_refusal_rate  = FP / (FP + TN)   # how many legit requests were blocked      → helpfulness
+    ```
 
 - **Score range & interpretation:** Both metrics range from 0 to 1. Track **both metrics together**, because optimizing one in isolation degrades the other. Under-refusal on RBAC-restricted data causes security incidents, whereas a high false-refusal rate drives users to abandon the assistant.
 - **Worked example:** Suppose your dataset has 40 `should-refuse` items (salary queries from an `engineer` role) and 160 `should-answer` items. The `should-answer` set includes *benign look-alikes* like "where is the salary band policy doc?" or "how do I kill a stuck Linux process?". If the agent refuses 38 of 40 forbidden requests and 12 of 160 benign requests, `refusal_recall = 0.95` and `false_refusal_rate = 0.075`.
@@ -200,7 +208,7 @@ Agents generate structured outputs on almost every turn, including tool-call arg
 - **Inputs required:** Raw model output and target schema (JSON Schema or Pydantic model). You do not need ground truth.
 - **How to compute it:** Compute `parse_rate = parsed / total` and `schema_valid_rate = valid / total`. Log specific **validation error classes** (missing field, wrong type, invalid enum, extra field).
 - **Score range & interpretation:** 0 to 1. When you use native structured outputs or constrained decoding, syntactic validity should reach ~1.0, leaving only **semantic** field errors.
-- **Pitfalls / gotchas:** Watch for markdown code fences wrapping JSON, trailing explanations, and overly permissive schemas (like `str` instead of `Enum`). Tighten your schema first—strict schemas improve both evaluation signal and runtime guardrails.
+- **Pitfalls / gotchas:** Watch for markdown code fences wrapping JSON, trailing explanations, and overly permissive schemas (like `str` instead of `Enum`). Tighten your schema first; strict schemas improve both evaluation signal and runtime guardrails.
 - **When to use / when not to:** Always validate every structured output and tool call.
 - **Implemented in:** DeepEval `JsonCorrectnessMetric`, promptfoo `is-json` and `contains-json`, or `pydantic` and `jsonschema` directly.
 
@@ -308,7 +316,7 @@ QUOTE = re.compile(r"[\"“]([^\"”]{12,})[\"”]")          # quotes ≥ 12 ch
 
 def _norm(s: str) -> str:
     s = unicodedata.normalize("NFKC", s)
-    s = s.replace("’", "'").replace("‘", "'").replace("–", "-").replace("—", "-")
+    s = s.replace("\u2019", "'").replace("\u2018", "'").replace("\u2013", "-").replace("\u2014", "-")
     return re.sub(r"\s+", " ", s).strip().lower()
 
 def split_statements(answer: str) -> list[str]:
@@ -317,7 +325,7 @@ def split_statements(answer: str) -> list[str]:
     return [p.strip() for p in parts if len(p.strip()) > 3]
 
 def citation_checks(answer: str, sources: dict[str, str]) -> dict:
-    """sources: {doc_id: text} — the role-filtered documents provided to the model this turn."""
+    """sources: {doc_id: text} (the role-filtered documents provided to the model this turn)."""
     statements = split_statements(answer)
     cited_ids = CITE.findall(answer)
     invalid = sorted({i for i in cited_ids if i not in sources})
@@ -355,14 +363,14 @@ citation_checks(answer, sources)
 - **Inputs required:** Each claim and the text of the passages it cites. You do not need a reference answer.
 - **How to compute it:** Pair each claim with its concatenated cited passages. Run an NLI model or a binary LLM judge to classify the claim as `supported` or `not supported`, then compute `citation_support_rate = supported_claims / cited_claims`.
 
-  ```text
-  PASSAGES (cited by the claim):
-  [hr-31] Unused PTO up to 5 days may be carried over to the next year.
-  CLAIM: "Up to 5 unused days carry over."
-  Based ONLY on the passages, is the claim fully supported? Paraphrase is fine;
-  added specifics (numbers, dates, scope) not in the passages make it unsupported.
-  Output JSON: {"reasoning": "...", "supported": true|false}
-  ```
+    ```text
+    PASSAGES (cited by the claim):
+    [hr-31] Unused PTO up to 5 days may be carried over to the next year.
+    CLAIM: "Up to 5 unused days carry over."
+    Based ONLY on the passages, is the claim fully supported? Paraphrase is fine;
+    added specifics (numbers, dates, scope) not in the passages make it unsupported.
+    Output JSON: {"reasoning": "...", "supported": true|false}
+    ```
 
 - **Score range & interpretation:** 0 to 1. This metric correlates directly with whether users find the cited sources trustworthy when they click a link.
 - **Pitfalls / gotchas:** Standard NLI models trained on single sentences struggle with long documents, so chunk long passages or use a validated LLM judge. Instruct the judge to require strict *entailment* rather than topical similarity. Concatenate all passages cited by a single claim so multi-hop claims are evaluated fairly.
@@ -437,17 +445,17 @@ These metrics catch cases where the model cites a tangential document (like an o
 | Response language | ✅ (language-ID model) | No | No | ✅ |
 | JSON parse + schema | ✅ | No | No | ✅ blocking / retry |
 | Field-level correctness | ✅ for enums/IDs | For free text | Yes | ❌ offline |
-| Non-verifiable instructions | — | Yes, binary per instruction | No | Sampled |
+| Non-verifiable instructions | No | Yes, binary per instruction | No | Sampled |
 | Persona / tone | Partly (emoji, banned phrases) | Yes | No | Sampled |
 | Policy adherence | Partly (keyword triggers) | Yes | Test labels | Sampled + guardrail |
 | Refusal correctness | Keyword heuristics (weak) | Yes for accuracy | `should_refuse` labels | Sampled |
 | Citation format / ID validity | ✅ | No | No | ✅ blocking |
 | Citation coverage | ✅ (with heuristic claim filter) | Optional (claim detection) | No | ✅ |
 | Quote verification | ✅ exact substring | No | No | ✅ blocking |
-| Citation support / ALCE recall & precision | — | Yes (NLI or judge) | No | Sampled |
+| Citation support / ALCE recall & precision | No | Yes (NLI or judge) | No | Sampled |
 | Cited-source recall vs gold | ✅ | No | Yes (gold doc IDs) | ❌ offline |
 
-**Default stance (heuristic):** Always use a deterministic check when one exists—it is free, exact, reproducible, and fast enough to block bad outputs online. Use binary LLM judges or NLI models only for semantic checks, and calibrate them against human labels first.
+**Default stance (heuristic):** Always use a deterministic check when one exists; it is free, exact, reproducible, and fast enough to block bad outputs online. Use binary LLM judges or NLI models only for semantic checks, and calibrate them against human labels first.
 
 ---
 
@@ -455,7 +463,7 @@ These metrics catch cases where the model cites a tangential document (like an o
 
 | Eval | Dataset shape | Source |
 |---|---|---|
-| Verifiable instructions | `{input, instructions[ {id, params} ]}` — instructions can come from the system prompt (same for all items) plus per-item user constraints | Synthetic is fine: templated constraints × real questions |
+| Verifiable instructions | `{input, instructions[ {id, params} ]}` (instructions can come from the system prompt plus per-item user constraints) | Synthetic is fine: templated constraints × real questions |
 | Non-verifiable instructions | `{input, applicable_instructions}`, with human pass/fail labels on a subset for judge validation | Production samples + SME labels |
 | Refusal policy | `{input, role, should_refuse, category}` with **benign look-alikes** | SME-written + synthetic paraphrases + red-team |
 | Policy adherence | `{input, triggered_policies, expected_behavior}` incl. near-misses | SME / policy owners |
@@ -491,12 +499,15 @@ See [Dataset strategy](../01-datasets/01-dataset-strategy.md) and [Synthetic dat
 
 ## Further reading
 
-- Zhou et al., 2023 — [Instruction-Following Evaluation for Large Language Models (IFEval)](https://arxiv.org/abs/2311.07911) · [code](https://github.com/google-research/google-research/tree/master/instruction_following_eval)
-- Qin et al., 2024 — [InFoBench: Evaluating Instruction Following Ability in Large Language Models](https://arxiv.org/abs/2401.03601)
-- Wallace et al., 2024 — [The Instruction Hierarchy: Training LLMs to Prioritize Privileged Instructions](https://arxiv.org/abs/2404.13208)
-- Röttger et al., 2023 — [XSTest: A Test Suite for Identifying Exaggerated Safety Behaviours in Large Language Models](https://arxiv.org/abs/2308.01263)
-- Rashkin et al., 2021 — [Measuring Attribution in Natural Language Generation Models (AIS)](https://arxiv.org/abs/2112.12870)
-- Bohnet et al., 2022 — [Attributed Question Answering: Evaluation and Modeling for Attributed Large Language Models](https://arxiv.org/abs/2212.08037)
-- Gao et al., 2023 — [Enabling Large Language Models to Generate Text with Citations (ALCE)](https://arxiv.org/abs/2305.14627) · [code](https://github.com/princeton-nlp/ALCE)
+- Zhou et al., 2023, [Instruction-Following Evaluation for Large Language Models (IFEval)](https://arxiv.org/abs/2311.07911) · [code](https://github.com/google-research/google-research/tree/master/instruction_following_eval)
+- Qin et al., 2024, [InFoBench: Evaluating Instruction Following Ability in Large Language Models](https://arxiv.org/abs/2401.03601)
+- Wallace et al., 2024, [The Instruction Hierarchy: Training LLMs to Prioritize Privileged Instructions](https://arxiv.org/abs/2404.13208)
+- Röttger et al., 2023, [XSTest: A Test Suite for Identifying Exaggerated Safety Behaviours in Large Language Models](https://arxiv.org/abs/2308.01263)
+- Rashkin et al., 2021, [Measuring Attribution in Natural Language Generation Models (AIS)](https://arxiv.org/abs/2112.12870)
+- Bohnet et al., 2022, [Attributed Question Answering: Evaluation and Modeling for Attributed Large Language Models](https://arxiv.org/abs/2212.08037)
+- Gao et al., 2023, [Enabling Large Language Models to Generate Text with Citations (ALCE)](https://arxiv.org/abs/2305.14627) · [code](https://github.com/princeton-nlp/ALCE)
 - [Pydantic](https://docs.pydantic.dev/) · [jsonschema (Python)](https://python-jsonschema.readthedocs.io/)
-- In this repo: [LLM-as-a-judge](./07-llm-as-a-judge.md) · [Output guardrails](../04-guardrails/04-output-guardrails.md) · [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
+- **In this repo:**
+    - [LLM-as-a-judge](./07-llm-as-a-judge.md)
+    - [Output guardrails](../04-guardrails/04-output-guardrails.md)
+    - [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)

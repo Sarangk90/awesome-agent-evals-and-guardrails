@@ -1,14 +1,19 @@
 # Observability & Tracing for Agentic RAG
 
 > **TL;DR**
+>
 > - **Emit one complete trace per user turn.** Record every retrieval, rerank, LLM call, tool execution, SQL query, and guardrail check with child spans.
 > - **Tag every version and group into sessions.** Log prompt, model, index, and config versions plus `session_id` to isolate regressions fast.
 > - **Adopt OpenTelemetry conventions.** Use OTel GenAI semantic conventions or OpenInference and add application attributes under `app.*`.
 > - **Scrub PII before export and enforce ACLs.** Redact sensitive payloads at the source, restrict trace viewing by document permissions, and tier retention.
 
-**You will learn:** Agentic RAG span hierarchy · Per-span logging specifications · OTel GenAI and OpenInference standards · Session grouping, version tagging, PII redaction, and tool selection  
-**Prerequisites:** [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Online evals](./01-online-evals.md)  
-**Related:** [User feedback](./03-user-feedback-and-implicit-signals.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)
+- **You will learn:**
+    - Agentic RAG span hierarchy
+    - Per-span logging specifications
+    - OTel GenAI and OpenInference standards
+    - Session grouping, version tagging, PII redaction, and tool selection
+- **Prerequisites:** [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Online evals](./01-online-evals.md)
+- **Related:** [User feedback](./03-user-feedback-and-implicit-signals.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)
 
 ---
 
@@ -488,12 +493,12 @@ Evaluate observability tools against this checklist:
 
 ## Further reading
 
-- OpenTelemetry — [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (now maintained in [open-telemetry/semantic-conventions-genai](https://github.com/open-telemetry/semantic-conventions-genai))
-- OpenTelemetry blog — [OpenTelemetry for Generative AI](https://opentelemetry.io/blog/2024/otel-generative-ai/)
-- OpenTelemetry — [Database span conventions](https://opentelemetry.io/docs/specs/semconv/database/database-spans/) and [Sampling](https://opentelemetry.io/docs/concepts/sampling/)
-- Arize — [OpenInference specification & instrumentation](https://github.com/Arize-ai/openinference), [Phoenix tracing docs](https://arize.com/docs/phoenix/tracing/llm-traces)
+- OpenTelemetry, [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (now maintained in [open-telemetry/semantic-conventions-genai](https://github.com/open-telemetry/semantic-conventions-genai))
+- OpenTelemetry blog, [OpenTelemetry for Generative AI](https://opentelemetry.io/blog/2024/otel-generative-ai/)
+- OpenTelemetry, [Database span conventions](https://opentelemetry.io/docs/specs/semconv/database/database-spans/) and [Sampling](https://opentelemetry.io/docs/concepts/sampling/)
+- Arize, [OpenInference specification & instrumentation](https://github.com/Arize-ai/openinference), [Phoenix tracing docs](https://arize.com/docs/phoenix/tracing/llm-traces)
 - [Langfuse docs](https://langfuse.com/docs/observability/overview) · [LangSmith observability](https://docs.smith.langchain.com/observability) · [Braintrust logs](https://www.braintrust.dev/docs/guides/logs) · [W&B Weave docs](https://weave-docs.wandb.ai/) · [MLflow Tracing](https://mlflow.org/docs/latest/genai/tracing/) · [Datadog LLM Observability](https://docs.datadoghq.com/llm_observability/)
-- Microsoft — [Presidio](https://github.com/microsoft/presidio) (PII detection/anonymization)
-- Chip Huyen — [Building A Generative AI Platform](https://huyenchip.com/2024/07/25/genai-platform.html) (observability and guardrails in the overall architecture)
-- Hamel Husain — [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
+- Microsoft, [Presidio](https://github.com/microsoft/presidio) (PII detection/anonymization)
+- Chip Huyen, [Building A Generative AI Platform](https://huyenchip.com/2024/07/25/genai-platform.html) (observability and guardrails in the overall architecture)
+- Hamel Husain, [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
 - Within this repo: [Online evals](./01-online-evals.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md), [Threat model / OWASP](../04-guardrails/07-threat-model-owasp.md)

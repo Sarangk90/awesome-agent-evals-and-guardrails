@@ -1,14 +1,22 @@
 # Running Offline Experiments
 
 > **TL;DR**
+>
 > - **Treat every change as a controlled experiment.** Run your baseline and variant on the same pinned dataset under identical judge versions.
 > - **Compare variants per item with paired statistics.** Inspect item-level flips (regressions and fixes) and compute paired bootstrap confidence intervals or McNemar's test.
 > - **Break results down by slice and enforce budgets.** Check critical slices (such as RBAC and safety) with zero-tolerance gates and protect a held-out test set.
 > - **Automate tiered evaluation gates in CI/CD.** Run unit checks and a smoke suite on pull requests, and run the full suite nightly.
 
-**You will learn:** What metadata to record for every run · Paired baseline-vs-variant comparisons and flip analysis · Handling non-determinism with `pass@k` and `pass^k` · Confidence intervals, paired bootstrap, and McNemar's test · Slice analysis, cost/latency budgets, and RAG ablations · Preventing eval-set overfitting · Tiered CI/CD gates with GitHub Actions and `pytest`  
-**Prerequisites:** [Dataset strategy](../01-datasets/01-dataset-strategy.md), [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md)  
-**Related:** [Retrieval metrics](./02-retrieval-metrics.md), [Text-to-SQL evals](./05-text-to-sql-evals.md), [Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md), [Monitoring, alerting & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
+- **You will learn:**
+    - What metadata to record for every run
+    - Paired baseline-vs-variant comparisons and flip analysis
+    - Handling non-determinism with `pass@k` and `pass^k`
+    - Confidence intervals, paired bootstrap, and McNemar's test
+    - Slice analysis, cost/latency budgets, and RAG ablations
+    - Preventing eval-set overfitting
+    - Tiered CI/CD gates with GitHub Actions and `pytest`
+- **Prerequisites:** [Dataset strategy](../01-datasets/01-dataset-strategy.md), [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md)
+- **Related:** [Retrieval metrics](./02-retrieval-metrics.md), [Text-to-SQL evals](./05-text-to-sql-evals.md), [Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md), [Monitoring, alerting & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
 
 ---
 
@@ -78,9 +86,9 @@ Judges: faithfulness@v7 (pinned), answer_correctness@v4 (pinned)       Repeats: 
 Metric                         Baseline        Variant         Δ (paired, 95% CI)       Gate
 answer_correctness (pass)      0.780           0.815           +0.035 [+0.008, +0.062]   ✅ ≥ baseline − 0.01
 faithfulness (pass)            0.880           0.905           +0.025 [+0.004, +0.046]   ✅ ≥ 0.85
-context_recall@5               0.740           0.810           +0.070 [+0.045, +0.095]   —
+context_recall@5               0.740           0.810           +0.070 [+0.045, +0.095]   none
 citation_valid_id_rate         1.000           1.000           0                          ✅ = 1.0 (critical)
-RBAC must-pass (n=40)          40/40           40/40           —                          ✅ 100% (critical)
+RBAC must-pass (n=40)          40/40           40/40           0                          ✅ 100% (critical)
 p95 latency                    3.1 s           3.9 s           +0.8 s                     ✅ ≤ 5 s
 cost / query                   $0.0041         $0.0048         +17%                       ✅ ≤ $0.006
 Flips (correctness)            regressions 9 · fixes 23
@@ -117,8 +125,8 @@ Execute each evaluation item **`k` times** (use 3 to 5 repeats for pull-request 
 
 | Metric | Question | Definition (from n trials with c successes) | Use for |
 |---|---|---|---|
-| **pass@k** | "Does *at least one* of k attempts succeed?" | `1 − C(n−c, k) / C(n, k)` — the unbiased estimator from [Chen et al., 2021 (Codex)](https://arxiv.org/abs/2107.03374) | Settings with a verifier/selector or user retries (e.g. code + tests, best-of-k with a checker) |
-| **pass^k** | "Do *all* k attempts succeed?" — consistency/reliability | `C(c, k) / C(n, k)`, introduced in [τ-bench (Yao et al., 2024)](https://arxiv.org/abs/2406.12045) | User-facing agents: each user gets one attempt, and many users ask similar things |
+| **pass@k** | "Does *at least one* of k attempts succeed?" | `1 − C(n−c, k) / C(n, k)`, the unbiased estimator from [Chen et al., 2021 (Codex)](https://arxiv.org/abs/2107.03374) | Settings with a verifier/selector or user retries (e.g. code + tests, best-of-k with a checker) |
+| **pass^k** | "Do *all* k attempts succeed?" (consistency/reliability) | `C(c, k) / C(n, k)`, introduced in [τ-bench (Yao et al., 2024)](https://arxiv.org/abs/2406.12045) | User-facing agents: each user gets one attempt, and many users ask similar things |
 
 As `k` increases, `pass@k` rises while `pass^k` falls. For an enterprise assistant that must succeed reliably on the first try, **use `pass^k` as your primary reliability metric**. An agent with an 80% single-trial success rate can easily drop below 40% on `pass^8` if its failures are spread across items.
 
@@ -175,7 +183,7 @@ def paired_bootstrap(base: list[float], var: list[float], n_boot: int = 10_000, 
     diffs = [v - b for b, v in zip(base, var)]
     if clusters is None:
         groups = [[d] for d in diffs]
-    else:  # resample whole clusters (e.g. all questions about one doc) — wider, more honest CIs
+    else:  # resample whole clusters (e.g. all questions about one doc): wider, more honest CIs
         by = {}
         for d, g in zip(diffs, clusters):
             by.setdefault(g, []).append(d)
@@ -306,7 +314,7 @@ import itertools
 GRID = {"top_k": [3, 5, 8], "reranker": [None, "cross-encoder"], "chunk_size": [256, 512]}
 
 def sweep(run_retrieval_eval, dev_items):
-    """run_retrieval_eval(config, items) -> {"recall@k": float, "p95_latency_s": float} — your code."""
+    """run_retrieval_eval(config, items) -> {"recall@k": float, "p95_latency_s": float} (your code)."""
     results = []
     for values in itertools.product(*GRID.values()):
         cfg = dict(zip(GRID.keys(), values))
@@ -355,7 +363,7 @@ On pull requests (Tier 1), **hard-fail on critical items and post warnings on so
 ### 10.3 Illustrative GitHub Actions workflow
 
 ```yaml
-# .github/workflows/evals.yml — illustrative; adapt paths, secrets and commands to your repo.
+# .github/workflows/evals.yml: illustrative; adapt paths, secrets and commands to your repo.
 name: llm-evals
 
 on:
@@ -444,7 +452,7 @@ Tools like promptfoo also provide pre-built GitHub Actions ([promptfoo-action](h
 Use `pytest` to structure your evaluation suite. Parametrize **critical items** as individual test cases, and run **aggregate threshold and non-regression checks** over session-cached outputs:
 
 ```python
-# evals/test_agent_evals.py — illustrative; `my_app.run_agent` and the dataset format are yours.
+# evals/test_agent_evals.py: illustrative; `my_app.run_agent` and the dataset format are yours.
 import json
 import os
 from functools import lru_cache
@@ -546,10 +554,14 @@ Include five essential views in your evaluation dashboard:
 
 ## Further reading
 
-- Evan Miller, 2024 — [Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations](https://arxiv.org/abs/2411.00640)
-- Chen et al., 2021 — [Evaluating Large Language Models Trained on Code (pass@k)](https://arxiv.org/abs/2107.03374)
-- Yao et al., 2024 — [τ-bench: A Benchmark for Tool-Agent-User Interaction in Real-World Domains (pass^k)](https://arxiv.org/abs/2406.12045)
-- Hamel Husain — [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) · [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
-- Eugene Yan — [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/)
+- Evan Miller, 2024, [Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations](https://arxiv.org/abs/2411.00640)
+- Chen et al., 2021, [Evaluating Large Language Models Trained on Code (pass@k)](https://arxiv.org/abs/2107.03374)
+- Yao et al., 2024, [τ-bench: A Benchmark for Tool-Agent-User Interaction in Real-World Domains (pass^k)](https://arxiv.org/abs/2406.12045)
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) · [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
+- Eugene Yan, [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/)
 - [promptfoo GitHub Action](https://github.com/promptfoo/promptfoo-action)
-- In this repo: [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md) · [Implementation playbook](../05-decision-framework/04-implementation-playbook.md) · [Maturity model](../05-decision-framework/05-maturity-model.md) · [Online evals](../03-online-evals-and-observability/01-online-evals.md)
+- **In this repo:**
+    - [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)
+    - [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)
+    - [Maturity model](../05-decision-framework/05-maturity-model.md)
+    - [Online evals](../03-online-evals-and-observability/01-online-evals.md)

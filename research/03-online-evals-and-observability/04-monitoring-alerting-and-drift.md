@@ -1,14 +1,19 @@
 # Monitoring, Alerting & Drift
 
 > **TL;DR**
+>
 > - **Segment KPIs by version, role, and intent.** Track quality, retrieval, safety, SQL, latency, and cost metrics with confidence intervals across slices.
 > - **Set 4–7 user-facing SLOs and hard safety invariants.** Alert on sustained budget burn or hard invariant breaches rather than noisy single-point spikes.
 > - **Monitor all four drift axes.** Detect shifts in user queries, corpus and warehouse schemas, hosted model snapshots, and LLM judge behavior.
 > - **Prepare an AI incident runbook and kill switches.** Use runtime config rollbacks, tool kill switches, and mandatory regression tests for every incident.
 
-**You will learn:** Segmented KPI catalog and dashboard design · AI SLOs and low-fatigue alerting · Query, corpus, model, and judge drift detection · Incident response runbooks, kill switches, and re-evaluation cadences  
-**Prerequisites:** [Online evals](./01-online-evals.md), [Observability & tracing](./02-observability-and-tracing.md)  
-**Related:** [User feedback](./03-user-feedback-and-implicit-signals.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [Maturity model](../05-decision-framework/05-maturity-model.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)
+- **You will learn:**
+    - Segmented KPI catalog and dashboard design
+    - AI SLOs and low-fatigue alerting
+    - Query, corpus, model, and judge drift detection
+    - Incident response runbooks, kill switches, and re-evaluation cadences
+- **Prerequisites:** [Online evals](./01-online-evals.md), [Observability & tracing](./02-observability-and-tracing.md)
+- **Related:** [User feedback](./03-user-feedback-and-implicit-signals.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [Maturity model](../05-decision-framework/05-maturity-model.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)
 
 ---
 
@@ -132,7 +137,7 @@ Follow these rules when setting AI SLOs:
 ### 4.4 Example alert rules (illustrative)
 
 ```yaml
-# illustrative — adapt to your alerting system's syntax
+# illustrative: adapt to your alerting system's syntax
 - name: rbac_citation_leak
   expr: sum(increase(app_citations_leaked_total[5m])) > 0
   severity: sev1
@@ -182,9 +187,9 @@ flowchart LR
 **How to detect it:**
 
 - **Track embedding cluster shifts.** Cluster query embeddings on a baseline reference window and monitor three signals on incoming traffic:
-  - Shifts in traffic share across existing clusters.
-  - Rising **novelty rate** (share of queries whose nearest centroid distance exceeds threshold $r$).
-  - Dense new clusters formed by previously unseen topics.
+    - Shifts in traffic share across existing clusters.
+    - Rising **novelty rate** (share of queries whose nearest centroid distance exceeds threshold $r$).
+    - Dense new clusters formed by previously unseen topics.
 - **Measure categorical distribution distance.** Compute Population Stability Index (PSI), Jensen–Shannon divergence, or chi-square statistics on intent, user role, language, and selected tools using libraries such as [Evidently](https://github.com/evidentlyai/evidently).
 - **Watch downstream retrieval symptoms:** Rising weak-retrieval rates, `no_context` refusals, and user rephrase rates within a specific slice.
 
@@ -214,7 +219,7 @@ flowchart LR
 
 **Common failure modes:**
 
-- **Stale vector index:** A policy document changes, but the index still serves the old chunk. The assistant generates a response that is 100% faithful to the retrieved text yet factually outdated — **faithfulness judges cannot catch this failure**.
+- **Stale vector index:** A policy document changes, but the index still serves the old chunk. The assistant generates a response that is 100% faithful to the retrieved text yet factually outdated; **faithfulness judges cannot catch this failure**.
 - **Orphaned or ACL-mismatched chunks:** Deleted or permission-restricted documents remain searchable in the vector index (see [Retrieval & context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md)).
 - **Conflicting document versions:** Multiple editions of the same policy coexist in the index, causing the generator to blend old and new rules.
 - **Warehouse schema drift:** Data engineers rename columns, deprecate tables, or change metric definitions (such as `revenue` switching from gross to net), causing SQL syntax errors or silent calculation errors.
@@ -245,7 +250,7 @@ flowchart LR
 
 ### 5.4 Judge drift
 
-**What changes:** Your evaluation instrument shifts. A provider updates the judge model, an engineer edits the judge prompt or context truncation limit, or user traffic shifts into domains where the judge was never calibrated. Human standards also evolve as reviewers inspect more data — a phenomenon Shankar et al. term **criteria drift** in ["Who Validates the Validators?"](https://arxiv.org/abs/2404.12272).
+**What changes:** Your evaluation instrument shifts. A provider updates the judge model, an engineer edits the judge prompt or context truncation limit, or user traffic shifts into domains where the judge was never calibrated. Human standards also evolve as reviewers inspect more data, a phenomenon Shankar et al. term **criteria drift** in ["Who Validates the Validators?"](https://arxiv.org/abs/2404.12272).
 
 **Symptoms:** Dashboard quality scores jump or drop while user feedback, deterministic checks, and system versions remain flat, or a step change coincides with a judge update.
 
@@ -286,10 +291,10 @@ Treat AI quality and safety failures as production incidents. A hallucinated HR 
 
 - [ ] **Put prompts, model snapshots, retriever parameters, and guardrail thresholds in versioned runtime config** so rollback takes a config flip rather than a code deployment.
 - [ ] **Build granular kill switches** at four levels:
-  - Disable individual **write tools** (such as `create_ticket`) or force them into human-approval mode.
-  - Disable **text-to-SQL** execution for specific roles or warehouse schemas.
-  - Exclude a compromised or stale **data source** from retrieval.
-  - Switch the **entire assistant** to search-only links or a maintenance banner.
+    - Disable individual **write tools** (such as `create_ticket`) or force them into human-approval mode.
+    - Disable **text-to-SQL** execution for specific roles or warehouse schemas.
+    - Exclude a compromised or stale **data source** from retrieval.
+    - Switch the **entire assistant** to search-only links or a maintenance banner.
 - [ ] **Pre-configure and test a fallback model** on a secondary provider or pinned snapshot.
 - [ ] **Enforce strict rate limits on write tools** per user, session, and hour to cap the blast radius of agent loops.
 - [ ] **Retain hot traces long enough** to support forensic root-cause analysis (see [Observability & tracing §5](./02-observability-and-tracing.md)).
@@ -320,24 +325,24 @@ flowchart TD
 Execute this step-by-step checklist during an incident:
 
 1. **Triage (first 15 minutes)**
-   - [ ] Inspect 10–20 affected traces from the alert link to confirm the failure is real.
-   - [ ] Scope the blast radius by role, intent, data source, `config_hash`, and start timestamp.
-   - [ ] Check recent deployments, prompt/config changes, index ingestion runs, warehouse DDL logs, and `gen_ai.response.model` strings.
-   - [ ] Assign an incident severity level and designate an incident commander.
+    - [ ] Inspect 10–20 affected traces from the alert link to confirm the failure is real.
+    - [ ] Scope the blast radius by role, intent, data source, `config_hash`, and start timestamp.
+    - [ ] Check recent deployments, prompt/config changes, index ingestion runs, warehouse DDL logs, and `gen_ai.response.model` strings.
+    - [ ] Assign an incident severity level and designate an incident commander.
 2. **Contain (15–60 minutes)**
-   - [ ] **Flip the appropriate kill switch immediately** for any Sev-1 data leak or runaway write tool before debugging further.
-   - [ ] **Roll back** the suspect prompt, model, or config version, or dial canary traffic down to 0%.
-   - [ ] **Reverse or quarantine bad write actions** (for example, bulk-close duplicate tickets via API) and notify affected teams.
-   - [ ] **Place exposed traces under legal/security hold** and restrict trace viewer permissions if an RBAC leak occurred.
+    - [ ] **Flip the appropriate kill switch immediately** for any Sev-1 data leak or runaway write tool before debugging further.
+    - [ ] **Roll back** the suspect prompt, model, or config version, or dial canary traffic down to 0%.
+    - [ ] **Reverse or quarantine bad write actions** (for example, bulk-close duplicate tickets via API) and notify affected teams.
+    - [ ] **Place exposed traces under legal/security hold** and restrict trace viewer permissions if an RBAC leak occurred.
 3. **Verify recovery**
-   - [ ] Confirm deterministic metrics return to baseline, oversample online judges on post-rollback traffic, and run the sentinel prompt suite.
+    - [ ] Confirm deterministic metrics return to baseline, oversample online judges on post-rollback traffic, and run the sentinel prompt suite.
 4. **Diagnose root cause**
-   - [ ] Identify the exact failing component in the trace tree (see [User feedback §7](./03-user-feedback-and-implicit-signals.md)) and determine why offline CI gates missed it.
+    - [ ] Identify the exact failing component in the trace tree (see [User feedback §7](./03-user-feedback-and-implicit-signals.md)) and determine why offline CI gates missed it.
 5. **Prevent recurrence**
-   - [ ] **Add redacted failure traces to your offline regression dataset** and verify that the CI gate fails on the broken version.
-   - [ ] Add or tighten the **online check or alert rule** that would have caught the issue faster.
-   - [ ] Add a **runtime guardrail** if the failure mode requires synchronous prevention (see [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md)).
-   - [ ] Conduct a **blameless postmortem** (see [SRE workbook: postmortem culture](https://sre.google/workbook/postmortem-culture/)) that documents both the system bug and the evaluation gap.
+    - [ ] **Add redacted failure traces to your offline regression dataset** and verify that the CI gate fails on the broken version.
+    - [ ] Add or tighten the **online check or alert rule** that would have caught the issue faster.
+    - [ ] Add a **runtime guardrail** if the failure mode requires synchronous prevention (see [Guardrail selection decision tree](../05-decision-framework/02-guardrail-selection-decision-tree.md)).
+    - [ ] Conduct a **blameless postmortem** (see [SRE workbook: postmortem culture](https://sre.google/workbook/postmortem-culture/)) that documents both the system bug and the evaluation gap.
 
 ### 6.4 Example: runaway ticket creation
 
@@ -360,7 +365,7 @@ Even when no alerts fire, production systems slowly drift. Run this recurring ev
 | **Daily** | Review sampled LLM judge metrics (with confidence intervals) and inspect top triggered traces |
 | **Weekly** | Hold error-analysis review (feedback-ranked + 20% random sample), spot-check human–judge agreement, review query drift clusters, and promote new cases to datasets |
 | **Monthly** | Run the full offline benchmark against current production config and corpus snapshot, re-run the judge calibration set, prune noisy alerts, review eval and inference costs, and audit guardrail false-positive overrides |
-| **Quarterly** | Refresh golden datasets (retire stale questions, re-verify references against current docs, rebalance slices — see [Dataset strategy](../01-datasets/01-dataset-strategy.md)), run red-team exercises (see [Threat model / OWASP](../04-guardrails/07-threat-model-owasp.md)), and review SLOs |
+| **Quarterly** | Refresh golden datasets (retire stale questions, re-verify references against current docs, rebalance slices; see [Dataset strategy](../01-datasets/01-dataset-strategy.md)), run red-team exercises (see [Threat model / OWASP](../04-guardrails/07-threat-model-owasp.md)), and review SLOs |
 | **Event-driven** | Treat any provider model update, embedding migration, major corpus overhaul, warehouse schema migration, or new tool launch as a full release requiring offline gating, canary rollout, and focused monitoring |
 
 ---
@@ -382,18 +387,18 @@ Even when no alerts fire, production systems slowly drift. Run this recurring ev
 - Track quality, retrieval, safety, behavior, tool/SQL, latency, cost, and reliability KPIs **sliced by version, role, intent, and data source**, and display confidence intervals on all sampled metrics.
 - Maintain **4–7 user-facing SLOs**, and enforce zero-tolerance **hard invariants** for RBAC leaks and unauthorized write actions.
 - Design low-fatigue alerts using minimum sample sizes, multi-window burn rates, seasonal baselines, and direct links to runbooks and filtered traces.
-- Monitor all four drift axes — **query**, **corpus/schema**, **model/provider**, and **judge** — because faithfulness judges cannot detect stale source documents and judges themselves drift.
+- Monitor all four drift axes (**query**, **corpus/schema**, **model/provider**, and **judge**), because faithfulness judges cannot detect stale source documents and judges themselves drift.
 - Prepare for AI incidents ahead of time with **granular kill switches, runtime config rollback, fallback models, write-tool rate limits**, and a runbook that mandates **an offline regression test for every incident**.
 - Follow a disciplined re-evaluation cadence: daily sentinel runs, weekly error analysis, monthly full benchmarks, and quarterly golden-dataset refreshes.
 
 ## Further reading
 
-- Google SRE — [Service Level Objectives](https://sre.google/sre-book/service-level-objectives/), [Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/), [Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/), [Postmortem Culture](https://sre.google/workbook/postmortem-culture/)
-- Chen, Zaharia & Zou — [How is ChatGPT's behavior changing over time?](https://arxiv.org/abs/2307.09009)
-- Shankar et al. — [Who Validates the Validators?](https://arxiv.org/abs/2404.12272) (criteria drift and evaluator alignment)
-- Evidently — [open-source data & ML monitoring / drift detection](https://github.com/evidentlyai/evidently) ([docs](https://docs.evidentlyai.com))
-- NIST — [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework) (the *Measure* and *Manage* functions cover ongoing monitoring)
-- OWASP — [GenAI Security Project / Top 10 for LLM Applications](https://genai.owasp.org/)
-- Chip Huyen — [Building A Generative AI Platform](https://huyenchip.com/2024/07/25/genai-platform.html)
-- Applied LLMs — [What We've Learned From A Year of Building with LLMs](https://applied-llms.org/)
+- Google SRE, [Service Level Objectives](https://sre.google/sre-book/service-level-objectives/), [Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/), [Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/), [Postmortem Culture](https://sre.google/workbook/postmortem-culture/)
+- Chen, Zaharia & Zou, [How is ChatGPT's behavior changing over time?](https://arxiv.org/abs/2307.09009)
+- Shankar et al., [Who Validates the Validators?](https://arxiv.org/abs/2404.12272) (criteria drift and evaluator alignment)
+- Evidently, [open-source data & ML monitoring / drift detection](https://github.com/evidentlyai/evidently) ([docs](https://docs.evidentlyai.com))
+- NIST, [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework) (the *Measure* and *Manage* functions cover ongoing monitoring)
+- OWASP, [GenAI Security Project / Top 10 for LLM Applications](https://genai.owasp.org/)
+- Chip Huyen, [Building A Generative AI Platform](https://huyenchip.com/2024/07/25/genai-platform.html)
+- Applied LLMs, [What We've Learned From A Year of Building with LLMs](https://applied-llms.org/)
 - Within this repo: [Online evals](./01-online-evals.md), [Observability & tracing](./02-observability-and-tracing.md), [Maturity model](../05-decision-framework/05-maturity-model.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)

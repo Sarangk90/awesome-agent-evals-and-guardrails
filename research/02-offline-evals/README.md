@@ -1,14 +1,18 @@
-# 02 — Offline Evals
+# 02 · Offline Evals
 
 > **TL;DR**
+>
 > - **Run offline evals before shipping.** Test your system against a fixed dataset to verify improvements and catch regressions.
 > - **Combine end-to-end and component metrics.** Measure overall user outcomes first, then isolate failures to specific pipeline stages.
 > - **Calibrate your LLM judges.** Validate automated evaluators against human labels before you trust them for release gates.
 > - **Gate releases on statistical experiments.** Compare variants across slices, latency, and cost before deploying to production.
 
-**You will learn:** End-to-end vs component evals · Metric families for RAG, SQL, and agents · Suggested reading order  
-**Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Datasets](../01-datasets/README.md)  
-**Related:** [Online evals & observability](../03-online-evals-and-observability/README.md), [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
+- **You will learn:**
+    - End-to-end vs component evals
+    - Metric families for RAG, SQL, and agents
+    - Suggested reading order
+- **Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Datasets](../01-datasets/README.md)
+- **Related:** [Online evals & observability](../03-online-evals-and-observability/README.md), [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
 
 ---
 
@@ -70,12 +74,12 @@ flowchart LR
 
 ## Suggested reading order
 
-1. **Read [01 — End-to-end RAG evals](./01-end-to-end-rag-evals.md)** to understand what good quality means for a RAG answer.
-2. **Read [07 — LLM-as-a-judge](./07-llm-as-a-judge.md)** because most E2E and quality metrics rely on LLM judges. Learn how to calibrate and validate them early.
-3. **Read [02 — Retrieval metrics](./02-retrieval-metrics.md)** to diagnose retrieval, which is the most common root cause of bad RAG answers.
-4. **Read [04 — Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md)** and **[05 — Text-to-SQL evals](./05-text-to-sql-evals.md)** if your system takes actions or queries structured data.
-5. **Read [03 — Generation quality & safety](./03-generation-quality-and-safety-evals.md)** and **[06 — Instruction & citation adherence](./06-instruction-and-citation-adherence.md)** to enforce style, policy, and source attribution.
-6. **Read [08 — Running offline experiments](./08-running-offline-experiments.md)** to turn these metrics into a repeatable release process.
+1. **Read [01 · End-to-end RAG evals](./01-end-to-end-rag-evals.md)** to understand what good quality means for a RAG answer.
+2. **Read [07 · LLM-as-a-judge](./07-llm-as-a-judge.md)** because most E2E and quality metrics rely on LLM judges. Learn how to calibrate and validate them early.
+3. **Read [02 · Retrieval metrics](./02-retrieval-metrics.md)** to diagnose retrieval, which is the most common root cause of bad RAG answers.
+4. **Read [04 · Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md)** and **[05 · Text-to-SQL evals](./05-text-to-sql-evals.md)** if your system takes actions or queries structured data.
+5. **Read [03 · Generation quality & safety](./03-generation-quality-and-safety-evals.md)** and **[06 · Instruction & citation adherence](./06-instruction-and-citation-adherence.md)** to enforce style, policy, and source attribution.
+6. **Read [08 · Running offline experiments](./08-running-offline-experiments.md)** to turn these metrics into a repeatable release process.
 
 **Prerequisites:** Prepare a dataset that matches the shape of your target evaluation. See [Datasets](../01-datasets/README.md) and [dataset strategy](../01-datasets/01-dataset-strategy.md).
 

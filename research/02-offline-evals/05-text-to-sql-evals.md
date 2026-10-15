@@ -1,14 +1,21 @@
 # Text-to-SQL Evals
 
 > **TL;DR**
+>
 > - **Build a layered SQL evaluation stack.** Run fast syntax, schema, and safety checks before you execute any queries.
 > - **Anchor on execution accuracy against a frozen database.** Compare query results against SME-written gold SQL on a pinned snapshot.
 > - **Use string and AST similarity only for diagnostics.** Equivalent SQL queries often look completely different in text or syntax trees.
 > - **Evaluate efficiency, schema linking, and the final prose answer.** Check query cost, table recall, and numeric grounding in the user response.
 
-**You will learn:** The text-to-SQL eval ladder · Execution-accuracy comparators · SQL normalization with `sqlglot` · Spider, Spider 2.0, and BIRD benchmarks · Schema linking, safety, efficiency, and answer evals · Gold datasets with multiple valid queries  
-**Prerequisites:** [Evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)  
-**Related:** [Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Running offline experiments](./08-running-offline-experiments.md), [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md)
+- **You will learn:**
+    - The text-to-SQL eval ladder
+    - Execution-accuracy comparators
+    - SQL normalization with `sqlglot`
+    - Spider, Spider 2.0, and BIRD benchmarks
+    - Schema linking, safety, efficiency, and answer evals
+    - Gold datasets with multiple valid queries
+- **Prerequisites:** [Evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)
+- **Related:** [Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Running offline experiments](./08-running-offline-experiments.md), [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md)
 
 ---
 
@@ -44,15 +51,15 @@ flowchart TD
 | L1 | Syntactic validity | No | No | ~free | Valid SQL can still be totally wrong |
 | L2 | Schema validity | No (needs schema) | No | ~free | Correct tables, wrong logic |
 | L3 | Safety / policy | No (static) + optional runtime | No | ~free | Static checks miss runtime RLS issues |
-| — | Exact match (string / normalized) | No | Yes | ~free | Massive false negatives |
-| — | Component match (clause F1) | No | Yes | ~free | Penalizes equivalent rewrites |
-| — | AST / tree-edit similarity | No | Yes | cheap | Similar ≠ equivalent |
-| — | Token / embedding similarity | No | Yes | cheap | Very weak correlation with correctness |
+| Diagnostic | Exact match (string / normalized) | No | Yes | ~free | Massive false negatives |
+| Diagnostic | Component match (clause F1) | No | Yes | ~free | Penalizes equivalent rewrites |
+| Diagnostic | AST / tree-edit similarity | No | Yes | cheap | Similar ≠ equivalent |
+| Diagnostic | Token / embedding similarity | No | Yes | cheap | Very weak correlation with correctness |
 | L4 | Execution accuracy (EX) | Yes | Yes (gold SQL or gold result) | medium | False positives on "lucky" data |
 | L5 | Test-suite accuracy | Yes (many DBs) | Yes | high | Expensive to build test DBs |
 | L5 | LLM semantic-equivalence judge | No | Yes | medium | Judge errors on subtle logic |
 | L6 | VES / cost ratio / bytes scanned | Yes | Gold for ratio | medium | Noisy timings |
-| — | Schema-linking recall | No | Yes (derived from gold SQL) | ~free | Only measures the retrieval step |
+| Diagnostic | Schema-linking recall | No | Yes (derived from gold SQL) | ~free | Only measures the retrieval step |
 | L7 | Answer-level correctness | Yes | Yes | medium | Needs judge for phrasing |
 
 ---
@@ -80,7 +87,7 @@ flowchart TD
 - **Implemented in:** Custom scripts with `sqlglot`, or promptfoo's `is-sql` table and column restrictions.
 
 ```python
-# Requires: pip install sqlglot  (tested against a recent sqlglot release; APIs evolve — pin your version)
+# Requires: pip install sqlglot  (tested against a recent sqlglot release; APIs evolve, so pin your version)
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
@@ -128,7 +135,7 @@ Text-to-SQL is a **tool call with side effects on shared infrastructure**. Evalu
 | Cost ceiling | Runtime (`EXPLAIN` / dry run) | Yes | % over budget |
 
 ```python
-# Static safety checker — a defence-in-depth layer, NOT a substitute for a read-only DB role + RLS.
+# Static safety checker: a defence-in-depth layer, NOT a substitute for a read-only DB role + RLS.
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
@@ -186,7 +193,7 @@ Similarity metrics compare predicted SQL to gold SQL *as text or syntax trees*. 
 **Normalization with `sqlglot`.** The `sqlglot.optimizer.optimize` function qualifies columns, quotes identifiers, canonicalizes expressions, and expands positional `GROUP BY` clauses. Add table-alias canonicalization on top of the optimizer:
 
 ```python
-# Requires: pip install sqlglot. Optimizer rules change between versions — pin and snapshot-test.
+# Requires: pip install sqlglot. Optimizer rules change between versions; pin and snapshot-test.
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError, OptimizeError
@@ -227,26 +234,26 @@ Even after normalization, `FROM orders JOIN customers` and `FROM customers JOIN 
 - **Inputs required:** Predicted SQL and gold SQL.
 - **How to compute it:** Treat the items in each clause (select expressions, AND-ed predicates, group keys) as a set. Compute F1 between the gold and predicted sets:
 
-  ```text
-  P_c = |gold_c ∩ pred_c| / |pred_c|     R_c = |gold_c ∩ pred_c| / |gold_c|
-  F1_c = 2·P_c·R_c / (P_c + R_c)          (F1_c = 1 if both sets empty)
-  ```
+    ```text
+    P_c = |gold_c ∩ pred_c| / |pred_c|     R_c = |gold_c ∩ pred_c| / |gold_c|
+    F1_c = 2·P_c·R_c / (P_c + R_c)          (F1_c = 1 if both sets empty)
+    ```
 
 - **Score range & interpretation:** 0 to 1 per component. Aggregate these scores across your dataset to find weak spots. For example, a low `WHERE` F1 tells you to improve filter generation (date ranges, status codes) rather than joins.
 - **Worked example:**
 
-  ```text
-  gold: SELECT region, SUM(amount) AS total FROM orders
-        WHERE created_at >= '2024-01-01' AND status = 'paid'
-        GROUP BY region ORDER BY total DESC LIMIT 5
-  pred: SELECT region, SUM(amount) FROM orders
-        WHERE status = 'paid'
-        GROUP BY region ORDER BY SUM(amount) DESC LIMIT 5
+    ```text
+    gold: SELECT region, SUM(amount) AS total FROM orders
+          WHERE created_at >= '2024-01-01' AND status = 'paid'
+          GROUP BY region ORDER BY total DESC LIMIT 5
+    pred: SELECT region, SUM(amount) FROM orders
+          WHERE status = 'paid'
+          GROUP BY region ORDER BY SUM(amount) DESC LIMIT 5
 
-  select 1.0 · from 1.0 · where 0.67 · group_by 1.0 · having 1.0 · order_by 0.0 · limit 1.0
-  ```
+    select 1.0 · from 1.0 · where 0.67 · group_by 1.0 · having 1.0 · order_by 0.0 · limit 1.0
+    ```
 
-  The `WHERE` score of 0.67 correctly flags the missing date filter. However, the `ORDER BY` score of 0.0 is a **false alarm** because `total` and `SUM(amount)` are equivalent. This false alarm illustrates the main weakness of syntactic metrics.
+    The `WHERE` score of 0.67 correctly flags the missing date filter. However, the `ORDER BY` score of 0.0 is a **false alarm** because `total` and `SUM(amount)` are equivalent. This false alarm illustrates the main weakness of syntactic metrics.
 
 - **Pitfalls / gotchas:** Watch for alias-versus-expression mismatches, OR-ed predicates, and nested subqueries. Normalize both queries before you compare components.
 - **When to use / when not to:** Use component F1 for error analysis and clause-level debugging dashboards. Do not use it as a release gate.
@@ -328,7 +335,7 @@ def component_scores(gold_sql: str, pred_sql: str) -> dict[str, float]:
 | Duplicates | Compare as **multisets** (keep duplicates) | `SELECT DISTINCT` vs not can matter (counts) |
 | Column order | Ignore (find a column permutation) | `SELECT a, b` vs `SELECT b, a` answer the same question |
 | Column names / aliases | Ignore | Aliases are presentation |
-| Extra columns | Fail by default; optionally allow "pred ⊇ gold columns" | Extra context columns are often harmless for a chat answer — decide per use case |
+| Extra columns | Fail by default; optionally allow "pred ⊇ gold columns" | Extra context columns are often harmless for a chat answer; decide per use case |
 | Floats | Round to ~6 decimals or use relative tolerance | `AVG` across engines/plans differs in low bits |
 | Decimals / ints | Cast numerics to float before compare | `Decimal('10.0')` vs `10` |
 | Dates / timestamps | ISO-format; normalize timezone | Drivers return different types |
@@ -338,11 +345,11 @@ def component_scores(gold_sql: str, pred_sql: str) -> dict[str, float]:
 
 - **Score range & interpretation:** 0 to 1. Anchor your evaluation stack and release gates on this metric, provided your gold dataset is reliable.
 - **Pitfalls / gotchas:**
-  - **False positives on lucky data.** A query that omits `status = 'paid'` still passes if every row in the snapshot is paid. Empty-result matches are the worst offenders. Mitigate this with test suites (§5.2), multiple snapshots, and seeded edge-case fixtures.
-  - **False negatives on valid alternatives.** A prompt asking for "top customers" might validly use `LIMIT 5` or `LIMIT 10`. Store **multiple gold queries** or tag the item as ambiguous.
-  - **Data drift.** Stored gold *results* go stale when warehouse data changes. Store gold *SQL* instead, and execute both queries against the same pinned snapshot (time-travel `AS OF`, a cloned schema, or a fixture database).
-  - **Non-determinism.** Queries can be non-deterministic due to `LIMIT` without `ORDER BY`, ties in `ORDER BY ... LIMIT k`, or functions like `NOW()` and `CURRENT_DATE`. Freeze the reference date in your eval harness and make gold queries deterministic.
-  - **Timeouts and cost.** Enforce a statement timeout and a cost ceiling on your evaluation database connection.
+    - **False positives on lucky data.** A query that omits `status = 'paid'` still passes if every row in the snapshot is paid. Empty-result matches are the worst offenders. Mitigate this with test suites (§5.2), multiple snapshots, and seeded edge-case fixtures.
+    - **False negatives on valid alternatives.** A prompt asking for "top customers" might validly use `LIMIT 5` or `LIMIT 10`. Store **multiple gold queries** or tag the item as ambiguous.
+    - **Data drift.** Stored gold *results* go stale when warehouse data changes. Store gold *SQL* instead, and execute both queries against the same pinned snapshot (time-travel `AS OF`, a cloned schema, or a fixture database).
+    - **Non-determinism.** Queries can be non-deterministic due to `LIMIT` without `ORDER BY`, ties in `ORDER BY ... LIMIT k`, or functions like `NOW()` and `CURRENT_DATE`. Freeze the reference date in your eval harness and make gold queries deterministic.
+    - **Timeouts and cost.** Enforce a statement timeout and a cost ceiling on your evaluation database connection.
 - **When to use / when not to:** Always use execution accuracy once you have a database snapshot. It is the closest fast proxy for whether the user got the right data.
 - **Implemented in:** Spider and BIRD official eval scripts, RAGAS `DataCompyScore`, or the custom comparator below.
 
@@ -420,9 +427,9 @@ Derive `gold_is_ordered` from the parsed gold query (`sqlglot.parse_one(gold).ar
 - **Score range & interpretation:** 0 to 1. Test-suite accuracy is always less than or equal to single-database EX because it is strictly harder to pass. The gap between EX and test-suite accuracy estimates your false-positive rate.
 - **Pitfalls / gotchas:** Generating realistic synthetic fixtures for a complex enterprise warehouse with hundreds of tables, foreign keys, and business invariants is difficult. Random data can violate business invariants and cause spurious mismatches.
 - **When to use / when not to:** Use on release candidates and to estimate how much single-snapshot EX over-counts. In enterprise warehouses, approximate test-suite accuracy with three practical steps:
-  - [ ] Run EX across **2–3 different snapshots or date partitions** of the warehouse.
-  - [ ] Build a **small seeded fixture database** with edge cases (NULLs, `LIMIT` ties, duplicate names, timezone boundaries, soft-deleted rows).
-  - [ ] **Mutation-check your fixture suite:** Mutate gold queries (drop predicates, flip `>` to `>=`) and verify every mutant fails.
+    - [ ] Run EX across **2–3 different snapshots or date partitions** of the warehouse.
+    - [ ] Build a **small seeded fixture database** with edge cases (NULLs, `LIMIT` ties, duplicate names, timezone boundaries, soft-deleted rows).
+    - [ ] **Mutation-check your fixture suite:** Mutate gold queries (drop predicates, flip `>` to `>=`) and verify every mutant fails.
 - **Implemented in:** [taoyds/test-suite-sql-eval](https://github.com/taoyds/test-suite-sql-eval) (for Spider-format schemas) or custom harnesses.
 
 ### 5.3 Valid Efficiency Score (VES, BIRD)
@@ -431,12 +438,13 @@ Derive `gold_is_ordered` from the parsed gold query (`sqlglot.parse_one(gold).ar
 - **Inputs required:** Predicted SQL, gold SQL, database connection, and execution timings.
 - **How to compute it:**
 
-  ```text
-  VES = (1/N) · Σ_n  1[result(pred_n) == result(gold_n)] · R(n)
-  R(n) = sqrt( time(gold_n) / time(pred_n) )
-  ```
+    ```text
+    VES = (1/N) · Σ_n  1[result(pred_n) == result(gold_n)] · R(n)
+    R(n) = sqrt( time(gold_n) / time(pred_n) )
+    ```
 
-  Incorrect queries score 0. Correct queries earn higher credit when they run faster relative to the gold query. BIRD Mini-Dev also introduced a **Reward-based VES (R-VES)** that assigns reward points by time-ratio buckets for greater stability, alongside a result-table **Soft F1-score**. See the [BIRD Mini-Dev repo](https://github.com/bird-bench/mini_dev) for details.
+    Incorrect queries score 0. Correct queries earn higher credit when they run faster relative to the gold query. BIRD Mini-Dev also introduced a **Reward-based VES (R-VES)** that assigns reward points by time-ratio buckets for greater stability, alongside a result-table **Soft F1-score**. See the [BIRD Mini-Dev repo](https://github.com/bird-bench/mini_dev) for details.
+
 - **Score range & interpretation:** 0 or higher (can exceed EX if predicted queries run faster than gold). If VES is much lower than EX, your generated queries are correct but slow.
 - **Pitfalls / gotchas:** Wall-clock timings fluctuate due to caching, concurrency, and warehouse auto-scaling. Run repeated executions, take the median, and control cache state consistently.
 - **When to use / when not to:** Use when query cost or latency matters in your warehouse. For enterprise cloud warehouses, deterministic cost proxies (§7) are usually more stable than wall-clock timings.
@@ -450,15 +458,15 @@ Derive `gold_is_ordered` from the parsed gold query (`sqlglot.parse_one(gold).ar
 - **Inputs required:** Question, relevant schema (DDL and column descriptions), gold SQL, predicted SQL, and optional result previews.
 - **How to compute it:** Run a binary judge prompt (see [LLM-as-a-judge](./07-llm-as-a-judge.md) for prompt design and calibration):
 
-  ```text
-  You are a senior analytics engineer. Decide whether CANDIDATE SQL answers the QUESTION
-  equivalently to REFERENCE SQL on ANY valid database state for this SCHEMA.
-  Consider: filters (incl. inclusive/exclusive bounds), join types and NULL handling, DISTINCT,
-  aggregation grain, GROUP BY keys, ORDER BY + LIMIT ties, date/timezone logic.
-  Ignore: aliases, formatting, column order, CTE vs subquery style.
-  First list each semantic difference you find, then output JSON:
-  {"differences": [...], "equivalent": true|false}
-  ```
+    ```text
+    You are a senior analytics engineer. Decide whether CANDIDATE SQL answers the QUESTION
+    equivalently to REFERENCE SQL on ANY valid database state for this SCHEMA.
+    Consider: filters (incl. inclusive/exclusive bounds), join types and NULL handling, DISTINCT,
+    aggregation grain, GROUP BY keys, ORDER BY + LIMIT ties, date/timezone logic.
+    Ignore: aliases, formatting, column order, CTE vs subquery style.
+    First list each semantic difference you find, then output JSON:
+    {"differences": [...], "equivalent": true|false}
+    ```
 
 - **Score range & interpretation:** 0 to 1 (fraction judged equivalent). Use this judge to resolve EX failures, catch EX false positives on lucky data, or evaluate without database access.
 - **Pitfalls / gotchas:** LLM judges often miss subtle NULL, `LEFT JOIN`, or boundary condition bugs, and surface similarity can fool them. Validate the judge against human labels (aim for TPR and TNR ≥ 0.9) before trusting it. Never use an LLM judge *instead of* execution when a database is available. Use it *alongside* execution.
@@ -509,12 +517,12 @@ Enterprise warehouse schemas rarely fit in a single prompt. Most agents first **
 - **Inputs required:** Question, retrieved schema elements (tables and columns), and gold schema elements. You can **derive gold schema elements automatically** by extracting tables and columns from your gold SQL queries.
 - **How to compute it:**
 
-  ```text
-  table_recall@k  = |gold_tables ∩ retrieved_tables@k|  / |gold_tables|
-  column_recall@k = |gold_cols   ∩ retrieved_cols@k|    / |gold_cols|
-  all_tables_hit  = 1 if gold_tables ⊆ retrieved_tables@k else 0     # strict, per question
-  precision@k     = |gold ∩ retrieved@k| / k                         # prompt-noise proxy
-  ```
+    ```text
+    table_recall@k  = |gold_tables ∩ retrieved_tables@k|  / |gold_tables|
+    column_recall@k = |gold_cols   ∩ retrieved_cols@k|    / |gold_cols|
+    all_tables_hit  = 1 if gold_tables ⊆ retrieved_tables@k else 0     # strict, per question
+    precision@k     = |gold ∩ retrieved@k| / k                         # prompt-noise proxy
+    ```
 
 - **Score range & interpretation:** 0 to 1. Focus on **`all_tables_hit`** because partial table recall is almost as bad as zero recall for join queries. Track precision secondarily, since extra irrelevant tables increase prompt length, confusion, and cost.
 - **Worked example:** Suppose the gold query uses `{orders, customers}`. At `k=5`, the retriever returns `{orders, order_items, products, regions, customers}`, giving `table_recall = 1.0`, `all_tables_hit = 1`, and `precision = 0.4`. At `k=3`, it returns `{orders, order_items, products}`, dropping recall to `0.5` and `all_tables_hit` to `0`, which causes generation to fail or hallucinate a column.
@@ -554,7 +562,7 @@ Most agents summarize SQL result rows into natural language (for example, "EMEA 
 | Eval | Inputs | Method | Ground truth? |
 |---|---|---|---|
 | **Numeric grounding** | answer, result rows | Extract numbers from answer; each must match a value (or simple derivation) in the result within tolerance | No |
-| **Answer faithfulness to result** | answer, result rows | LLM judge: is every claim supported by the rows? (same idea as RAG faithfulness — see [End-to-end RAG evals](./01-end-to-end-rag-evals.md)) | No |
+| **Answer faithfulness to result** | answer, result rows | LLM judge: is every claim supported by the rows? (same idea as RAG faithfulness; see [End-to-end RAG evals](./01-end-to-end-rag-evals.md)) | No |
 | **Answer correctness** | answer, gold answer or gold result | LLM judge or numeric compare vs gold result | Yes |
 | **Completeness** | answer, question, result | Judge: does it answer all parts (e.g. "and QoQ change")? | No |
 | **Empty / error handling** | answer, result | Deterministic: empty result → answer must say "no data" and not invent numbers | No |
@@ -564,7 +572,7 @@ Most agents summarize SQL result rows into natural language (for example, "EMEA 
 ```python
 import re
 
-# Standalone numbers like "$4.12M", "1,200", "8%" — but not the "3" in "Q3".
+# Standalone numbers like "$4.12M", "1,200", "8%", but not the "3" in "Q3".
 NUM = re.compile(r"(?<![\w.])-?\$?\d[\d,]*(?:\.\d+)?(?:\s*[kKmMbB%])?(?!\w)")
 SCALE = {"k": 1e3, "m": 1e6, "b": 1e9}
 
@@ -679,10 +687,14 @@ Follow this checklist when building your dataset:
 
 ## Further reading
 
-- Yu et al., 2018 — [Spider: A Large-Scale Human-Labeled Dataset for Complex and Cross-Domain Semantic Parsing and Text-to-SQL Task](https://arxiv.org/abs/1809.08887) · eval code: [taoyds/spider](https://github.com/taoyds/spider)
-- Zhong, Yu & Klein, 2020 — [Semantic Evaluation for Text-to-SQL with Distilled Test Suites](https://arxiv.org/abs/2010.02840) · code: [taoyds/test-suite-sql-eval](https://github.com/taoyds/test-suite-sql-eval)
-- Li et al., 2023 — [Can LLM Already Serve as A Database Interface? A BIg Bench for Large-Scale Database Grounded Text-to-SQLs (BIRD)](https://arxiv.org/abs/2305.03111) · [BIRD site](https://bird-bench.github.io/)
-- Lei et al., 2024 — [Spider 2.0: Evaluating Language Models on Real-World Enterprise Text-to-SQL Workflows](https://arxiv.org/abs/2411.07763)
-- [sqlglot](https://github.com/tobymao/sqlglot) — SQL parser, transpiler, optimizer and diff
-- [RAGAS SQL metrics](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/sql/) — `DataCompyScore`, `SQLSemanticEquivalence`
-- In this repo: [LLM-as-a-judge](./07-llm-as-a-judge.md) · [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md) · [Access control & RBAC](../04-guardrails/06-access-control-rbac.md) · [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
+- Yu et al., 2018, [Spider: A Large-Scale Human-Labeled Dataset for Complex and Cross-Domain Semantic Parsing and Text-to-SQL Task](https://arxiv.org/abs/1809.08887) · eval code: [taoyds/spider](https://github.com/taoyds/spider)
+- Zhong, Yu & Klein, 2020, [Semantic Evaluation for Text-to-SQL with Distilled Test Suites](https://arxiv.org/abs/2010.02840) · code: [taoyds/test-suite-sql-eval](https://github.com/taoyds/test-suite-sql-eval)
+- Li et al., 2023, [Can LLM Already Serve as A Database Interface? A BIg Bench for Large-Scale Database Grounded Text-to-SQLs (BIRD)](https://arxiv.org/abs/2305.03111) · [BIRD site](https://bird-bench.github.io/)
+- Lei et al., 2024, [Spider 2.0: Evaluating Language Models on Real-World Enterprise Text-to-SQL Workflows](https://arxiv.org/abs/2411.07763)
+- [sqlglot](https://github.com/tobymao/sqlglot): SQL parser, transpiler, optimizer and diff
+- [RAGAS SQL metrics](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/sql/): `DataCompyScore`, `SQLSemanticEquivalence`
+- **In this repo:**
+    - [LLM-as-a-judge](./07-llm-as-a-judge.md)
+    - [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md)
+    - [Access control & RBAC](../04-guardrails/06-access-control-rbac.md)
+    - [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)

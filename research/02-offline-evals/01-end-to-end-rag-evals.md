@@ -1,14 +1,19 @@
 # End-to-End RAG Evals
 
 > **TL;DR**
+>
 > - **Start with the RAG triad.** Measure context relevance, groundedness, and answer relevance without any ground-truth labels.
 > - **Add reference-based metrics for truth.** Use answer correctness and context recall on a golden dataset to verify factual accuracy.
 > - **Evaluate abstention on unanswerable queries.** Measure both missed abstentions and false refusals on out-of-scope or restricted questions.
 > - **Diagnose failures with the 2×2 matrix.** Cross-reference context recall and faithfulness to isolate retrieval bugs from generation bugs.
 
-**You will learn:** The RAG triad and RAGAS-style metrics · Abstention evaluation · Scorecard design · Retrieval × generation 2×2 diagnosis  
-**Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)  
-**Related:** [Retrieval metrics](./02-retrieval-metrics.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Citation adherence](./06-instruction-and-citation-adherence.md)
+- **You will learn:**
+    - The RAG triad and RAGAS-style metrics
+    - Abstention evaluation
+    - Scorecard design
+    - Retrieval × generation 2×2 diagnosis
+- **Prerequisites:** [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)
+- **Related:** [Retrieval metrics](./02-retrieval-metrics.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Citation adherence](./06-instruction-and-citation-adherence.md)
 
 ---
 
@@ -19,7 +24,7 @@ Every E2E RAG metric uses a subset of five core artefacts:
 | Symbol | Name (RAGAS field name) | Produced by | Needed for |
 |---|---|---|---|
 | `q` | Question (`user_input`) | Dataset | All metrics |
-| `C` | Retrieved contexts (`retrieved_contexts`) — ordered list of chunks | Your system | Faithfulness, context precision/relevance, context recall, noise sensitivity |
+| `C` | Retrieved contexts (`retrieved_contexts`): ordered list of chunks | Your system | Faithfulness, context precision/relevance, context recall, noise sensitivity |
 | `a` | Generated answer (`response`) | Your system | Faithfulness, answer relevancy, answer correctness |
 | `a*` | Reference answer (`reference`) | Dataset (SME or synthetic) | Answer correctness, semantic similarity, context recall, context precision (with reference) |
 | `C*` | Reference contexts / relevant chunk IDs | Dataset | Classic retrieval metrics ([02](./02-retrieval-metrics.md)), context entities recall |
@@ -82,24 +87,26 @@ Start with the RAG triad because it requires no ground-truth labels. Add referen
 - **What it measures:** The fraction of claims in the answer that the retrieved context supports. This metric measures *support*, not factual truth.
 - **Inputs required:** `q`, `a`, `C`. No ground truth required.
 - **How to compute it:**
-  1. **Decompose claims:** Prompt an LLM to split `a` into atomic, self-contained statements. Resolve all pronouns (for example, turn "It was founded in 2010" into "Acme was founded in 2010").
-  2. **Verify claims:** Check whether `C` entails each claim. Use an LLM judge or a specialized NLI model such as a cross-encoder or Vectara's HHEM.
-  3. **Aggregate the score:**
-  ```text
-  faithfulness = |claims supported by C| / |claims in a|
-  ```
+    1. **Decompose claims:** Prompt an LLM to split `a` into atomic, self-contained statements. Resolve all pronouns (for example, turn "It was founded in 2010" into "Acme was founded in 2010").
+    2. **Verify claims:** Check whether `C` entails each claim. Use an LLM judge or a specialized NLI model such as a cross-encoder or Vectara's HHEM.
+    3. **Aggregate the score:**
+
+        ```text
+        faithfulness = |claims supported by C| / |claims in a|
+        ```
+
 - **Score range & interpretation:** 0 to 1, where higher is better. A score of 1.0 means every claim traces back to the retrieved context.
 - **Worked example:**
-  - `q`: "How many days of parental leave do employees in India get?"
-  - `C`: `["Employees in India are entitled to 26 weeks of paid maternity leave.", "Paternity leave in India is 10 working days."]`
-  - `a`: "Mothers get 26 weeks of paid leave, fathers get 10 working days, and both can extend by 4 weeks unpaid."
-  - Claims: (1) mothers get 26 weeks paid ✅, (2) fathers get 10 working days ✅, (3) both can extend 4 weeks unpaid ❌.
-  - Result: **faithfulness = 2/3 ≈ 0.67**.
+    - `q`: "How many days of parental leave do employees in India get?"
+    - `C`: `["Employees in India are entitled to 26 weeks of paid maternity leave.", "Paternity leave in India is 10 working days."]`
+    - `a`: "Mothers get 26 weeks of paid leave, fathers get 10 working days, and both can extend by 4 weeks unpaid."
+    - Claims: (1) mothers get 26 weeks paid ✅, (2) fathers get 10 working days ✅, (3) both can extend 4 weeks unpaid ❌.
+    - Result: **faithfulness = 2/3 ≈ 0.67**.
 - **Pitfalls and gotchas:**
-  - **Grounded does not mean correct.** If the retriever returns a superseded 2021 policy, a faithful answer is still factually wrong.
-  - **Claim decomposition quality drives the score.** Long answers generate more claims and increase judge variance. Very short answers like "Yes." may produce zero claims. Track zero-claim answers separately as `None` rather than inflating your mean score.
-  - **Common-knowledge claims may fail verification.** A strict judge marks "Paris is in France" as unsupported if the context omits it. Decide upfront whether your enterprise assistant may use parametric knowledge.
-  - **Paraphrases and rounding confuse judges.** Expressions like "~26 weeks" or "six months" can trigger false negatives under strict entailment. Spot-check judge disagreements regularly.
+    - **Grounded does not mean correct.** If the retriever returns a superseded 2021 policy, a faithful answer is still factually wrong.
+    - **Claim decomposition quality drives the score.** Long answers generate more claims and increase judge variance. Very short answers like "Yes." may produce zero claims. Track zero-claim answers separately as `None` rather than inflating your mean score.
+    - **Common-knowledge claims may fail verification.** A strict judge marks "Paris is in France" as unsupported if the context omits it. Decide upfront whether your enterprise assistant may use parametric knowledge.
+    - **Paraphrases and rounding confuse judges.** Expressions like "~26 weeks" or "six months" can trigger false negatives under strict entailment. Spot-check judge disagreements regularly.
 - **When to use it:** Run faithfulness on every RAG answer as your primary reference-free hallucination check. If the answer uses tool outputs, include those tool outputs in `C` before scoring.
 - **Implemented in:** RAGAS (`Faithfulness`), TruLens (groundedness), DeepEval (`FaithfulnessMetric`), Phoenix (hallucination eval), promptfoo (`context-faithfulness`).
 
@@ -127,20 +134,23 @@ Return JSON: [{"statement": ..., "reason": ..., "verdict": "yes"|"no"}]
 - **What it measures:** How directly the answer addresses the question. It penalizes incomplete, evasive, or padded answers, but it does **not** measure factual correctness.
 - **Inputs required:** `q`, `a` (some RAGAS versions also use `C`). Requires an embedding model, but no ground truth.
 - **How to compute it (RAGAS reverse-question method):**
-  1. Prompt an LLM to generate `N` questions that the answer `a` would directly answer (typically `N = 3`).
-  2. Embed each generated question `g_i` and the original question `q`.
-  3. Compute the mean cosine similarity:
-  ```text
-  answer_relevancy = (1/N) * Σ_i cos( E(g_i), E(q) )
-  ```
-  RAGAS also checks whether the answer is **noncommittal** (such as "I'm not sure" or "It depends") and assigns a score of 0.
+    1. Prompt an LLM to generate `N` questions that the answer `a` would directly answer (typically `N = 3`).
+    2. Embed each generated question `g_i` and the original question `q`.
+    3. Compute the mean cosine similarity:
+
+        ```text
+        answer_relevancy = (1/N) * Σ_i cos( E(g_i), E(q) )
+        ```
+
+    RAGAS also checks whether the answer is **noncommittal** (such as "I'm not sure" or "It depends") and assigns a score of 0.
+
 - **Alternative (TruLens / DeepEval method):** Prompt an LLM judge to rate relevance directly from `q` and `a`. DeepEval splits the answer into statements and computes the fraction of statements relevant to the question.
 - **Score range & interpretation:** Roughly 0 to 1. Because embedding cosine similarities rarely reach 0 or 1, absolute values depend on your embedding model. Compare **relative** scores across variants instead of setting a universal threshold.
 - **Worked example:** Suppose `q` is "What is the VPN client for macOS?" and `a` is "Use GlobalProtect. Install it from Self Service." The generated questions ("Which VPN client should Mac users install?", "Where do I get the macOS VPN client?") match `q` and score high. If `a` says "IT Security reviews VPN policies annually", the generated questions drift and produce a lower score.
 - **Pitfalls and gotchas:**
-  - **Confidently wrong answers can score high.** The metric rewards answers that restate the question, even when the facts are wrong.
-  - **Noncommittal rules penalize valid abstentions.** An honest "I don't have information about that" receives a 0 score. **Exclude unanswerable questions** from this metric and evaluate them with [abstention correctness](#311-abstention-correctness-i-dont-know).
-  - **Scores shift across embedding models.** Pin your embedding model version.
+    - **Confidently wrong answers can score high.** The metric rewards answers that restate the question, even when the facts are wrong.
+    - **Noncommittal rules penalize valid abstentions.** An honest "I don't have information about that" receives a 0 score. **Exclude unanswerable questions** from this metric and evaluate them with [abstention correctness](#311-abstention-correctness-i-dont-know).
+    - **Scores shift across embedding models.** Pin your embedding model version.
 - **When to use it:** Use it as a fast triad check to catch topic drift and verbosity. Never use it as a proxy for factual correctness.
 - **Implemented in:** RAGAS (`ResponseRelevancy`/`AnswerRelevancy`), TruLens (answer relevance), DeepEval (`AnswerRelevancyMetric`), promptfoo (`answer-relevance`).
 
@@ -151,31 +161,35 @@ Return JSON: [{"statement": ..., "reason": ..., "verdict": "yes"|"no"}]
 - **What it measures:** How closely the generated answer agrees with the reference answer. This metric directly measures whether the answer is factually right.
 - **Inputs required:** `q`, `a`, `a*`. **Requires ground truth.**
 - **How to compute it (RAGAS method):** Combine **factual correctness** and **semantic similarity** using a weighted average:
-  1. Decompose both `a` and `a*` into atomic claims.
-  2. Classify each claim into one of three buckets:
-     - **TP:** A claim in `a` that `a*` supports.
-     - **FP:** A claim in `a` that `a*` does not support (extra or incorrect information).
-     - **FN:** A claim in `a*` that is missing from `a`.
-  3. Compute the factual F1 score:
-  ```text
-  F1_factual = TP / (TP + 0.5 * (FP + FN))
-  ```
-  4. Compute semantic similarity `S = cos(E(a), E(a*))` (see section 3.4).
-  5. Combine both scores (RAGAS defaults to 0.75 factual and 0.25 semantic):
-  ```text
-  answer_correctness = w_f * F1_factual + w_s * S       # w_f + w_s = 1
-  ```
+    1. Decompose both `a` and `a*` into atomic claims.
+    2. Classify each claim into one of three buckets:
+        - **TP:** A claim in `a` that `a*` supports.
+        - **FP:** A claim in `a` that `a*` does not support (extra or incorrect information).
+        - **FN:** A claim in `a*` that is missing from `a`.
+    3. Compute the factual F1 score:
+
+        ```text
+        F1_factual = TP / (TP + 0.5 * (FP + FN))
+        ```
+
+    4. Compute semantic similarity `S = cos(E(a), E(a*))` (see section 3.4).
+    5. Combine both scores (RAGAS defaults to 0.75 factual and 0.25 semantic):
+
+        ```text
+        answer_correctness = w_f * F1_factual + w_s * S       # w_f + w_s = 1
+        ```
+
 - **Score range & interpretation:** 0 to 1. The factual F1 score drives the result, while semantic similarity smooths over valid paraphrases.
 - **Worked example:**
-  - `a*`: "Expense reports must be submitted within 30 days. Receipts are required for amounts over $25."
-  - `a`: "Submit expense reports within 30 days. Receipts are needed for any amount. Approval is by your manager."
-  - Classification: TP = 1 ("within 30 days"), FP = 2 ("any amount" contradicts the reference, "manager approval" is absent from the reference), FN = 1 ("receipts over $25").
-  - `F1_factual = 1 / (1 + 0.5 * (2 + 1)) = 1 / 2.5 = 0.40`.
-  - With `S = 0.88`, `answer_correctness = 0.75 * 0.40 + 0.25 * 0.88 = 0.30 + 0.22 = 0.52`.
+    - `a*`: "Expense reports must be submitted within 30 days. Receipts are required for amounts over $25."
+    - `a`: "Submit expense reports within 30 days. Receipts are needed for any amount. Approval is by your manager."
+    - Classification: TP = 1 ("within 30 days"), FP = 2 ("any amount" contradicts the reference, "manager approval" is absent from the reference), FN = 1 ("receipts over $25").
+    - `F1_factual = 1 / (1 + 0.5 * (2 + 1)) = 1 / 2.5 = 0.40`.
+    - With `S = 0.88`, `answer_correctness = 0.75 * 0.40 + 0.25 * 0.88 = 0.30 + 0.22 = 0.52`.
 - **Pitfalls and gotchas:**
-  - **Extra true facts count as false positives** if the reference omits them. Write comprehensive references, or configure `FactualCorrectness` to use **precision-only** or **recall-only** mode.
-  - **Reference answers grow stale** when company policies change. Version your golden dataset alongside your document corpus.
-  - **LLM judges are overkill for short factoids.** Use normalized exact match or numeric tolerance for single numbers, dates, or names.
+    - **Extra true facts count as false positives** if the reference omits them. Write comprehensive references, or configure `FactualCorrectness` to use **precision-only** or **recall-only** mode.
+    - **Reference answers grow stale** when company policies change. Version your golden dataset alongside your document corpus.
+    - **LLM judges are overkill for short factoids.** Use normalized exact match or numeric tolerance for single numbers, dates, or names.
 - **When to use it:** Use answer correctness as the primary metric for offline regression suites with golden datasets. You cannot run it on unlabeled production traffic.
 - **Implemented in:** RAGAS (`AnswerCorrectness`, `FactualCorrectness`), Phoenix (QA correctness eval), promptfoo (`factuality`), DeepEval (`GEval` with a correctness rubric).
 
@@ -198,10 +212,13 @@ print(answer_correctness(tp=1, fp=2, fn=1, sem_sim=0.88))  # 0.52
 - **What it measures:** Meaning-level similarity between `a` and `a*`.
 - **Inputs required:** `a`, `a*`. **Requires ground truth** plus an embedding model or cross-encoder.
 - **How to compute it:**
-  ```text
-  semantic_similarity = cos( E(a), E(a*) ) = (E(a) · E(a*)) / (‖E(a)‖ ‖E(a*)‖)
-  ```
-  You can optionally apply a threshold to convert the score into a binary pass/fail result. Cross-encoder models score `(a, a*)` jointly and usually outperform bi-encoder cosine similarity. For token-level matching, see BERTScore in [03 — Generation quality and safety evals](./03-generation-quality-and-safety-evals.md#reference-based-text-metrics-bleu-rouge-bertscore).
+
+    ```text
+    semantic_similarity = cos( E(a), E(a*) ) = (E(a) · E(a*)) / (‖E(a)‖ ‖E(a*)‖)
+    ```
+
+    You can optionally apply a threshold to convert the score into a binary pass/fail result. Cross-encoder models score `(a, a*)` jointly and usually outperform bi-encoder cosine similarity. For token-level matching, see BERTScore in [03 · Generation quality and safety evals](./03-generation-quality-and-safety-evals.md#reference-based-text-metrics-bleu-rouge-bertscore).
+
 - **Score range & interpretation:** Modern embedding models compress most pairs into a narrow high band (such as 0.70 to 0.95). Small score changes matter, and absolute thresholds do not transfer across embedding models.
 - **Worked example:** "Refunds take 5–7 business days" vs "Expect your refund within a week" produces high similarity. However, "Refunds take 5–7 business days" vs "Refunds take 50–70 business days" **also produces high similarity**.
 - **Pitfalls and gotchas:** Embeddings often miss negations, number changes, and entity swaps. Never use semantic similarity as your sole correctness metric.
@@ -215,24 +232,26 @@ print(answer_correctness(tp=1, fp=2, fn=1, sem_sim=0.88))  # 0.52
 - **What it measures:** Whether your retriever ranks *relevant* chunks *above* irrelevant chunks. It acts as a rank-aware signal-to-noise ratio for the context window.
 - **Inputs required:** `q`, ordered `C`, and either `a*` (**with reference**) or `a` (**without reference**, which RAGAS calls *context utilization*). Ground truth is optional.
 - **How to compute it:**
-  1. For each chunk at rank `k`, prompt an LLM judge to score relevance `v_k ∈ {0,1}`. Ask *"Was this chunk useful in arriving at the reference answer?"* (or *"...the given answer?"* without a reference).
-  2. Compute rank-weighted average precision over the retrieved list:
-  ```text
-  precision@k = (Σ_{i=1..k} v_i) / k
+    1. For each chunk at rank `k`, prompt an LLM judge to score relevance `v_k ∈ {0,1}`. Ask *"Was this chunk useful in arriving at the reference answer?"* (or *"...the given answer?"* without a reference).
+    2. Compute rank-weighted average precision over the retrieved list:
 
-  context_precision@K = Σ_{k=1..K} ( precision@k × v_k ) / (number of relevant chunks in top K)
-  ```
+        ```text
+        precision@k = (Σ_{i=1..k} v_i) / k
+
+        context_precision@K = Σ_{k=1..K} ( precision@k × v_k ) / (number of relevant chunks in top K)
+        ```
+
 - **Score range & interpretation:** 0 to 1. A score of 1.0 means all relevant chunks appear at the top of the list. Placing the same chunks lower in the ranking reduces the score.
 - **Worked example:** Suppose `K = 4` and the relevance vector is `[1, 0, 1, 0]`.
-  - `precision@1 = 1/1 = 1.0` (`v₁ = 1`) → contributes `1.0`
-  - `precision@3 = 2/3 ≈ 0.667` (`v₃ = 1`) → contributes `0.667`
-  - Sum = `1.667` across `2` relevant chunks → **0.83**.
-  - Reordering the list to `[0, 0, 1, 1]` yields `(1/3 + 2/4) / 2 ≈` **0.42**.
+    - `precision@1 = 1/1 = 1.0` (`v₁ = 1`) → contributes `1.0`
+    - `precision@3 = 2/3 ≈ 0.667` (`v₃ = 1`) → contributes `0.667`
+    - Sum = `1.667` across `2` relevant chunks → **0.83**.
+    - Reordering the list to `[0, 0, 1, 1]` yields `(1/3 + 2/4) / 2 ≈` **0.42**.
 - **Pitfalls and gotchas:**
-  - **The reference-free variant anchors on `a`.** If the generated answer is wrong, the judge evaluates chunk usefulness against a wrong target.
-  - **The denominator only counts retrieved relevant chunks.** It ignores relevant chunks that your retriever missed completely. Always pair context precision with context recall.
-  - **Judge calls scale with `K`.** Scoring 500 questions at `K = 10` requires 5,000 judge calls. Cache judgments by `(q, chunk_id)`.
-- **When to use it:** Use it when tuning rerankers, chunk sizes, or cutoff `K`. If you already have labeled chunk IDs, use deterministic retrieval metrics from [02 — Retrieval metrics](./02-retrieval-metrics.md) instead.
+    - **The reference-free variant anchors on `a`.** If the generated answer is wrong, the judge evaluates chunk usefulness against a wrong target.
+    - **The denominator only counts retrieved relevant chunks.** It ignores relevant chunks that your retriever missed completely. Always pair context precision with context recall.
+    - **Judge calls scale with `K`.** Scoring 500 questions at `K = 10` requires 5,000 judge calls. Cache judgments by `(q, chunk_id)`.
+- **When to use it:** Use it when tuning rerankers, chunk sizes, or cutoff `K`. If you already have labeled chunk IDs, use deterministic retrieval metrics from [02 · Retrieval metrics](./02-retrieval-metrics.md) instead.
 - **Implemented in:** RAGAS (`ContextPrecision`, `ContextUtilization`, LLM and non-LLM variants), DeepEval (`ContextualPrecisionMetric`).
 
 ```python
@@ -255,9 +274,11 @@ assert round(context_precision([0, 0, 1, 1]), 2) == 0.42
 - **What it measures:** The fraction of retrieved content that is relevant to the question, ignoring chunk rank and reference answers.
 - **Inputs required:** `q`, `C`. No ground truth required.
 - **How to compute it:** Prompt an LLM judge to score each chunk for relevance to `q` (binary or 0–3 scale), then average across chunks. DeepEval extracts individual statements from each chunk and computes `relevant statements / total statements`.
-  ```text
-  context_relevance = (1/|C|) * Σ_c relevance(q, c)
-  ```
+
+    ```text
+    context_relevance = (1/|C|) * Σ_c relevance(q, c)
+    ```
+
 - **Score range & interpretation:** 0 to 1. Low scores indicate a noisy context window that increases distraction and hallucination risk.
 - **Pitfalls and gotchas:** Long chunks with a single relevant sentence receive inconsistent scores. Define clearly in your rubric whether a chunk must *contain* relevant info or *mostly consist* of relevant info.
 - **When to use it:** Use it for online monitoring as the retrieval leg of the RAG triad. Prefer context precision whenever chunk rank matters.
@@ -270,17 +291,20 @@ assert round(context_precision([0, 0, 1, 1]), 2) == 0.42
 - **What it measures:** Whether the retrieved context contains all the facts needed to produce the reference answer.
 - **Inputs required:** `q`, `C`, `a*`. **Requires ground truth** (a reference answer, not labeled chunk IDs).
 - **How to compute it:**
-  1. Decompose `a*` into atomic claims.
-  2. Judge whether `C` supports each reference claim:
-  ```text
-  context_recall = |reference claims attributable to C| / |reference claims|
-  ```
-  If you have labeled relevant chunk IDs, use deterministic [recall@k](./02-retrieval-metrics.md#recallk) instead.
+    1. Decompose `a*` into atomic claims.
+    2. Judge whether `C` supports each reference claim:
+
+        ```text
+        context_recall = |reference claims attributable to C| / |reference claims|
+        ```
+
+    If you have labeled relevant chunk IDs, use deterministic [recall@k](./02-retrieval-metrics.md#recallk) instead.
+
 - **Score range & interpretation:** 0 to 1. Low context recall caps your maximum achievable answer correctness because the generator cannot use missing facts.
 - **Worked example:** Suppose `a*` states: "Laptops are refreshed every 3 years. Engineers may request a refresh at 2 years. Requests go through the IT portal." If `C` includes the 3-year rule and portal steps but omits the engineer exception, **context recall = 2/3 ≈ 0.67**.
 - **Pitfalls and gotchas:**
-  - **Unindexed facts cap recall below 1.0.** If an SME writes a reference answer from memory using facts absent from the corpus, no retriever can achieve 1.0.
-  - **Recall ignores noise.** Retrieving 50 chunks inflates recall, so always pair it with context precision.
+    - **Unindexed facts cap recall below 1.0.** If an SME writes a reference answer from memory using facts absent from the corpus, no retriever can achieve 1.0.
+    - **Recall ignores noise.** Retrieving 50 chunks inflates recall, so always pair it with context precision.
 - **When to use it:** Use context recall as your primary retrieval metric when you have reference answers but lack chunk-level labels.
 - **Implemented in:** RAGAS (`ContextRecall`, LLM and non-LLM variants), DeepEval (`ContextualRecallMetric`), promptfoo (`context-recall`).
 
@@ -291,12 +315,15 @@ assert round(context_precision([0, 0, 1, 1]), 2) == 0.42
 - **What it measures:** The fraction of named entities (people, products, dates, IDs, amounts) in the reference answer that appear in the retrieved context.
 - **Inputs required:** `C`, `a*` (or `C*`). **Requires ground truth.**
 - **How to compute it:**
-  ```text
-  GE = entities extracted from reference
-  CE = entities extracted from retrieved contexts
-  context_entities_recall = |CE ∩ GE| / |GE|
-  ```
-  Extract entities with an LLM or NER model, and normalize aliases (such as "Q3 FY24" vs "third quarter of fiscal 2024").
+
+    ```text
+    GE = entities extracted from reference
+    CE = entities extracted from retrieved contexts
+    context_entities_recall = |CE ∩ GE| / |GE|
+    ```
+
+    Extract entities with an LLM or NER model, and normalize aliases (such as "Q3 FY24" vs "third quarter of fiscal 2024").
+
 - **Score range & interpretation:** 0 to 1. Once you extract entities, this check is cheaper and more deterministic than claim-level recall.
 - **Worked example:** The reference contains `{"GlobalProtect", "macOS 14", "Self Service"}`. The retrieved context mentions `GlobalProtect` and `Self Service`, giving a score of **2/3**.
 - **Pitfalls and gotchas:** Finding an entity in a chunk does not guarantee the chunk states the right fact about that entity. Alias normalization requires careful tuning.
@@ -310,10 +337,13 @@ assert round(context_precision([0, 0, 1, 1]), 2) == 0.42
 - **What it measures:** How often the generator produces **incorrect claims** because irrelevant or confusing chunks distracted it. **Lower is better.**
 - **Inputs required:** `q`, `C`, `a`, `a*`. **Requires ground truth.**
 - **How to compute it:** Decompose `a` into claims. Check whether each claim agrees with `a*` and trace which retrieved chunks entailed it:
-  ```text
-  noise_sensitivity = |incorrect claims in a| / |claims in a|
-  ```
-  RAGAS provides two modes. The `relevant` mode counts incorrect claims drawn from relevant chunks (misreading good context). The `irrelevant` mode counts incorrect claims drawn from irrelevant chunks (distraction from noise).
+
+    ```text
+    noise_sensitivity = |incorrect claims in a| / |claims in a|
+    ```
+
+    RAGAS provides two modes. The `relevant` mode counts incorrect claims drawn from relevant chunks (misreading good context). The `irrelevant` mode counts incorrect claims drawn from irrelevant chunks (distraction from noise).
+
 - **Score range & interpretation:** 0 to 1, where lower is better.
 - **Pitfalls and gotchas:** Claim-to-chunk attribution relies on an LLM judge. Validate judge attribution accuracy on a manual sample.
 - **When to use it:** Run noise sensitivity when you increase `K` or add noisy data sources like team wikis. You can also inject known-irrelevant chunks to stress-test generator robustness.
@@ -326,11 +356,14 @@ assert round(context_precision([0, 0, 1, 1]), 2) == 0.42
 - **What it measures:** Whether the answer covers every required key point in the reference answer.
 - **Inputs required:** `q`, `a`, `a*` (or an explicit SME checklist of key facts). **Requires ground truth.**
 - **How to compute it:** Have SMEs list the must-have key points for each question. Prompt an LLM judge to check which key points appear in `a`:
-  ```text
-  completeness = |required key points covered by a| / |required key points|
-  ```
-  This metric isolates the false-negative (`FN`) side of answer correctness. RAGAS `FactualCorrectness` in `recall` mode computes a close equivalent.
-- **Score range & interpretation:** 0 to 1. Track completeness alongside a conciseness metric ([03 — Generation quality and safety evals](./03-generation-quality-and-safety-evals.md)) so the model does not game recall by writing walls of text.
+
+    ```text
+    completeness = |required key points covered by a| / |required key points|
+    ```
+
+    This metric isolates the false-negative (`FN`) side of answer correctness. RAGAS `FactualCorrectness` in `recall` mode computes a close equivalent.
+
+- **Score range & interpretation:** 0 to 1. Track completeness alongside a conciseness metric ([03 · Generation quality and safety evals](./03-generation-quality-and-safety-evals.md)) so the model does not game recall by writing walls of text.
 - **Worked example:** Suppose `q` is "How do I access the finance warehouse?" Required points: (1) use access portal, (2) manager approval, and (3) data-handling training. An answer that mentions only 1 and 2 scores **0.67**.
 - **Pitfalls and gotchas:** Key-point checklists take SME time to write. Keep each list short (3–5 must-have items).
 - **When to use it:** Use completeness for multi-part, procedural, and policy questions. Skip it for simple single-fact lookups.
@@ -344,22 +377,23 @@ assert round(context_precision([0, 0, 1, 1]), 2) == 0.42
 - **Inputs required:** `q`, `a`, and a dataset label `answerable ∈ {yes, no}` per question. **Requires ground-truth labels.** Include 10–20% unanswerable questions covering missing corpus facts, external companies, future events, and RBAC-restricted documents.
 - **How to compute it:** Classify each response as *abstained* or *answered* using a regex or lightweight LLM classifier. Build a 2×2 confusion matrix:
 
-  | Ground truth \ System action | System answered | System abstained |
-  |---|---|---|
-  | **Answerable** | Answered (score correctness next) | **False abstention** (over-refusal) |
-  | **Unanswerable** | **Hallucinated answer** (worst case) | Correct abstention |
+    | Ground truth \ System action | System answered | System abstained |
+    |---|---|---|
+    | **Answerable** | Answered (score correctness next) | **False abstention** (over-refusal) |
+    | **Unanswerable** | **Hallucinated answer** (worst case) | Correct abstention |
 
-  ```text
-  abstention_recall     = correct abstentions / unanswerable questions      # did we decline when we should?
-  abstention_precision  = correct abstentions / all abstentions             # when we declined, was it right?
-  false_abstention_rate = false abstentions / answerable questions
-  ```
+    ```text
+    abstention_recall     = correct abstentions / unanswerable questions      # did we decline when we should?
+    abstention_precision  = correct abstentions / all abstentions             # when we declined, was it right?
+    false_abstention_rate = false abstentions / answerable questions
+    ```
+
 - **Score range & interpretation:** 0 to 1 for each metric. Always report both recall and false-abstention rate. Optimizing abstention recall alone creates an unhelpful bot that refuses every question.
 - **Worked example:** Your dataset has 80 answerable and 20 unanswerable questions. The system abstains on 15 unanswerable and 6 answerable questions. Here, `abstention_recall = 15/20 = 0.75`, `abstention_precision = 15/21 ≈ 0.71`, and `false_abstention_rate = 6/80 = 0.075`.
 - **Pitfalls and gotchas:**
-  - **Exclude unanswerable questions from standard answer relevancy.** Reference-free relevancy penalizes valid refusals.
-  - **Test RBAC boundaries explicitly.** The assistant must refuse "What is the CFO's salary?" for unauthorized roles even when the document exists in the corpus. Enforce access control at the retrieval layer (see [access control](../04-guardrails/06-access-control-rbac.md)), and verify the user-facing refusal here.
-  - **Define rules for partial abstentions.** Decide how your rubric grades responses like "I couldn't find X, but here is Y."
+    - **Exclude unanswerable questions from standard answer relevancy.** Reference-free relevancy penalizes valid refusals.
+    - **Test RBAC boundaries explicitly.** The assistant must refuse "What is the CFO's salary?" for unauthorized roles even when the document exists in the corpus. Enforce access control at the retrieval layer (see [access control](../04-guardrails/06-access-control-rbac.md)), and verify the user-facing refusal here.
+    - **Define rules for partial abstentions.** Decide how your rubric grades responses like "I couldn't find X, but here is Y."
 - **When to use it:** Include an unanswerable slice (10–20% of samples) in every enterprise RAG evaluation suite. See [synthetic datasets](../01-datasets/03-synthetic-datasets.md) for ways to generate unanswerable questions.
 - **Implemented in:** Custom evaluators, or DeepEval `GEval` and promptfoo `llm-rubric` assertions.
 
@@ -500,10 +534,14 @@ flowchart TD
 
 ## Further reading
 
-- Es et al., *RAGAS: Automated Evaluation of Retrieval Augmented Generation* — [arXiv:2309.15217](https://arxiv.org/abs/2309.15217)
-- Saad-Falcon et al., *ARES: An Automated Evaluation Framework for Retrieval-Augmented Generation Systems* — [arXiv:2311.09476](https://arxiv.org/abs/2311.09476)
-- TruLens — [The RAG Triad](https://www.trulens.org/getting_started/core_concepts/rag_triad/)
-- RAGAS docs — [List of available metrics](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/)
-- DeepEval — [Metrics introduction](https://deepeval.com/docs/metrics-introduction)
-- Hamel Husain — [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
-- Within this repo: [Retrieval metrics](./02-retrieval-metrics.md) · [LLM-as-a-judge](./07-llm-as-a-judge.md) · [Instruction & citation adherence](./06-instruction-and-citation-adherence.md) · [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)
+- Es et al., *RAGAS: Automated Evaluation of Retrieval Augmented Generation*, [arXiv:2309.15217](https://arxiv.org/abs/2309.15217)
+- Saad-Falcon et al., *ARES: An Automated Evaluation Framework for Retrieval-Augmented Generation Systems*, [arXiv:2311.09476](https://arxiv.org/abs/2311.09476)
+- TruLens, [The RAG Triad](https://www.trulens.org/getting_started/core_concepts/rag_triad/)
+- RAGAS docs, [List of available metrics](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/)
+- DeepEval, [Metrics introduction](https://deepeval.com/docs/metrics-introduction)
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
+- **Within this repo:**
+    - [Retrieval metrics](./02-retrieval-metrics.md)
+    - [LLM-as-a-judge](./07-llm-as-a-judge.md)
+    - [Instruction & citation adherence](./06-instruction-and-citation-adherence.md)
+    - [Metric cheatsheet](../05-decision-framework/03-metric-cheatsheet.md)

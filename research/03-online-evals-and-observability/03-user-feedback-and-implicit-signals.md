@@ -1,14 +1,19 @@
 # User Feedback & Implicit Signals
 
 > **TL;DR**
+>
 > - **Capture both explicit and implicit signals.** Log thumbs, reason chips, and inline corrections alongside behavioral signals like retries, regenerations, escalations, and copies.
 > - **Link every feedback event to a `trace_id`.** Attach user signals directly to trace records so you can inspect the exact prompt, context, and SQL query.
 > - **Treat user feedback as a triage signal, not a rate.** Use biased feedback to find failures, and rely on uniform-sample judges for unbiased quality rates.
 > - **Promote feedback to dataset labels in stages.** Corroborate user signals with LLM judges and SME review before adding cases to golden datasets.
 
-**You will learn:** Explicit and implicit signal catalog · Sparsity and bias corrections · Feedback UX design · Trace linking, label promotion, and weekly error analysis  
-**Prerequisites:** [Observability & tracing](./02-observability-and-tracing.md), [Online evals](./01-online-evals.md)  
-**Related:** [Production data flywheel](../01-datasets/04-production-data-flywheel.md), [SME golden datasets](../01-datasets/02-sme-golden-datasets.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
+- **You will learn:**
+    - Explicit and implicit signal catalog
+    - Sparsity and bias corrections
+    - Feedback UX design
+    - Trace linking, label promotion, and weekly error analysis
+- **Prerequisites:** [Observability & tracing](./02-observability-and-tracing.md), [Online evals](./01-online-evals.md)
+- **Related:** [Production data flywheel](../01-datasets/04-production-data-flywheel.md), [SME golden datasets](../01-datasets/02-sme-golden-datasets.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
 
 ---
 
@@ -32,10 +37,10 @@ Use feedback to **surface and prioritize** candidate failures, and verify them w
 | Signal | Example UX | Information content | Typical volume | Notes |
 |---|---|---|---|---|
 | **Binary thumbs** | 👍 / 👎 on each assistant turn | Low per event, easy to aggregate | Low | Best default starting point |
-| **Thumbs + reason** | 👎 opens reason chips: *Incorrect · Not relevant · Missing info · Outdated · Too long · Wrong data access · Other* | Medium — assigns a failure category | Lower than thumbs | Map chips directly to your failure taxonomy |
-| **Rating scale** | 1–5 stars or end-of-session CSAT | Medium, noisy calibration across users | Low | Users anchor scales differently — prefer binary thumbs + reason chips |
+| **Thumbs + reason** | 👎 opens reason chips: *Incorrect · Not relevant · Missing info · Outdated · Too long · Wrong data access · Other* | Medium (assigns a failure category) | Lower than thumbs | Map chips directly to your failure taxonomy |
+| **Rating scale** | 1–5 stars or end-of-session CSAT | Medium, noisy calibration across users | Low | Users anchor scales differently; prefer binary thumbs + reason chips |
 | **Free-text comment** | "Tell us more" input box | High, unstructured detail | Very low | Classify comments with an LLM and read every comment early on |
-| **Correction / edit** | User edits the output or supplies the right value ("It's $41.2M, not $42.1M") | **Very high** — close to a reference answer | Very low | High-value golden dataset candidates after SME verification |
+| **Correction / edit** | User edits the output or supplies the right value ("It's $41.2M, not $42.1M") | **Very high** (close to a reference answer) | Very low | High-value golden dataset candidates after SME verification |
 | **Pairwise choice** | "Which response is better?" side-by-side card | High for preference tuning | Very low | Use sparingly because side-by-side comparison adds friction |
 | **Source feedback** | "This source is not relevant" on a cited chunk | High for retriever evaluation | Very low | Provides direct relevance labels for retrieval benchmarks |
 | **Report / flag** | "Report a problem" or "Exposes restricted data" | High severity | Rare | Route directly to a security or on-call queue, not just analytics |
@@ -62,10 +67,10 @@ Implicit signals come from natural user behavior. Every session generates implic
 |---|---|---|---|---|---|
 | **Copy answer / copy SQL / copy table** | UI copy event on answer text or code block | Output was useful enough to reuse | + | Medium | Users sometimes copy text to fix or critique it elsewhere |
 | **Regenerate** | User clicks "Regenerate" | User was dissatisfied with the initial answer | − | Medium–high | Some users click regenerate simply to explore alternatives |
-| **Rephrase / retry** | Next user turn arrives within $N$ seconds with high embedding similarity ($> \tau$) | Previous answer missed the user's intent | − | Medium | Valid follow-up questions can look similar — calibrate $\tau$ on labeled pairs |
-| **"That's wrong" follow-up** | Classifier or LLM detects contradiction, correction, or frustration in next turn | Explicit natural-language dissatisfaction | − | High | Regex misses sarcasm and multilingual phrasing — use a classifier |
-| **Abandonment** | Session ends immediately after an answer or while tokens are still streaming | Could mean task completion or user frustration | ? | Low alone | Combine with other signals — mid-stream abandonment is usually negative |
-| **Escalation to human** | User clicks "Talk to support" or opens a manual ticket on the same topic within $T$ minutes | Assistant failed to resolve the user's problem | − | High | Some policy flows require human escalation — segment by intent |
+| **Rephrase / retry** | Next user turn arrives within $N$ seconds with high embedding similarity ($> \tau$) | Previous answer missed the user's intent | − | Medium | Valid follow-up questions can look similar; calibrate $\tau$ on labeled pairs |
+| **"That's wrong" follow-up** | Classifier or LLM detects contradiction, correction, or frustration in next turn | Explicit natural-language dissatisfaction | − | High | Regex misses sarcasm and multilingual phrasing; use a classifier |
+| **Abandonment** | Session ends immediately after an answer or while tokens are still streaming | Could mean task completion or user frustration | ? | Low alone | Combine with other signals; mid-stream abandonment is usually negative |
+| **Escalation to human** | User clicks "Talk to support" or opens a manual ticket on the same topic within $T$ minutes | Assistant failed to resolve the user's problem | − | High | Some policy flows require human escalation; segment by intent |
 | **Ticket created via tool** | `create_ticket` tool call succeeded | Assistant completed the requested action | + / ? | Medium | Check downstream outcomes to see whether the ticket was reopened or rejected |
 | **Ticket reopened / rejected** | Ticketing webhook reports reopen, rejection, or duplicate closure | Assistant created the wrong ticket or bad content | − | High (delayed) | Requires webhook integration with your ticketing system |
 | **Citation click-through** | User clicks a cited document link | User wants to verify claims or read deeper | ? | Low–medium | Reflects either curiosity or distrust and suffers from strong position bias |
@@ -123,7 +128,7 @@ Calibrate these weights against human judgment. Hand-label ~200 traces as good o
 
 | Bias | What happens | How to mitigate it |
 |---|---|---|
-| **Self-selection / non-response** | Only very frustrated or very happy users click rating buttons | Never report raw 👎 rate as your true error rate — use uniform-sample judges instead |
+| **Self-selection / non-response** | Only very frustrated or very happy users click rating buttons | Never report raw 👎 rate as your true error rate; use uniform-sample judges instead |
 | **Negativity bias** | Users report failures much more often than successes | Track 👍 and 👎 counts separately alongside overall feedback coverage |
 | **Position / presentation bias** | First citations get the most clicks, and below-the-fold buttons get ignored | Compare click rates within the same rank position and keep feedback UI placement stable |
 | **Power-user skew** | A small group of heavy users generates most feedback events | Cap per-user weight or stratify feedback metrics by user tenure |
@@ -240,7 +245,7 @@ Follow these practices during weekly review sessions:
 | Metric | Definition | Reporting caveat |
 |---|---|---|
 | **Feedback coverage** | % of assistant turns with any explicit feedback | Always display alongside feedback-derived rates |
-| **👎 rate (given feedback)** | $\text{👎} / (\text{👍} + \text{👎})$ | Selection-biased — compare trends only across a stable UI |
+| **👎 rate (given feedback)** | $\text{👎} / (\text{👍} + \text{👎})$ | Selection-biased; compare trends only across a stable UI |
 | **👎 reasons mix** | Share of 👎 events per reason chip | Best signal for weekly backlog prioritization |
 | **Rephrase/retry rate** | % of turns followed by a semantic rephrase within $N$ seconds | Recalibrate threshold $\tau$ when changing embedding models |
 | **Negative follow-up rate** | % of turns followed by a user correction or frustration message | Depends on follow-up classifier accuracy |
@@ -265,10 +270,10 @@ Feed these metrics directly into the operational dashboards covered in [Monitori
 
 ## Further reading
 
-- Hamel Husain — [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/) and [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
-- Shreya Shankar — [Data Flywheels for LLM Applications](https://www.sh-reya.com/blog/ai-engineering-flywheel/)
-- Shankar et al. — [Who Validates the Validators?](https://arxiv.org/abs/2404.12272) (criteria drift, aligning evaluators with human judgment)
-- Eugene Yan — [Patterns for Building LLM-based Systems & Products](https://eugeneyan.com/writing/llm-patterns/) (section on collecting user feedback)
-- Joachims et al. — [Accurately Interpreting Clickthrough Data as Implicit Feedback](https://www.cs.cornell.edu/people/tj/publications/joachims_etal_05a.pdf)
-- Radlinski, Kurup, Joachims — [How Does Clickthrough Data Reflect Retrieval Quality?](https://www.cs.cornell.edu/people/tj/publications/radlinski_etal_08b.pdf)
+- Hamel Husain, [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/) and [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
+- Shreya Shankar, [Data Flywheels for LLM Applications](https://www.sh-reya.com/blog/ai-engineering-flywheel/)
+- Shankar et al., [Who Validates the Validators?](https://arxiv.org/abs/2404.12272) (criteria drift, aligning evaluators with human judgment)
+- Eugene Yan, [Patterns for Building LLM-based Systems & Products](https://eugeneyan.com/writing/llm-patterns/) (section on collecting user feedback)
+- Joachims et al., [Accurately Interpreting Clickthrough Data as Implicit Feedback](https://www.cs.cornell.edu/people/tj/publications/joachims_etal_05a.pdf)
+- Radlinski, Kurup, Joachims, [How Does Clickthrough Data Reflect Retrieval Quality?](https://www.cs.cornell.edu/people/tj/publications/radlinski_etal_08b.pdf)
 - Within this repo: [Production data flywheel](../01-datasets/04-production-data-flywheel.md), [Online evals](./01-online-evals.md), [Observability & tracing](./02-observability-and-tracing.md)

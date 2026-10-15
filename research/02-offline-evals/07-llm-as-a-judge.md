@@ -1,20 +1,28 @@
 # LLM-as-a-Judge
 
 > **TL;DR**
+>
 > - **Treat every LLM judge as a measurement instrument.** Calibrate your judge against human labels before you trust any score it produces.
 > - **Use code for verifiable rules and judges for semantic rules.** Let domain experts label a calibration set, then scale their judgment with an LLM.
 > - **Build narrow, binary, rubric-driven judges.** Require step-by-step reasoning before the verdict, provide expert few-shot critiques, and enforce JSON output.
 > - **Measure TPR and TNR, correct for error, and version the judge.** Pin the judge snapshot, apply Rogan–Gladen correction, and run judge regression tests.
 
-**You will learn:** Choosing between code, LLM judges, and humans · Pointwise, pairwise, and reference-guided formats · Binary verdicts vs Likert scales · Judge rubric design and bias mitigation · Calibrating judges with critique shadowing, EvalGen, TPR/TNR, and Cohen's κ · Correcting pass rates for judge error · G-Eval, fine-tuned judges, juries, and judge versioning  
-**Prerequisites:** [Evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)  
-**Related:** [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [Instruction & citation adherence](./06-instruction-and-citation-adherence.md), [Running offline experiments](./08-running-offline-experiments.md), [Online evals](../03-online-evals-and-observability/01-online-evals.md)
+- **You will learn:**
+    - Choosing between code, LLM judges, and humans
+    - Pointwise, pairwise, and reference-guided formats
+    - Binary verdicts vs Likert scales
+    - Judge rubric design and bias mitigation
+    - Calibrating judges with critique shadowing, EvalGen, TPR/TNR, and Cohen's κ
+    - Correcting pass rates for judge error
+    - G-Eval, fine-tuned judges, juries, and judge versioning
+- **Prerequisites:** [Evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)
+- **Related:** [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [Instruction & citation adherence](./06-instruction-and-citation-adherence.md), [Running offline experiments](./08-running-offline-experiments.md), [Online evals](../03-online-evals-and-observability/01-online-evals.md)
 
 ---
 
 ## 1. Code vs judge vs human: who should grade what?
 
-Most standard RAG metrics—faithfulness, answer relevancy, context precision, and answer correctness—use LLM judges under the hood (see [End-to-end RAG evals](./01-end-to-end-rag-evals.md)). Judge reliability therefore determines the trustworthiness of your entire evaluation program.
+Most standard RAG metrics (faithfulness, answer relevancy, context precision, and answer correctness) use LLM judges under the hood (see [End-to-end RAG evals](./01-end-to-end-rag-evals.md)). Judge reliability therefore determines the trustworthiness of your entire evaluation program.
 
 ```mermaid
 flowchart TD
@@ -47,7 +55,7 @@ flowchart TD
 
 | Format | Question asked | Needs reference? | Pros | Cons | Typical use |
 |---|---|---|---|---|---|
-| **Pointwise, reference-free** | "Does this response satisfy criterion X?" | No | Works on production traffic; simple | Judge must know what "correct" is — weak for factual correctness | Faithfulness to context, tone, policy, relevance |
+| **Pointwise, reference-free** | "Does this response satisfy criterion X?" | No | Works on production traffic; simple | Judge must know what "correct" is (weak for factual correctness) | Faithfulness to context, tone, policy, relevance |
 | **Pointwise, reference-guided** | "Does this response match the reference on the key facts?" | Yes (gold answer / key facts) | Much more reliable for correctness, math, domain facts | Needs gold data; penalizes valid alternatives if rubric is strict | Answer correctness on golden datasets |
 | **Pairwise** | "Which of A and B is better on X?" | Optional | Easier, more consistent than absolute scores; great for A/B of prompts/models | Position bias; doesn't tell you if *either* is good; O(n²) for many systems | Comparing variants, preference data, model selection |
 | **Rubric / checklist** | "Which of these N binary requirements are met?" | Optional | Diagnostic; maps to fixes | More calls or longer prompts | Instruction adherence, completeness |
@@ -97,7 +105,7 @@ When you need finer gradations, decompose the evaluation into **multiple binary 
 SYSTEM:
 You are an exacting reviewer for an internal enterprise assistant. You evaluate ONE criterion.
 
-CRITERION — Faithfulness to retrieved context
+CRITERION: Faithfulness to retrieved context
 PASS if every factual statement in the RESPONSE is supported by the CONTEXT.
   - Paraphrases and summaries of the context are fine.
   - Statements that are clearly non-factual (greetings, offers to help, questions) are ignored.
@@ -118,7 +126,7 @@ VERDICT: PASS
 <example>
 CONTEXT: [hr-31] Unused PTO up to 5 days may be carried over to the next year.
 RESPONSE: You can carry over up to 5 unused days, but they expire at the end of March.
-CRITIQUE: The 5-day carry-over is supported. The March expiry is not in the context — added specific.
+CRITIQUE: The 5-day carry-over is supported. The March expiry is not in the context (added specific).
 VERDICT: FAIL
 </example>
 <example>
@@ -198,10 +206,10 @@ Track the **position-swap inconsistency rate** (how often the winner flips when 
 
 | Bias | What happens | Evidence | Mitigation |
 |---|---|---|---|
-| **Position bias** | Pairwise judges favour the first (or second) answer | Zheng et al. 2023; [Wang et al., 2023 — "Large Language Models are not Fair Evaluators"](https://arxiv.org/abs/2305.17926) | Evaluate both orders; count inconsistent verdicts as ties; randomize |
+| **Position bias** | Pairwise judges favour the first (or second) answer | Zheng et al. 2023; [Wang et al., 2023, "Large Language Models are not Fair Evaluators"](https://arxiv.org/abs/2305.17926) | Evaluate both orders; count inconsistent verdicts as ties; randomize |
 | **Verbosity / length bias** | Longer, more detailed answers preferred even when not better | Zheng et al. 2023 | Rubric says length isn't a merit; include short-correct vs long-padded examples; prefer pointwise binary criteria; report length alongside wins |
-| **Self-enhancement / self-preference** | Judges favour outputs from themselves or their model family | Zheng et al. 2023; [Panickssery et al., 2024 — "LLM Evaluators Recognize and Favor Their Own Generations"](https://arxiv.org/abs/2404.13076) | Use a judge from a different family than the generator, or a panel (§9) |
-| **Sycophancy / authority** | Judge defers to confident tone, claimed expertise, or the user's stated opinion; can be swayed by text inside the evaluated output ("this answer is correct") | [Sharma et al., 2023 — "Towards Understanding Sycophancy in Language Models"](https://arxiv.org/abs/2310.13548) | Strip/escape instructions inside evaluated content; delimit inputs; rubric says confidence ≠ correctness; adversarial test cases for the judge |
+| **Self-enhancement / self-preference** | Judges favour outputs from themselves or their model family | Zheng et al. 2023; [Panickssery et al., 2024, "LLM Evaluators Recognize and Favor Their Own Generations"](https://arxiv.org/abs/2404.13076) | Use a judge from a different family than the generator, or a panel (§9) |
+| **Sycophancy / authority** | Judge defers to confident tone, claimed expertise, or the user's stated opinion; can be swayed by text inside the evaluated output ("this answer is correct") | [Sharma et al., 2023, "Towards Understanding Sycophancy in Language Models"](https://arxiv.org/abs/2310.13548) | Strip/escape instructions inside evaluated content; delimit inputs; rubric says confidence ≠ correctness; adversarial test cases for the judge |
 | **Limited reasoning on hard items** | Judge can't verify math, SQL, code, or domain logic it can't solve itself | Zheng et al. 2023 | Reference-guided grading; give the judge the computed answer (execution results); use code where possible |
 | **Reference anchoring** | In reference-guided mode, valid answers phrased differently or with extra correct details are failed | Common practitioner observation | Rubric: compare *key facts*, allow extra correct info; label alternative-correct examples |
 | **Leniency drift** | Judge passes everything that "looks reasonable" | Common practitioner observation | Track TNR specifically; include subtle-fail examples in few-shot and calibration sets |
@@ -244,7 +252,7 @@ Follow this workflow from [Hamel Husain's LLM-as-a-Judge guide](https://hamel.de
 6. **Measure judge-expert agreement** on a held-out split and iterate on the rubric until agreement meets your target.
 7. **Re-sample and re-verify periodically** as user traffic and expert standards evolve.
 
-### 7.2 Criteria drift (EvalGen — Shankar et al.)
+### 7.2 Criteria drift (EvalGen, Shankar et al.)
 
 [Who Validates the Validators? (Shankar et al., 2024)](https://arxiv.org/abs/2404.12272) introduced EvalGen and documented **criteria drift**: human reviewers *refine their definition of quality only after they see concrete model failure modes*. You cannot write a complete rubric before grading real outputs. Plan for criteria drift in your workflow:
 
@@ -291,7 +299,7 @@ def judge_agreement(human: list[bool], judge: list[bool]) -> dict:
 human = [True] * 80 + [False] * 20
 judge = [True] * 76 + [False] * 4 + [True] * 6 + [False] * 14
 judge_agreement(human, judge)
-# tpr 0.95, tnr 0.70, raw_agreement 0.90, kappa ≈ 0.68 — high agreement hides that 30% of bad answers pass
+# tpr 0.95, tnr 0.70, raw_agreement 0.90, kappa ≈ 0.68 (high agreement hides that 30% of bad answers pass)
 ```
 
 ### 7.4 How many labels?
@@ -342,7 +350,7 @@ def corrected_pass_rate(judge_on_eval: list[bool], human_lbl: list[bool], judge_
     return {"corrected": point, "ci95": (boots[int(0.025 * len(boots))], boots[int(0.975 * len(boots)) - 1])}
 ```
 
-If `TPR + TNR` is close to 1.0, the denominator approaches zero and the confidence interval explodes. Do not use statistical correction to salvage a weak judge—fix the rubric or upgrade the judge model instead.
+If `TPR + TNR` is close to 1.0, the denominator approaches zero and the confidence interval explodes. Do not use statistical correction to salvage a weak judge; fix the rubric or upgrade the judge model instead.
 
 ---
 
@@ -440,14 +448,17 @@ An LLM judge is a combination of prompt code, few-shot data, and model weights. 
 
 ## Further reading
 
-- Zheng et al., 2023 — [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)
-- Liu et al., 2023 — [G-Eval: NLG Evaluation using GPT-4 with Better Human Alignment](https://arxiv.org/abs/2303.16634)
-- Shankar et al., 2024 — [Who Validates the Validators? Aligning LLM-Assisted Evaluation of LLM Outputs with Human Preferences](https://arxiv.org/abs/2404.12272)
-- Verga et al., 2024 — [Replacing Judges with Juries: Evaluating LLM Generations with a Panel of Diverse Models](https://arxiv.org/abs/2404.18796)
-- Wang et al., 2023 — [Large Language Models are not Fair Evaluators](https://arxiv.org/abs/2305.17926)
-- Panickssery et al., 2024 — [LLM Evaluators Recognize and Favor Their Own Generations](https://arxiv.org/abs/2404.13076)
-- Sharma et al., 2023 — [Towards Understanding Sycophancy in Language Models](https://arxiv.org/abs/2310.13548)
-- Kim et al. — [Prometheus](https://arxiv.org/abs/2310.08491) · [Prometheus 2](https://arxiv.org/abs/2405.01535); Patronus AI — [Lynx](https://arxiv.org/abs/2407.08488) · [Glider](https://arxiv.org/abs/2412.14140)
-- Hamel Husain — [Using LLM-as-a-Judge For Evaluation: A Complete Guide (critique shadowing)](https://hamel.dev/blog/posts/llm-judge/) · [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
-- Eugene Yan — [Evaluating the Effectiveness of LLM-Evaluators (aka LLM-as-Judge)](https://eugeneyan.com/writing/llm-evaluators/)
-- In this repo: [Instruction & citation adherence](./06-instruction-and-citation-adherence.md) · [Running offline experiments](./08-running-offline-experiments.md) · [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)
+- Zheng et al., 2023, [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)
+- Liu et al., 2023, [G-Eval: NLG Evaluation using GPT-4 with Better Human Alignment](https://arxiv.org/abs/2303.16634)
+- Shankar et al., 2024, [Who Validates the Validators? Aligning LLM-Assisted Evaluation of LLM Outputs with Human Preferences](https://arxiv.org/abs/2404.12272)
+- Verga et al., 2024, [Replacing Judges with Juries: Evaluating LLM Generations with a Panel of Diverse Models](https://arxiv.org/abs/2404.18796)
+- Wang et al., 2023, [Large Language Models are not Fair Evaluators](https://arxiv.org/abs/2305.17926)
+- Panickssery et al., 2024, [LLM Evaluators Recognize and Favor Their Own Generations](https://arxiv.org/abs/2404.13076)
+- Sharma et al., 2023, [Towards Understanding Sycophancy in Language Models](https://arxiv.org/abs/2310.13548)
+- Kim et al., [Prometheus](https://arxiv.org/abs/2310.08491) · [Prometheus 2](https://arxiv.org/abs/2405.01535); Patronus AI, [Lynx](https://arxiv.org/abs/2407.08488) · [Glider](https://arxiv.org/abs/2412.14140)
+- Hamel Husain, [Using LLM-as-a-Judge For Evaluation: A Complete Guide (critique shadowing)](https://hamel.dev/blog/posts/llm-judge/) · [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
+- Eugene Yan, [Evaluating the Effectiveness of LLM-Evaluators (aka LLM-as-Judge)](https://eugeneyan.com/writing/llm-evaluators/)
+- **In this repo:**
+    - [Instruction & citation adherence](./06-instruction-and-citation-adherence.md)
+    - [Running offline experiments](./08-running-offline-experiments.md)
+    - [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)
