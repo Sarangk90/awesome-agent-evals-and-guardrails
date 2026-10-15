@@ -1,20 +1,26 @@
 # Eval and Observability Tools: The Landscape (October 2026 snapshot)
 
-> **TL;DR** — Eval tooling splits into three layers: open-source **metric libraries** (RAGAS, DeepEval, promptfoo, Inspect …), **eval + observability platforms** that act as your system of record for traces, datasets and experiments (LangSmith, Langfuse, Phoenix, Braintrust, MLflow, Opik …), and **cloud-native evaluation services** (Microsoft Foundry, Amazon Bedrock, Google's Gen AI evaluation service). Pick one platform as the system of record, use libraries for metrics, instrument with OpenTelemetry so you can switch later, and validate every metric against your own labeled data before trusting it.
+> **TL;DR**
+> - **Separate your system of record from metric libraries.** Pick one platform for traces, datasets, and experiments, and use swappable libraries for metrics.
+> - **Instrument once with OpenTelemetry.** Use OpenInference or OTel GenAI semantic conventions so you can switch backends without rewriting application code.
+> - **Calibrate every judge on your own data.** Two tools with "faithfulness" metrics use different prompts and scales, so validate against human labels.
+> - **Write domain metrics as deterministic code.** Check SQL execution accuracy, RBAC leakage, and tool-argument schemas directly in code.
 
-**You'll learn:** what each major tool is good at · which metrics each ships · a capability matrix across 8 dimensions · ownership/status changes that affect tool choice · how to choose and how to run a bake-off  ·  **Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md)  ·  **Related:** [Guardrail tools](./02-guardrail-tools.md), [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
+**You will learn:** What each major eval tool does best · Which metrics each tool ships · Capability matrix across 8 dimensions · How to run a bake-off  
+**Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md)  
+**Related:** [Guardrail tools](./02-guardrail-tools.md), [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)
 
 ---
 
 ## Read this first: this is a dated snapshot
 
-This document reflects the state of the ecosystem as of **October 2026**. The LLM tooling market moves faster than any other part of this repository: in the 18 months before this snapshot, several of the tools below were acquired, rebranded, re-licensed, rewritten or sunset (see [Ownership and status changes](#ownership-and-status-changes-to-know-about)).
+This document reflects the ecosystem as of **October 2026**. The LLM tooling market moves faster than any other part of this repository. In the 18 months before this snapshot, vendors acquired, rebranded, re-licensed, rewrote, or sunset several tools (see [Ownership and status changes](#ownership-and-status-changes-to-know-about)).
 
-- [ ] Before adopting anything, re-check the project's README/changelog, last release date, license, and pricing page.
-- [ ] Treat the capability matrix as a starting hypothesis, not a spec sheet. Vendors ship monthly.
-- [ ] Never trust a metric because it has a familiar name. Two tools' "faithfulness" can use different prompts, judge models, decompositions and score scales. Calibrate on your data (see [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)).
+- [ ] **Check current project status:** Review the project's README, changelog, latest release date, license, and pricing page before you adopt it.
+- [ ] **Verify capabilities directly:** Treat the capability matrix as a starting hypothesis because vendors ship new features every month.
+- [ ] **Calibrate every metric on your data:** Never trust a metric by name alone because prompts, judge models, and scales differ ([LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)).
 
-The concepts in the rest of this repository (datasets, metrics, judges, guardrail architecture) are durable; the tool names are not. Design your stack so that tools are replaceable.
+The concepts in this repository (datasets, metrics, judges, and guardrail architecture) are durable. Tool names change quickly, so design your stack to make tools replaceable.
 
 ---
 
@@ -45,36 +51,36 @@ flowchart TD
 
 | Layer | What it gives you | What it does *not* give you | Typical owner |
 |---|---|---|---|
-| **A. Eval libraries** | Metric implementations, judge prompts, test runners, synthetic data generators | A durable store of traces/datasets/experiment history, team UI, production sampling | ML/AI engineers, in code and CI |
-| **B. Platforms** | Tracing, datasets, experiment comparison, annotation queues, online evaluators, prompt management | Domain-correct metrics out of the box (you still define what "good" means) | Platform / AI engineering team |
-| **C. Cloud-native** | Managed judges, safety evaluators, integration with the cloud's model catalog, IAM and monitoring | Portability; parity of features across regions; independence from that cloud's model catalog | Teams already standardised on that cloud |
+| **A. Eval libraries** | Metric implementations, judge prompts, test runners, and synthetic data generators | Durable trace storage, dataset history, team UI, or production sampling | ML and AI engineers in code and CI |
+| **B. Platforms** | Tracing, datasets, experiment comparison, annotation queues, online evaluators, and prompt management | Ready-made domain metrics, because you must still define what "good" means | Platform or AI engineering team |
+| **C. Cloud-native** | Managed judges, safety evaluators, cloud model catalog integration, IAM, and monitoring | Cross-cloud portability, regional feature parity, or independence from that cloud's models | Teams standardized on that cloud |
 
-> **Heuristic:** most production teams end up with **one platform (B or C) + one or two libraries (A) + custom code** for domain metrics like SQL execution accuracy or RBAC leakage checks.
+> **Heuristic:** Most production teams combine **one platform (B or C) + one or two libraries (A) + custom code** for domain checks like SQL execution accuracy and RBAC leakage.
 
 ---
 
 ## Ownership and status changes to know about
 
-These changes matter for procurement, long-term maintenance risk and data-residency reviews. All were verified against project pages in October 2026.
+These changes affect procurement, long-term maintenance risk, and data-residency reviews. We verified all entries against official project pages in October 2026.
 
 | Tool | Change | What it means for you |
 |---|---|---|
-| **Humanloop** | Team joined Anthropic; the Humanloop platform is being **sunset** ([announcement](https://humanloop.com)). | Do not start new projects on it. If you have data there, plan an export and migration. |
-| **promptfoo** | "Promptfoo is now part of OpenAI" — remains open source and MIT licensed ([README](https://github.com/promptfoo/promptfoo)). | Still usable with any model provider; watch roadmap direction. |
-| **Langfuse** | Acquired by ClickHouse (January 2026); stated commitment to stay open source and self-hostable ([blog](https://langfuse.com/blog/joining-clickhouse)). | No licensing change announced. Core is MIT; enterprise features live in `ee/` folders under a separate license. |
-| **Galileo** | Docs state that as of August 7, 2026, "Galileo is now Splunk Agent Observability" ([docs](https://docs.galileo.ai/what-is-galileo)). | Expect product/pricing/packaging changes; new customers are pointed at Splunk docs. |
-| **Weights & Biases (Weave)** | W&B docs, including Weave, are now hosted under CoreWeave ([docs](https://docs.coreweave.com/products/wandb/weave)). | Product continues; check contract/hosting terms. |
-| **Patronus AI** | Homepage now emphasises RL environments, benchmarks and research rather than the eval platform ([site](https://www.patronus.ai/)). | Its open models (Lynx, Glider) remain on Hugging Face; verify the commercial eval product's availability before relying on it. |
-| **Giskard** | v3 is a fresh rewrite (`giskard-checks`, `giskard-scan`) for agents; **v2 is no longer actively maintained** ([repo](https://github.com/Giskard-AI/giskard-oss)). | Old tutorials using v2 APIs (RAGET, `giskard.scan` on LLMs) are outdated. |
-| **RAGAS** | Repository moved from `explodinggradients/ragas` to `vibrantlabsai/ragas`; latest release at snapshot time was v0.4.3 (January 2026). | Still widely used; check release cadence and API changes (metric names changed across 0.1 → 0.2+). |
-| **OpenAI Evals** | The `openai/evals` repo README points to running evals in the OpenAI dashboard / Evals API. | Use the hosted Evals product if you are OpenAI-centric; the OSS registry is mainly of historical/benchmark interest. |
-| **TruLens** | Originally TruEra; maintained in open source by Snowflake since the acquisition ([site](https://www.trulens.org/)). | Active (2.x releases in 2026). |
+| **Humanloop** | The team joined Anthropic and **sunset** the Humanloop platform ([announcement](https://humanloop.com)). | Do not start new projects on Humanloop. Export and migrate any existing data. |
+| **promptfoo** | Promptfoo joined OpenAI and remains open source under the MIT license ([README](https://github.com/promptfoo/promptfoo)). | You can still use it with any model provider. Watch the roadmap for changes. |
+| **Langfuse** | ClickHouse acquired Langfuse in January 2026 and committed to keeping it open source and self-hostable ([blog](https://langfuse.com/blog/joining-clickhouse)). | Core code stays MIT-licensed. Enterprise features live in `ee/` folders under a separate commercial license. |
+| **Galileo** | Galileo rebranded as **Splunk Agent Observability** on August 7, 2026 ([docs](https://docs.galileo.ai/what-is-galileo)). | Expect product, pricing, and packaging changes. New customers use Splunk documentation. |
+| **Weights & Biases (Weave)** | CoreWeave acquired W&B and now hosts the Weave documentation ([docs](https://docs.coreweave.com/products/wandb/weave)). | The product continues actively. Review updated contract and hosting terms. |
+| **Patronus AI** | The homepage now highlights RL environments, benchmarks, and research over the eval platform ([site](https://www.patronus.ai/)). | Open models (Lynx, Glider) remain on Hugging Face. Verify commercial platform availability before adopting it. |
+| **Giskard** | Giskard v3 is a fresh agent-focused rewrite (`giskard-checks`, `giskard-scan`), while **v2 is unmaintained** ([repo](https://github.com/Giskard-AI/giskard-oss)). | Older tutorials that use v2 APIs (RAGET or `giskard.scan` on LLMs) are outdated. |
+| **RAGAS** | The repository moved from `explodinggradients/ragas` to `vibrantlabsai/ragas` (v0.4.3 released in January 2026). | RAGAS remains widely used. Check release notes carefully because metric names and APIs changed from v0.1 to v0.2+. |
+| **OpenAI Evals** | The `openai/evals` README directs users to run evaluations in the OpenAI dashboard and Evals API. | Use the hosted Evals product if you standardize on OpenAI. Treat the OSS repo as a historical benchmark registry. |
+| **TruLens** | Snowflake acquired TruEra and continues to maintain TruLens as open source ([site](https://www.trulens.org/)). | TruLens remains active with 2.x releases in 2026. |
 
 ---
 
 ## A. Open-source eval libraries
 
-Each card uses the same fields: **Link · Type/License · Strengths · Notable metrics · Best for · Watch-outs**. "Notable metrics" lists only metrics the tool documents; names change between versions — check the docs.
+Each card covers six fields: **Link · Type/License · Strengths · Notable metrics · Best for · Watch-outs**. "Notable metrics" lists documented metrics at snapshot time. Check the official docs because metric names change across versions.
 
 ### RAGAS
 
@@ -82,10 +88,10 @@ Each card uses the same fields: **Link · Type/License · Strengths · Notable m
 |---|---|
 | **Link** | [docs.ragas.io](https://docs.ragas.io) · [GitHub](https://github.com/vibrantlabsai/ragas) |
 | **Type / License** | OSS library (Python), Apache-2.0 |
-| **Strengths** | The reference implementation of reference-free RAG metrics (from the [RAGAS paper](https://arxiv.org/abs/2309.15217)); test-set generation for RAG and agent scenarios via a knowledge-graph approach; integrations with LangChain, LlamaIndex, Langfuse, Phoenix and others. |
-| **Notable metrics** | RAG: Context Precision, Context Recall, Context Entities Recall, Noise Sensitivity, Response Relevancy, Faithfulness. Agent/tool: Topic Adherence, Tool Call Accuracy, Tool Call F1, Agent Goal Accuracy. SQL: Datacompy Score (execution-based), SQL Query Equivalence. General: Aspect Critic, Simple Criteria, rubric-based and instance-specific rubric scoring; Factual Correctness; non-LLM string metrics (BLEU, ROUGE, chrF, exact match). |
-| **Best for** | Fast, defensible RAG metrics in a notebook or CI job; bootstrapping a synthetic test set. |
-| **Watch-outs** | Judge-based metrics inherit judge cost and variance; metric names and APIs changed between 0.1 and 0.2+; scores are not comparable across RAGAS versions or judge models. No UI or store — pair with a platform. |
+| **Strengths** | Provides the reference implementation of reference-free RAG metrics from the [RAGAS paper](https://arxiv.org/abs/2309.15217). Generates synthetic test sets for RAG and agents using a knowledge-graph approach. Integrates with LangChain, LlamaIndex, Langfuse, and Phoenix. |
+| **Notable metrics** | RAG: Context Precision, Context Recall, Context Entities Recall, Noise Sensitivity, Response Relevancy, Faithfulness. Agent/tool: Topic Adherence, Tool Call Accuracy, Tool Call F1, Agent Goal Accuracy. SQL: Datacompy Score (execution-based), SQL Query Equivalence. General: Aspect Critic, Simple Criteria, rubric scoring, Factual Correctness, BLEU, ROUGE, chrF, and exact match. |
+| **Best for** | Running fast, defensible RAG metrics in notebooks or CI jobs, and bootstrapping synthetic test sets. |
+| **Watch-outs** | Judge-based metrics inherit LLM cost and variance. Metric names and APIs changed between v0.1 and v0.2+, so do not compare scores across versions or judge models. Pair RAGAS with a platform for storage and UI. |
 
 ### DeepEval (and DeepTeam)
 
@@ -93,65 +99,65 @@ Each card uses the same fields: **Link · Type/License · Strengths · Notable m
 |---|---|
 | **Link** | [deepeval.com](https://deepeval.com) · [GitHub](https://github.com/confident-ai/deepeval) · red teaming: [DeepTeam](https://github.com/confident-ai/deepteam) |
 | **Type / License** | OSS (Python), Apache-2.0. Commercial platform: Confident AI. |
-| **Strengths** | "Pytest for LLMs": test cases + metrics + thresholds, runnable as unit tests in CI; 50+ metrics, almost all LLM-as-a-judge using QAG, DAG (deep acyclic graph) or [G-Eval](https://arxiv.org/abs/2303.16634); every metric returns a 0–1 score plus reasoning; synthetic "golden" generation and conversation simulation; trajectory metrics for agents. |
-| **Notable metrics** | RAG: Answer Relevancy, Faithfulness, Contextual Precision, Contextual Recall, Contextual Relevancy. Agents: tool correctness, task completion and trajectory-level metrics. Custom: G-Eval, DAG. Safety: bias, toxicity, PII-leakage style metrics. Multi-turn conversational metrics. |
-| **Best for** | Teams that want evals to look and fail like unit tests; CI regression gates. |
-| **Watch-outs** | Default threshold is 0.5 for all metrics — set your own per metric after calibration. Many metrics make several judge calls per test case; budget for it. |
+| **Strengths** | Works like Pytest for LLMs by combining test cases, metrics, and thresholds in CI unit tests. Ships 50+ LLM-as-a-judge metrics built on QAG, DAG (deep acyclic graph), or [G-Eval](https://arxiv.org/abs/2303.16634). Returns a 0–1 score with reasoning, generates synthetic goldens, simulates conversations, and evaluates agent trajectories. |
+| **Notable metrics** | RAG: Answer Relevancy, Faithfulness, Contextual Precision, Contextual Recall, Contextual Relevancy. Agents: tool correctness, task completion, and trajectory metrics. Custom: G-Eval and DAG. Safety: bias, toxicity, PII leakage, and multi-turn conversational metrics. |
+| **Best for** | Running evaluations that behave like unit tests and enforce CI regression gates. |
+| **Watch-outs** | DeepEval sets a default threshold of 0.5 for every metric, so calibrate and set your own thresholds. Budget carefully because many metrics make multiple judge calls per test case. |
 
 ### TruLens
 
 | Field | Details |
 |---|---|
 | **Link** | [trulens.org](https://www.trulens.org/) · [GitHub](https://github.com/truera/trulens) |
-| **Type / License** | OSS (Python), MIT; maintained by Snowflake |
-| **Strengths** | Popularised the **RAG triad** (context relevance → groundedness → answer relevance) as a reference-free diagnostic; "feedback functions" as a general abstraction for LLM or classical scorers; OpenTelemetry-based tracing and a local dashboard for experiment comparison. |
-| **Notable metrics** | Context Relevance, Groundedness, Answer Relevance; plus moderation-style and custom feedback functions. |
-| **Best for** | RAG prototypes where you want tracing + triad scores locally with minimal setup; Snowflake-centric stacks. |
-| **Watch-outs** | Triad is reference-free — it cannot tell you the answer is *correct*, only that it is supported and on-topic. Pair with reference-based correctness on a golden set. |
+| **Type / License** | OSS (Python), MIT. Maintained by Snowflake. |
+| **Strengths** | Popularized the **RAG triad** (context relevance, groundedness, and answer relevance) as a reference-free diagnostic. Provides "feedback functions" for LLM or classical scorers, OpenTelemetry-based tracing, and a local dashboard for comparing experiments. |
+| **Notable metrics** | Context Relevance, Groundedness, Answer Relevance, moderation scorers, and custom feedback functions. |
+| **Best for** | Prototyping RAG pipelines with local tracing and triad scores, or building on Snowflake-centric stacks. |
+| **Watch-outs** | The RAG triad is reference-free. It checks whether an answer is supported and on-topic, not whether it is factually complete. Pair it with reference-based correctness on a golden dataset. |
 
 ### promptfoo
 
 | Field | Details |
 |---|---|
 | **Link** | [promptfoo.dev](https://www.promptfoo.dev) · [GitHub](https://github.com/promptfoo/promptfoo) |
-| **Type / License** | OSS CLI + library (Node.js; also installable via `pip`/`brew`), MIT. Now part of OpenAI. Commercial/enterprise offering exists. |
-| **Strengths** | Declarative YAML test matrices (prompts × providers × test cases × assertions); side-by-side comparison UI; excellent CI ergonomics; a large **red-teaming** module (plugins + attack strategies, OWASP/NIST/MITRE-aligned presets) — see [Guardrail tools](./02-guardrail-tools.md#promptfoo-red-teaming). |
-| **Notable metrics** | Deterministic assertions (equals, contains, regex, JSON schema, latency, cost …); model-graded assertions such as `llm-rubric`, `g-eval`, `factuality`, `agent-rubric`, `select-best`; RAG-oriented `context-faithfulness`, `context-recall`, `context-relevance`, `answer-relevance`; custom JavaScript/Python assertions. |
-| **Best for** | Prompt/model comparisons, regression suites in CI, and combined eval + red-team pipelines in one tool. |
-| **Watch-outs** | Not an observability platform. YAML scales poorly to very large, versioned datasets — keep datasets in a store and generate configs. |
+| **Type / License** | OSS CLI + library (Node.js, also installable via `pip` or `brew`), MIT. Part of OpenAI. Commercial enterprise edition available. |
+| **Strengths** | Runs declarative YAML test matrices across prompts, providers, test cases, and assertions. Includes a side-by-side comparison UI, fast CI workflows, and a built-in **red-teaming** module with OWASP, NIST, and MITRE presets (see [Guardrail tools](./02-guardrail-tools.md#promptfoo-red-teaming)). |
+| **Notable metrics** | Deterministic checks (equals, contains, regex, JSON schema, latency, cost). Model-graded checks (`llm-rubric`, `g-eval`, `factuality`, `agent-rubric`, `select-best`). RAG checks (`context-faithfulness`, `context-recall`, `context-relevance`, `answer-relevance`) and custom JS or Python assertions. |
+| **Best for** | Comparing prompts and models, running CI regression suites, and combining offline evals with red teaming in one CLI. |
+| **Watch-outs** | Promptfoo is not a production observability platform. Hand-written YAML files scale poorly for large datasets, so store datasets externally and generate configs. |
 
 ### OpenAI Evals (repo) and the OpenAI Evals API
 
 | Field | Details |
 |---|---|
 | **Link** | [GitHub](https://github.com/openai/evals) · [Evals guide](https://developers.openai.com/api/docs/guides/evals) · [Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices) |
-| **Type / License** | OSS framework + registry (repo); hosted Evals in the OpenAI platform (commercial) |
-| **Strengths** | Early, influential registry of model evals and "model-graded" eval templates; the hosted product lets you define graders over datasets and compare runs of OpenAI models/prompts. The best-practices guide is worth reading regardless of tooling. |
-| **Notable metrics** | String-check, text-similarity, model-graded (score/label) graders, Python graders (hosted); match/fuzzy-match and model-graded templates (repo). |
-| **Best for** | OpenAI-centric teams; prompt/model migration checks on OpenAI models. |
-| **Watch-outs** | Hosted evals tie you to one vendor's models and platform. The OSS repo is lightly maintained relative to the hosted product. |
+| **Type / License** | OSS framework and registry (repo). Hosted Evals API in the commercial OpenAI platform. |
+| **Strengths** | Created an early, influential registry of model benchmarks and model-graded evaluation templates. The hosted API lets you define graders over datasets and compare runs across OpenAI models and prompts. Read the best-practices guide regardless of which tool you choose. |
+| **Notable metrics** | Hosted: string-check, text-similarity, model-graded score or label graders, and Python graders. Repo: exact/fuzzy match and model-graded templates. |
+| **Best for** | Teams standardized on OpenAI models that run prompt and model migration checks. |
+| **Watch-outs** | Hosted Evals lock you into OpenAI models and infrastructure. The open-source repo receives light maintenance compared to the hosted API. |
 
 ### Inspect (UK AI Security Institute)
 
 | Field | Details |
 |---|---|
 | **Link** | [inspect.aisi.org.uk](https://inspect.aisi.org.uk/) · [GitHub](https://github.com/UKGovernmentBEIS/inspect_ai) |
-| **Type / License** | OSS (Python), MIT; developed by the UK AI Security Institute |
-| **Strengths** | Rigorous, composable eval framework: **datasets → solvers → scorers**; first-class **agent** support (ReAct agent, multi-agent, custom agents, MCP tools, sandboxed tool execution, tool approval), model grading, multiple scorers, eval sets, rich log viewer and VS Code extension. Large ecosystem of published benchmark implementations. |
-| **Notable metrics** | Built-in scorers (match, includes, pattern, model-graded QA/fact …), custom scorers and metrics (accuracy, stderr, etc.). |
-| **Best for** | Agentic evals that need sandboxed tool execution and reproducible, auditable runs; safety/capability evals; teams that like a research-grade harness. |
-| **Watch-outs** | No production tracing/online evals — it is an offline harness. RAG metrics are yours to implement (or wrap from another library). |
+| **Type / License** | OSS (Python), MIT. Developed by the UK AI Security Institute. |
+| **Strengths** | Provides a composable evaluation pipeline: **datasets → solvers → scorers**. Includes first-class **agent** support (ReAct, multi-agent, MCP tools, sandboxed execution, and tool approval), model grading, a log viewer, and a VS Code extension. Ships a large ecosystem of standard benchmark implementations. |
+| **Notable metrics** | Built-in scorers (match, includes, pattern, model-graded QA and factuality), custom scorers, accuracy, and standard error. |
+| **Best for** | Running agentic evaluations that require sandboxed tool execution, reproducible audit logs, or safety and capability benchmarks. |
+| **Watch-outs** | Inspect is an offline evaluation harness with no production tracing or online scoring. You must implement RAG-specific metrics yourself or wrap another library. |
 
 ### Giskard (open source, v3)
 
 | Field | Details |
 |---|---|
 | **Link** | [docs.giskard.ai](https://docs.giskard.ai) · [GitHub](https://github.com/Giskard-AI/giskard-oss) |
-| **Type / License** | OSS (Python 3.12+), Apache-2.0; commercial Giskard Hub |
-| **Strengths** | v3 rewrite targeting agents: `giskard-checks` (scenario API, multi-turn, built-in checks, LLM-as-judge) and `giskard-scan` (vulnerability scan for prompt injection, jailbreaks, harmful content + knowledge-base quality evaluation, successor of v2 RAGET). Async-first, light dependencies. |
-| **Notable metrics** | String/regex/comparison checks, semantic similarity, LLM-judge checks such as `Groundedness`, `Conformity`, `LLMJudge`. |
-| **Best for** | Scenario-based multi-turn agent tests plus a vulnerability scan in one OSS package. |
-| **Watch-outs** | v2 is unmaintained; most blog posts and tutorials online use v2 APIs. |
+| **Type / License** | OSS (Python 3.12+), Apache-2.0. Commercial Giskard Hub available. |
+| **Strengths** | Rewritten in v3 for agents with an async-first design and light dependencies. Ships `giskard-checks` for multi-turn scenario testing and `giskard-scan` for vulnerability scanning (prompt injection, jailbreaks, harmful content) and RAG knowledge-base quality checks. |
+| **Notable metrics** | String, regex, and comparison checks, semantic similarity, and LLM-judge checks (`Groundedness`, `Conformity`, `LLMJudge`). |
+| **Best for** | Running scenario-based multi-turn agent tests and automated vulnerability scans in one Python package. |
+| **Watch-outs** | Maintainers no longer update v2, and most older blog posts still show v2 APIs. |
 
 ### lm-evaluation-harness (EleutherAI) — for model benchmarking context
 
@@ -159,10 +165,10 @@ Each card uses the same fields: **Link · Type/License · Strengths · Notable m
 |---|---|
 | **Link** | [GitHub](https://github.com/EleutherAI/lm-evaluation-harness) |
 | **Type / License** | OSS (Python), MIT |
-| **Strengths** | The de-facto harness for running standard academic benchmarks against base/instruct models (it backs many public leaderboards); reproducible few-shot settings; supports HF, vLLM and API models. |
-| **Notable metrics** | Benchmark-defined (accuracy, exact match, perplexity, etc.) across hundreds of tasks. |
-| **Best for** | Choosing or fine-tuning a **model**; checking that a fine-tune did not regress general capabilities. |
-| **Watch-outs** | It evaluates models, not your **application**. Benchmark scores say little about your retrieval quality, tool use or RBAC behaviour. |
+| **Strengths** | Serves as the standard harness for running academic benchmarks against base and instruct models. Supports reproducible few-shot configurations across Hugging Face, vLLM, and commercial API models. |
+| **Notable metrics** | Benchmark-defined metrics (accuracy, exact match, log-likelihood perplexity) across hundreds of academic tasks. |
+| **Best for** | Selecting a base model or verifying that fine-tuning did not degrade general model capabilities. |
+| **Watch-outs** | This harness evaluates base **models**, not your **application**. Academic benchmark scores do not predict your retrieval quality, tool use, or RBAC safety. |
 
 ### ARES
 
@@ -170,150 +176,150 @@ Each card uses the same fields: **Link · Type/License · Strengths · Notable m
 |---|---|
 | **Link** | [GitHub](https://github.com/stanford-futuredata/ARES) · [paper](https://arxiv.org/abs/2311.09476) |
 | **Type / License** | OSS research code (Python), Apache-2.0 |
-| **Strengths** | Trains lightweight **fine-tuned judges** on synthetic data for context relevance, answer faithfulness and answer relevance, then uses **prediction-powered inference (PPI)** with a small human-labeled set to produce confidence intervals. Important idea: combine cheap judges with a few hundred human labels to get statistically valid estimates. |
-| **Notable metrics** | Context relevance, answer faithfulness, answer relevance (with confidence intervals). |
-| **Best for** | Learning the PPI approach; high-volume scoring where per-call LLM judging is too expensive. |
-| **Watch-outs** | Research code with infrequent updates (last push March 2025 at snapshot time); expect integration work. Borrow the idea even if you don't use the code. |
+| **Strengths** | Fine-tunes lightweight **classifier judges** on synthetic data for context relevance, answer faithfulness, and answer relevance. Uses **prediction-powered inference (PPI)** with a small human-labeled set to compute valid confidence intervals at low cost. |
+| **Notable metrics** | Context relevance, answer faithfulness, and answer relevance with statistical confidence intervals. |
+| **Best for** | Learning the PPI calibration method and scoring high-volume datasets where frontier LLM judges cost too much. |
+| **Watch-outs** | ARES is research code with infrequent updates (last updated March 2025). Borrow the PPI statistical method even if you write your own integration code. |
 
 ---
 
 ## B. Eval + observability platforms
 
-These are candidate **systems of record**: they store traces, datasets, experiment runs, human annotations and scores, and they run evaluators online. See [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md) for what to capture.
+These platforms act as candidate **systems of record**. They store traces, datasets, experiment runs, human annotations, and scores, and they run evaluators on live traffic. See [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md) for what to record in spans.
 
 ### LangSmith (LangChain)
 
 | Field | Details |
 |---|---|
 | **Link** | [Evaluation docs](https://docs.langchain.com/langsmith/evaluation) · [Observability docs](https://docs.langchain.com/langsmith/observability) · OSS evaluators: [openevals](https://github.com/langchain-ai/openevals), [agentevals](https://github.com/langchain-ai/agentevals) |
-| **Type / License** | Commercial SaaS; self-hosted deployment available (enterprise). `openevals`/`agentevals` are MIT. |
-| **Strengths** | Deep LangChain/LangGraph integration (works framework-agnostically too); datasets + experiments + pairwise comparison; online evaluators on production runs; annotation queues; pytest/vitest integrations; agent trajectory evaluators. |
-| **Notable metrics** | Bring-your-own evaluators; prebuilt LLM-as-judge prompts in openevals (e.g. correctness, conciseness, hallucination, toxicity, RAG groundedness / helpfulness / retrieval relevance, tool selection, trajectory accuracy, prompt injection, PII leakage) and trajectory match/judge evaluators in agentevals. |
-| **Best for** | Teams building on LangGraph/LangChain who want tracing, evals and prompt iteration in one place. |
-| **Watch-outs** | Commercial pricing per trace volume; self-hosting is an enterprise feature. |
+| **Type / License** | Commercial SaaS with enterprise self-hosting. `openevals` and `agentevals` are MIT-licensed. |
+| **Strengths** | Integrates deeply with LangChain and LangGraph while working with any framework. Supports datasets, experiment diffs, pairwise comparisons, online production evaluators, annotation queues, pytest/vitest runners, and agent trajectory evaluations. |
+| **Notable metrics** | Custom evaluators plus prebuilt LLM judge prompts in `openevals` (correctness, conciseness, hallucination, toxicity, RAG groundedness, retrieval relevance, tool selection, prompt injection, PII leakage) and trajectory evaluators in `agentevals`. |
+| **Best for** | Teams building on LangGraph or LangChain that want tracing, datasets, evals, and prompt iteration in one platform. |
+| **Watch-outs** | Pricing scales with trace volume, and self-hosting requires an enterprise contract. |
 
 ### Langfuse
 
 | Field | Details |
 |---|---|
 | **Link** | [langfuse.com/docs](https://langfuse.com/docs) · [GitHub](https://github.com/langfuse/langfuse) |
-| **Type / License** | OSS (MIT core; `ee/` folders under a separate enterprise license) + Langfuse Cloud. Owned by ClickHouse since January 2026. |
-| **Strengths** | The most widely adopted **self-hostable** LLM observability platform; OpenTelemetry-native tracing; datasets and experiments; managed LLM-as-a-judge evaluators that run on live traces or dataset runs; annotation queues; user feedback scores; prompt management; integrations with RAGAS and most frameworks. |
-| **Notable metrics** | Managed LLM-as-a-judge evaluators from a template gallery or a blank prompt (numeric, categorical or boolean scores; variables can map to input, output, metadata or tool calls) plus any custom score you push via SDK/API. |
-| **Best for** | Data-residency-sensitive orgs that need to self-host; teams that want an open, framework-neutral system of record. |
-| **Watch-outs** | Self-hosting means operating ClickHouse, Postgres, Redis and object storage at scale. Some enterprise features are licensed separately — check the current feature matrix. |
+| **Type / License** | OSS (MIT core, with `ee/` folders under a commercial enterprise license) + Langfuse Cloud. Owned by ClickHouse since January 2026. |
+| **Strengths** | Serves as the most widely adopted **self-hostable** LLM observability platform. Features OpenTelemetry-native tracing, datasets, experiments, managed LLM-as-a-judge evaluators on live traces or datasets, annotation queues, user feedback capture, and prompt management. |
+| **Notable metrics** | Managed LLM-as-a-judge templates (numeric, categorical, or boolean scores mapped to inputs, outputs, metadata, or tool calls) plus any custom score pushed via SDK or API. |
+| **Best for** | Organizations with strict data-residency rules that need a self-hosted, framework-neutral system of record. |
+| **Watch-outs** | Self-hosting at scale requires operating ClickHouse, PostgreSQL, Redis, and object storage. Check the feature matrix to see which features require an enterprise license. |
 
 ### Arize Phoenix and Arize AX
 
 | Field | Details |
 |---|---|
 | **Link** | [Phoenix docs](https://arize.com/docs/phoenix) · [Phoenix GitHub](https://github.com/Arize-ai/phoenix) · [Arize AX docs](https://arize.com/docs/ax) · instrumentation: [OpenInference](https://github.com/Arize-ai/openinference) |
-| **Type / License** | Phoenix: source-available, **Elastic License 2.0** (free to self-host; restrictions on offering as a managed service). Arize AX: commercial managed platform. |
-| **Strengths** | Built on OpenTelemetry + OpenInference semantic conventions (portable traces); strong eval library with LLM-judge templates for RAG and agents; datasets & experiments; runs locally in a notebook or as a server. AX adds managed scale, online evals, monitoring and agent observability. |
-| **Notable metrics** | Judge templates for hallucination, QA correctness, retrieval relevance, toxicity, summarisation, tool-calling / agent path evaluations; code evaluators; custom judges. |
-| **Best for** | OTel-first teams that want an open local tool now and a managed path later. |
-| **Watch-outs** | ELv2 is not an OSI-approved open-source license — check with legal if you plan to embed or resell. |
+| **Type / License** | Phoenix: source-available under **Elastic License 2.0** (free to self-host, restricted for managed resale). Arize AX: commercial managed platform. |
+| **Strengths** | Builds natively on OpenTelemetry and OpenInference semantic conventions for portable traces. Ships an evaluation library with LLM-judge templates for RAG and agents, dataset and experiment tracking, and local notebook or server modes. Arize AX adds managed scale, online monitoring, and enterprise observability. |
+| **Notable metrics** | LLM-judge templates for hallucination, QA correctness, retrieval relevance, toxicity, summarization, and tool-calling or agent trajectories, plus custom code evaluators. |
+| **Best for** | OpenTelemetry-first teams that want a free self-hosted tool today and a managed enterprise upgrade path later. |
+| **Watch-outs** | ELv2 is not an OSI-approved open-source license. Check with your legal team if you embed Phoenix in a commercial service. |
 
 ### Braintrust
 
 | Field | Details |
 |---|---|
 | **Link** | [braintrust.dev](https://www.braintrust.dev/) · [docs](https://www.braintrust.dev/docs) · scorers: [autoevals](https://github.com/braintrustdata/autoevals) (MIT) |
-| **Type / License** | Commercial SaaS; self-hosted data plane on the Enterprise plan (Braintrust runs the UI/control plane) or BYOC |
-| **Strengths** | Experiment-centric workflow (`Eval(...)` in code → diff experiments in UI); playgrounds for prompt iteration; online scoring of production logs; SDKs in many languages (Python, TypeScript, Go, Ruby, C# …); strong dataset and human-review UX. |
-| **Notable metrics** | `autoevals` library: LLM-judge scorers (factuality, closed-QA, etc.), RAG scorers, embedding similarity, JSON/structured comparisons; custom code scorers. |
-| **Best for** | Product + engineering teams iterating quickly on prompts and agents with tight experiment comparison loops. |
-| **Watch-outs** | Full self-hosting is enterprise-only and hybrid (control plane stays with the vendor). |
+| **Type / License** | Commercial SaaS. Enterprise plan offers a hybrid self-hosted data plane (BYOC) while Braintrust hosts the UI control plane. |
+| **Strengths** | Centers on fast experiment loops (`Eval(...)` in code with visual diffs in the UI). Offers interactive prompt playgrounds, online production log scoring, multi-language SDKs (Python, TypeScript, Go, Ruby, C#), and strong dataset and human-review workflows. |
+| **Notable metrics** | Open-source `autoevals` scorers (factuality, closed-QA, RAG metrics, embedding similarity, structured JSON diffs) plus custom code and LLM-judge scorers. |
+| **Best for** | Product and engineering teams that iterate rapidly on prompts and agents and want tight experiment comparison workflows. |
+| **Watch-outs** | Self-hosting requires an enterprise plan and uses a hybrid architecture where the control plane remains cloud-hosted. |
 
 ### W&B Weave
 
 | Field | Details |
 |---|---|
 | **Link** | [Weave docs](https://docs.coreweave.com/products/wandb/weave) · [GitHub](https://github.com/wandb/weave) |
-| **Type / License** | SDK Apache-2.0; hosted W&B platform (commercial; dedicated/self-managed options for enterprise). W&B is part of CoreWeave. |
-| **Strengths** | Decorator-based tracing (`@weave.op`), Evaluations with scorers, leaderboards, built-in scorers, human feedback; natural fit if you already use W&B for model training/experiments. |
-| **Notable metrics** | Built-in and custom scorers (LLM-judge and code); hallucination/relevance/moderation-style scorers. |
-| **Best for** | Organisations already on W&B for ML experiment tracking that want one vendor for training and app evals. |
-| **Watch-outs** | Check data-hosting terms after the CoreWeave acquisition; the strongest value is when you also use W&B Models. |
+| **Type / License** | Apache-2.0 SDK with a commercial hosted W&B platform (dedicated and self-managed enterprise options available). Owned by CoreWeave. |
+| **Strengths** | Uses lightweight `@weave.op` decorators for tracing and pairs them with dataset evaluations, leaderboards, built-in scorers, and human feedback. Fits naturally if your team already uses Weights & Biases for model training. |
+| **Notable metrics** | Built-in and custom LLM-judge or code scorers for hallucination, relevance, and moderation. |
+| **Best for** | Organizations already using W&B for ML experiment tracking that want one vendor for training and application evals. |
+| **Watch-outs** | Review updated data-hosting terms following the CoreWeave acquisition. Weave delivers the most value when paired with W&B Models. |
 
 ### MLflow (GenAI evaluation & tracing)
 
 | Field | Details |
 |---|---|
 | **Link** | [MLflow for Agents and LLMs](https://mlflow.org/docs/latest/genai/) · [GitHub](https://github.com/mlflow/mlflow) · [Predefined judges](https://mlflow.org/docs/latest/genai/eval-monitor/scorers/llm-judge/predefined/) |
-| **Type / License** | OSS, Apache-2.0; managed on Databricks and other clouds |
-| **Strengths** | MLflow 3 reoriented around GenAI: OpenTelemetry-compatible tracing, `mlflow.genai.evaluate` with scorers, predefined LLM judges, custom judges, evaluation datasets, prompt registry/optimisation, AI gateway, production monitoring. Fits existing MLOps governance (model registry, lineage). |
-| **Notable metrics** | Predefined judges including `RetrievalGroundedness`, `RetrievalRelevance`, `RetrievalSufficiency`, `RelevanceToQuery`, `Correctness`, `Safety`, `Guidelines`; tool-call judges `ToolCallCorrectness`, `ToolCallEfficiency` (marked experimental); multi-turn conversation judges (experimental). Several require traces. |
-| **Best for** | Databricks shops and orgs that already run MLflow for classic ML and want one open-source system for both. |
-| **Watch-outs** | Some judges are experimental and may change; the richest monitoring UX is on managed offerings. |
+| **Type / License** | OSS, Apache-2.0. Managed offerings available on Databricks and major clouds. |
+| **Strengths** | MLflow 3 focuses heavily on GenAI with OpenTelemetry-compatible tracing, `mlflow.genai.evaluate`, predefined and custom LLM judges, evaluation datasets, a prompt registry, an AI gateway, and production monitoring. Integrates with existing MLOps governance and lineage. |
+| **Notable metrics** | Predefined judges: `RetrievalGroundedness`, `RetrievalRelevance`, `RetrievalSufficiency`, `RelevanceToQuery`, `Correctness`, `Safety`, `Guidelines`, and experimental tool-call (`ToolCallCorrectness`, `ToolCallEfficiency`) and multi-turn judges. |
+| **Best for** | Databricks users and teams that already run MLflow for classical ML and want one open-source platform. |
+| **Watch-outs** | Several agent and multi-turn judges remain experimental and require full traces. Managed Databricks deployments offer the richest monitoring UI. |
 
 ### Comet Opik
 
 | Field | Details |
 |---|---|
 | **Link** | [Opik docs](https://www.comet.com/docs/opik/) · [GitHub](https://github.com/comet-ml/opik) |
-| **Type / License** | OSS, Apache-2.0; Comet-hosted cloud option |
-| **Strengths** | Fully open-source tracing + evaluation + datasets + experiments with a self-hostable server; online evaluation rules on production traces; prompt optimisation tooling; agent observability. |
-| **Notable metrics** | Heuristic metrics (equals, contains, regex, BLEU/ROUGE …) and LLM-judge metrics such as hallucination, answer relevance, context precision, context recall, factuality, moderation, usefulness, structured-output compliance, trajectory accuracy, G-Eval and LLM juries; custom metrics. |
-| **Best for** | Teams that want an Apache-licensed, self-hostable alternative with both offline and online evals. |
-| **Watch-outs** | As with any self-hosted platform, you operate the storage backends. |
+| **Type / License** | OSS, Apache-2.0. Managed Comet Cloud option available. |
+| **Strengths** | Provides a fully open-source, Apache-2.0 server for tracing, datasets, offline experiments, online production evaluation rules, prompt optimization, and agent observability. |
+| **Notable metrics** | Deterministic checks (equals, contains, regex, BLEU, ROUGE) and LLM-judge metrics (hallucination, answer relevance, context precision, context recall, factuality, moderation, usefulness, trajectory accuracy, G-Eval, and LLM juries). |
+| **Best for** | Teams that want an Apache-2.0 self-hostable platform with both offline and online evaluations. |
+| **Watch-outs** | Self-hosting requires your team to operate and scale the underlying storage databases. |
 
 ### Galileo (now Splunk Agent Observability)
 
 | Field | Details |
 |---|---|
 | **Link** | [galileo.ai](https://galileo.ai/) · [docs](https://docs.galileo.ai/what-is-galileo) |
-| **Type / License** | Commercial. Per its docs, Galileo became **Splunk Agent Observability** on August 7, 2026. |
-| **Strengths** | 20+ out-of-the-box evals for RAG, agents, safety and security; custom LLM-judge metrics; distils judge metrics into small **Luna** models for low-latency, low-cost scoring of 100% of traffic — positioned as "offline evals become production guardrails". |
-| **Notable metrics** | Agentic: Action Advancement, Action Completion, Agent Efficiency, Agent Flow, Tool Selection Quality, Tool Error, Reasoning Coherence. Response quality: Correctness, Ground Truth Adherence, Instruction Adherence; RAG, safety and security metrics; Autotune for custom LLM-judge metrics. |
-| **Best for** | Enterprises that want evaluator models cheap enough to run on all traffic, and Splunk customers consolidating observability. |
-| **Watch-outs** | Product direction and packaging are in flux after the acquisition — confirm roadmap, pricing and deployment model. |
+| **Type / License** | Commercial platform. Rebranded as **Splunk Agent Observability** on August 7, 2026. |
+| **Strengths** | Ships 20+ built-in evaluators for RAG, agents, safety, and security alongside custom LLM-judge metrics. Distills judge metrics into small **Luna** evaluator models for low-latency, low-cost scoring across 100% of production traffic. |
+| **Notable metrics** | Agentic: Action Advancement, Action Completion, Agent Efficiency, Agent Flow, Tool Selection Quality, Tool Error, Reasoning Coherence. Quality: Correctness, Ground Truth Adherence, Instruction Adherence, RAG, safety, and Autotune custom judges. |
+| **Best for** | Enterprises that want small evaluator models for full-traffic scoring, and Splunk customers consolidating observability. |
+| **Watch-outs** | Product packaging and roadmaps are shifting after the Splunk acquisition. Confirm current pricing and deployment options with sales. |
 
 ### Patronus AI
 
 | Field | Details |
 |---|---|
 | **Link** | [patronus.ai](https://www.patronus.ai/) · models: [Lynx](https://huggingface.co/PatronusAI/Llama-3-Patronus-Lynx-8B-Instruct), [Glider](https://huggingface.co/PatronusAI/glider) |
-| **Type / License** | Commercial; open-weight evaluator models on Hugging Face (check each model's license) |
-| **Strengths** | Known for evaluator models: **Lynx** (RAG hallucination detection) and **Glider** (small general-purpose judge model), plus research benchmarks. |
-| **Notable metrics** | Hallucination/faithfulness (Lynx); rubric-based judging (Glider). |
-| **Best for** | Self-hosting a specialised open judge model for hallucination checks. |
-| **Watch-outs** | **Status:** the October 2026 homepage focuses on RL environments and benchmarks; verify whether the hosted evaluation product is still offered before planning around it. |
+| **Type / License** | Commercial offering plus open-weight evaluator models on Hugging Face (verify each model's license). |
+| **Strengths** | Releases specialized open-weight evaluator models: **Lynx** for RAG hallucination detection and **Glider** for small general-purpose rubric judging, along with public evaluation benchmarks. |
+| **Notable metrics** | Hallucination and faithfulness detection (Lynx) and rubric-based pass/fail or score judging (Glider). |
+| **Best for** | Self-hosting a specialized open-weight judge model for RAG faithfulness or rubric checks. |
+| **Watch-outs** | **Status:** In October 2026, the Patronus homepage shifted focus to RL environments and benchmarks. Verify whether the commercial eval platform remains supported before adopting it. |
 
 ### Humanloop — sunset
 
 | Field | Details |
 |---|---|
 | **Link** | [humanloop.com](https://humanloop.com) |
-| **Status** | The team joined Anthropic and the platform is being sunset. Listed here only so you recognise the name in older articles. **Do not adopt.** |
+| **Status** | The Humanloop team joined Anthropic and sunset the platform. We list it here only so you recognize the name in older posts. **Do not adopt.** |
 
 ### Confident AI
 
 | Field | Details |
 |---|---|
 | **Link** | [confident-ai.com](https://www.confident-ai.com/) · [docs](https://www.confident-ai.com/docs) |
-| **Type / License** | Commercial platform built by the DeepEval maintainers; the platform's metrics are DeepEval's metrics. |
-| **Strengths** | Turns DeepEval tests into a team workflow: datasets, regression testing in CI/CD, tracing with evaluation on traces/spans/threads, online evals, drift alerts, human metric alignment, multi-turn simulation, red teaming (DeepTeam), and an "AI governance" gate that blocks releases failing evals. |
-| **Notable metrics** | All DeepEval metrics (RAG, agent, conversational, safety, G-Eval/DAG custom). |
-| **Best for** | Teams already using DeepEval in code who want a UI, history and production monitoring without changing metric definitions. |
-| **Watch-outs** | Commercial; check deployment options (cloud vs. on-prem) for regulated data. |
+| **Type / License** | Commercial platform built by the DeepEval maintainers. Uses DeepEval's open-source metric definitions. |
+| **Strengths** | Turns DeepEval unit tests into a shared team platform with dataset management, CI/CD regression gates, trace/span/thread evaluation, online monitoring, drift alerts, human alignment workflows, multi-turn simulation, and red teaming (DeepTeam). |
+| **Notable metrics** | All DeepEval metrics across RAG, agents, multi-turn conversations, safety, G-Eval, and DAG. |
+| **Best for** | Teams already using DeepEval in code that want a managed UI, historical tracking, and online monitoring without rewriting metrics. |
+| **Watch-outs** | Confident AI is commercial software. Confirm cloud versus on-premises deployment options if you handle regulated data. |
 
 ---
 
 ## C. Cloud-native evaluation services
 
-Choose these when you are already standardised on a cloud and want IAM, networking, billing and model catalog integration. Expect tighter coupling to that cloud's models and regions.
+Choose a cloud-native service when your organization already standardizes on that cloud and wants unified IAM, private networking, billing, and model catalog access. Expect tighter coupling to that cloud's regions and models.
 
 ### Microsoft Foundry (formerly Azure AI Foundry) — evaluations & observability
 
 | Field | Details |
 |---|---|
 | **Link** | [Observability concepts](https://learn.microsoft.com/en-us/azure/foundry/concepts/observability) · [Built-in evaluators](https://learn.microsoft.com/en-us/azure/foundry/concepts/built-in-evaluators) · [RAG evaluators](https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/rag-evaluators) |
-| **Type** | Managed cloud service + Azure AI Evaluation SDK (Python) |
-| **Strengths** | Broadest catalog of built-in evaluators among the clouds, spanning quality, RAG, safety/security and agents; OpenTelemetry tracing integrated with Azure Monitor Application Insights; production monitoring dashboards and alerts; AI red-teaming integration. |
-| **Notable metrics** | General: Coherence, Fluency. Similarity: Similarity, F1, BLEU, GLEU, ROUGE, METEOR. RAG: Retrieval, Document Retrieval, Groundedness (1–5 judge), Groundedness Pro (preview, pass/fail via Content Safety), Relevance, Response Completeness (preview). Safety: Hate and Unfairness, Sexual, Violence, Self-Harm, Protected Materials, Indirect Attack (XPIA), Code Vulnerability, Ungrounded Attributes, Prohibited Actions, Sensitive Data Leakage. Agent: Task Adherence, Task Completion, Intent Resolution, Task Navigation Efficiency, Tool Call Accuracy, Customer Satisfaction (several in preview). |
-| **Best for** | Azure-standardised enterprises; agents built on Microsoft Agent Framework / Foundry Agent Service. |
-| **Watch-outs** | Many evaluators are preview; safety evaluators run as hosted services (region availability varies). Groundedness Pro and Groundedness are different methods — don't mix their scores. |
+| **Type** | Managed Azure cloud service + Azure AI Evaluation Python SDK |
+| **Strengths** | Offers the broadest catalog of built-in cloud evaluators across quality, RAG, safety, security, and agents. Integrates OpenTelemetry tracing with Azure Monitor Application Insights, production dashboards, alerts, and AI red teaming. |
+| **Notable metrics** | General: Coherence, Fluency, Similarity, F1, BLEU, GLEU, ROUGE, METEOR. RAG: Retrieval, Document Retrieval, Groundedness (1–5 judge), Groundedness Pro (preview), Relevance, Response Completeness (preview). Safety: Hate, Sexual, Violence, Self-Harm, Protected Materials, Indirect Attack (XPIA), Code Vulnerability, Ungrounded Attributes, Prohibited Actions, Sensitive Data Leakage. Agent: Task Adherence, Task Completion, Intent Resolution, Task Navigation Efficiency, Tool Call Accuracy. |
+| **Best for** | Azure-standardized enterprises and agents built on Microsoft Agent Framework or Foundry Agent Service. |
+| **Watch-outs** | Several evaluators remain in preview, and hosted safety evaluators vary by region. Do not mix Groundedness and Groundedness Pro scores because they use different methods. |
 
 ### Amazon Bedrock evaluations (+ AgentCore Evaluations)
 
@@ -321,34 +327,34 @@ Choose these when you are already standardised on a cloud and want IAM, networki
 |---|---|
 | **Link** | [Bedrock evaluations](https://docs.aws.amazon.com/bedrock/latest/userguide/evaluation.html) · [RAG evaluations](https://docs.aws.amazon.com/bedrock/latest/userguide/evaluation-kb.html) · [AgentCore Evaluations](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/evaluations.html) |
 | **Type** | Managed AWS services |
-| **Strengths** | Model evaluation jobs (programmatic, human-worker, LLM-as-judge); **RAG evaluation** jobs in "retrieve only" or "retrieve and generate" mode against Bedrock Knowledge Bases *or* your own RAG system's outputs (bring-your-own inference responses); AgentCore Evaluations scores agent traces (Strands, LangGraph via OpenTelemetry/OpenInference) with built-in and custom LLM-judge evaluators. |
-| **Notable metrics** | Judge-based quality metrics for models and RAG (correctness/completeness/helpfulness-style and retrieval relevance/coverage-style metrics — check the current metric list per job type); built-in agent evaluators such as helpfulness in AgentCore; custom metrics. |
-| **Best for** | AWS-native teams, especially those on Bedrock Knowledge Bases or AgentCore. |
-| **Watch-outs** | RAG evaluation jobs expect ground truth in the dataset; evaluator model availability varies by region. |
+| **Strengths** | Runs programmatic, human-worker, and LLM-as-a-judge model evaluations. Evaluates **RAG systems** in retrieve-only or retrieve-and-generate modes against Bedrock Knowledge Bases or your own exported RAG outputs. **AgentCore Evaluations** scores OpenTelemetry and OpenInference agent traces from Strands or LangGraph. |
+| **Notable metrics** | LLM-judge quality metrics for models and RAG (correctness, completeness, helpfulness, retrieval relevance, and coverage), built-in AgentCore evaluators, and custom metrics. |
+| **Best for** | AWS-native teams, especially those using Bedrock Knowledge Bases or Bedrock AgentCore. |
+| **Watch-outs** | RAG evaluation jobs require ground-truth references in your dataset, and judge model availability varies by AWS region. |
 
 ### Google Gen AI evaluation service (Vertex AI → Gemini Enterprise Agent Platform docs)
 
 | Field | Details |
 |---|---|
 | **Link** | [Gen AI evaluation service overview](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/evaluation-overview) (formerly under Vertex AI docs) |
-| **Type** | Managed Google Cloud service + SDK |
-| **Strengths** | **Adaptive rubrics** (recommended): auto-generates per-prompt pass/fail tests, which works well for heterogeneous prompts; static rubrics; computation-based metrics; custom Python functions; dataset creation from files, production logs or synthetic generation; agent evaluation using traces and response quality. |
-| **Notable metrics** | Rubric-based judge metrics (adaptive/static), ROUGE/BLEU-style computation metrics, agent trajectory and response metrics, custom functions. |
-| **Best for** | GCP-standardised teams; comparing Google and third-party models on your own data; model migrations. |
-| **Watch-outs** | Product naming and doc locations have moved recently (Vertex AI → Gemini Enterprise Agent Platform); pin SDK versions. |
+| **Type** | Managed Google Cloud service + Python SDK |
+| **Strengths** | Features **adaptive rubrics** that automatically generate tailored pass/fail tests for each prompt. Also supports static rubrics, deterministic computation metrics, custom Python functions, dataset creation from production logs, and agent trace evaluation. |
+| **Notable metrics** | Adaptive and static rubric-based judge metrics, ROUGE and BLEU computation metrics, agent trajectory and response metrics, and custom Python functions. |
+| **Best for** | GCP-standardized teams comparing Gemini and third-party models or validating model migrations on domain data. |
+| **Watch-outs** | Google recently moved documentation from Vertex AI to Gemini Enterprise Agent Platform. Pin your SDK versions to avoid breaking changes. |
 
 ---
 
 ## Comparison matrix
 
-**Legend:** ✅ first-class / native · 🟡 partial, via integration, preview, or enterprise-only · ❌ not a primary capability (may exist in limited form) · ❔ not verified — ask the vendor. "Self-host" for libraries means "runs entirely in your environment" (the judge model may still be an external API).
+**Legend:** ✅ first-class / native · 🟡 partial, via integration, preview, or enterprise-only · ❌ not a primary capability (may exist in limited form) · ❔ not verified — ask the vendor. For libraries, "Self-host" means the library runs entirely in your environment, even if it calls an external LLM judge API.
 
-> This matrix is the author's assessment from public docs as of **October 2026**. Verify before deciding.
+> This matrix reflects our assessment of public documentation in **October 2026**. Verify capabilities before you decide.
 
 | Tool | RAG metrics | Agent / tool evals | LLM-judge customization | Dataset mgmt | Tracing | Online evals | CI integration | Self-host |
 |---|---|---|---|---|---|---|---|---|
 | **RAGAS** | ✅ | 🟡 | ✅ | 🟡 (generation, no store) | ❌ | ❌ | 🟡 | ✅ |
-| **DeepEval** | ✅ | ✅ | ✅ | 🟡 (synthesizer; store via Confident AI) | 🟡 | 🟡 (via Confident AI) | ✅ | ✅ |
+| **DeepEval** | ✅ | ✅ | ✅ | 🟡 (synthesizer, store via Confident AI) | 🟡 | 🟡 (via Confident AI) | ✅ | ✅ |
 | **TruLens** | ✅ | 🟡 | ✅ | 🟡 | ✅ | 🟡 | 🟡 | ✅ |
 | **promptfoo** | 🟡 | 🟡 | ✅ | 🟡 (YAML/CSV) | ❌ | ❌ | ✅ | ✅ |
 | **OpenAI Evals** | ❌ | 🟡 | ✅ | 🟡 (hosted) | 🟡 (hosted) | ❌ | 🟡 | 🟡 (repo only) |
@@ -369,20 +375,20 @@ Choose these when you are already standardised on a cloud and want IAM, networki
 | **Bedrock + AgentCore** | ✅ | 🟡 | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | ❌ |
 | **Google Gen AI eval** | 🟡 | ✅ | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | ❌ |
 
-Not in the matrix: **Patronus AI** (status unclear) and **Humanloop** (sunset).
+We omitted **Patronus AI** (commercial platform status unclear) and **Humanloop** (sunset) from the matrix.
 
 ### What the matrix does *not* capture
 
-- **Domain metrics.** No tool ships "did the text-to-SQL agent return rows the user's role may not see?" You will write that yourself (see [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md) and [Access control & RBAC](../04-guardrails/06-access-control-rbac.md)).
-- **Judge quality.** A ✅ for judge customization means you *can* customise; it does not mean the default judge agrees with your SMEs.
-- **Scale and cost.** Trace volume pricing, judge-call cost and storage retention often decide the outcome more than features.
-- **Security posture.** SSO/SCIM, RBAC inside the tool, audit logs, PII redaction before storage, data residency.
+- **Domain metrics:** No tool checks whether your text-to-SQL agent leaked rows forbidden by the user's role. You must write those checks yourself ([Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md)).
+- **Judge alignment:** A ✅ for judge customization means you can edit the prompt, not that the default judge agrees with your domain experts.
+- **Scale and cost:** Trace ingestion pricing, judge token costs, and retention limits often drive total cost more than base license fees.
+- **Enterprise security:** Check SSO/SCIM, internal RBAC, audit logs, pre-ingestion PII redaction, and data residency.
 
 ---
 
 ## Same concept, different names: a metric crosswalk
 
-The same idea appears under different names (and different implementations). Names below are as documented at snapshot time; implementations differ, so scores are **not** interchangeable.
+Different tools use different names and implementations for the same core concept. Because their underlying prompts and scoring logic differ, **never compare raw scores across tools**.
 
 | Concept | RAGAS | DeepEval | TruLens | MLflow | Microsoft Foundry |
 |---|---|---|---|---|---|
@@ -393,7 +399,7 @@ The same idea appears under different names (and different implementations). Nam
 | Answer matches reference | Factual Correctness | custom G-Eval / correctness-style metrics | — | Correctness | Similarity, F1, Response Completeness |
 | Tool calls correct | Tool Call Accuracy / Tool Call F1 | tool correctness metric | — | ToolCallCorrectness | Tool Call Accuracy |
 
-For definitions and formulas see [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md), [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md) and [Agent, tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md).
+See [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md), [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md), and [Agent, tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) for mathematical definitions and formulas.
 
 ---
 
@@ -401,7 +407,7 @@ For definitions and formulas see [End-to-end RAG evals](../02-offline-evals/01-e
 
 ### Step 1 — Decide the system of record first
 
-The system of record holds traces, datasets, experiments and annotations. It is the hardest component to replace, so decide it first and pick metric libraries second.
+Your system of record stores traces, datasets, experiments, and annotations. Because it is the hardest piece to replace, choose your platform first and select metric libraries second.
 
 ```mermaid
 flowchart TD
@@ -427,42 +433,42 @@ flowchart TD
 | Evals as unit tests in CI | DeepEval (pytest) or promptfoo (CLI/YAML) | LangSmith pytest integration, Braintrust `Eval` |
 | Agentic evals with sandboxed tool execution | Inspect | Giskard checks, framework-native trajectory evaluators |
 | Prompt/model A/B across providers | promptfoo | Braintrust playgrounds, Google Gen AI eval |
-| Cheap high-volume scoring | Small judge / distilled models (e.g., Galileo Luna, open judge models), ARES-style trained judges | Sampled LLM judges |
-| Statistical confidence on small label sets | ARES/PPI approach | Bootstrap CIs in your own code ([Running offline experiments](../02-offline-evals/08-running-offline-experiments.md)) |
-| Base-model selection | lm-evaluation-harness, HELM | Cloud model-eval jobs |
+| Cheap high-volume scoring | Small judge models (Galileo Luna, Lynx, Glider) or ARES-style classifiers | Sampled LLM judges |
+| Statistical confidence on small label sets | ARES PPI approach | Bootstrap confidence intervals in code ([Running offline experiments](../02-offline-evals/08-running-offline-experiments.md)) |
+| Base-model selection | lm-evaluation-harness, HELM | Cloud model-evaluation jobs |
 | Red teaming | promptfoo redteam, garak, PyRIT, DeepTeam | See [Guardrail tools](./02-guardrail-tools.md#red-teaming-tools) |
 
 ### Step 3 — Rules of thumb
 
-1. **Instrument with OpenTelemetry** (OpenInference or the OTel GenAI semantic conventions) rather than a vendor-only SDK where possible. Your traces then become portable between Langfuse, Phoenix, MLflow, Foundry, AgentCore and others.
-2. **Own your datasets.** Keep golden datasets in version control or your own storage (JSONL/Parquet + schema) and sync them into tools. A tool's dataset store is a cache, not the source of truth. See [Dataset strategy](../01-datasets/01-dataset-strategy.md).
-3. **Own your judge prompts.** Copy judge prompts into your repo, version them, and calibrate them against SME labels (TPR/TNR, Cohen's κ) before using them as gates. See [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md).
-4. **Pin versions** of libraries *and* judge models. A RAGAS or DeepEval upgrade, or a judge-model update, can shift scores with no change in your app.
-5. **Write domain metrics as plain code.** SQL execution accuracy, RBAC leakage, citation validity and tool-argument validation are usually deterministic and cheaper than any judge.
-6. **Avoid two systems of record.** Running LangSmith *and* Langfuse *and* Phoenix produces three partial truths. One platform; many libraries is fine.
-7. **Budget the judge.** Estimate `#examples × #metrics × judge calls per metric × price` before scheduling nightly runs; many metrics make several calls per example.
+1. **Instrument with OpenTelemetry:** Use OpenInference or OTel GenAI semantic conventions so your traces stay portable across Langfuse, Phoenix, MLflow, Foundry, and AgentCore.
+2. **Own your datasets:** Store golden datasets as JSONL or Parquet in Git or object storage, and treat your eval tool as a synced cache ([Dataset strategy](../01-datasets/01-dataset-strategy.md)).
+3. **Own your judge prompts:** Version judge prompts in Git and calibrate them against SME labels using TPR, TNR, and Cohen's $\kappa$ ([LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)).
+4. **Pin library and judge versions:** Lock both your eval library version and your judge model snapshot so silent upgrades do not shift your scores.
+5. **Write domain checks in plain code:** Implement SQL execution accuracy, RBAC leakage, citation checks, and tool-schema validation as fast, deterministic code.
+6. **Run only one system of record:** Avoid splitting traces and datasets across multiple platforms. Use one platform and as many metric libraries as you need.
+7. **Budget judge token costs:** Multiply examples, metrics, judge calls per metric, and token price before you schedule nightly runs.
 
 ### Step 4 — Run a bake-off on your own data
 
-Feature lists converge; fit to *your* data and workflow does not. Time-box a bake-off to 1–2 weeks.
+Vendor feature lists look similar on paper, so test how each tool fits your data and workflow. Time-box your bake-off to 1–2 weeks.
 
-- [ ] Pick 2–3 candidates from the decision flow.
-- [ ] Instrument the same branch of your app with each (OTel makes this cheap).
-- [ ] Load the same golden dataset (e.g., 100–200 examples across RAG, SQL and tool-call cases) into each.
-- [ ] Re-implement 2–3 of *your* key metrics (e.g., faithfulness, SQL execution accuracy, citation validity) in each tool.
-- [ ] Compare each tool's built-in judge to ~100 SME labels: agreement, false-pass rate, cost, latency.
-- [ ] Test the human workflow: can an SME annotate a trace in < 1 minute? Can a failing trace become a dataset example in two clicks?
-- [ ] Test online evals: sample 5% of traffic, run a judge, alert on a drop.
-- [ ] Test CI: fail a PR when a metric drops beyond a tolerance.
-- [ ] Review security: SSO, RBAC within the tool, PII redaction before ingest, retention, residency, audit logs.
-- [ ] Estimate 12-month cost at expected trace volume and judge usage.
-- [ ] Check exit cost: can you export traces, datasets, scores and annotations in an open format?
+- [ ] **Select 2–3 candidate platforms** using the decision flowchart above.
+- [ ] **Instrument one branch of your app** with OpenTelemetry so you can send identical traces to each candidate.
+- [ ] **Load the same golden dataset** of 100–200 RAG, SQL, and tool-call examples into each platform.
+- [ ] **Implement 2–3 core metrics** (such as faithfulness, SQL execution accuracy, and citation validity) in each tool.
+- [ ] **Compare built-in judges against 100 SME labels** for agreement, false-pass rate, cost, and latency.
+- [ ] **Test the SME annotation workflow:** Verify that a reviewer can grade a trace in under 1 minute and promote failures to a dataset in two clicks.
+- [ ] **Test online production evaluations:** Sample 5% of live traces, run a groundedness judge, and trigger a test alert.
+- [ ] **Test CI regression gating:** Configure a pull request check that fails when a key metric drops past your threshold.
+- [ ] **Verify security and governance:** Check SSO, role-based access, pre-ingestion PII redaction, retention controls, data residency, and audit logs.
+- [ ] **Project 12-month total cost** based on your expected production trace volume and judge call frequency.
+- [ ] **Verify your exit path:** Export a full trace, dataset, score, and annotation bundle in an open format like JSONL or Parquet.
 
 ---
 
 ## A reference stack for the running example
 
-Running example: an internal enterprise assistant that answers questions over company docs (vector search), queries a data warehouse via text-to-SQL, can create tickets, and serves users in different roles.
+Our running example is an internal enterprise assistant. It answers questions over company docs using vector search, queries a data warehouse via text-to-SQL, creates support tickets, and enforces per-user RBAC.
 
 ```mermaid
 flowchart LR
@@ -477,14 +483,14 @@ flowchart LR
 
 | Concern | Choice in this example | Why |
 |---|---|---|
-| Tracing + datasets + annotations | One self-hosted platform (Langfuse or Phoenix) *or* the cloud you already run on | Company docs and warehouse results are sensitive; one source of truth |
-| RAG metrics | RAGAS or DeepEval faithfulness, context precision/recall, answer relevancy | Mature, documented, calibratable |
-| Text-to-SQL | Custom code: execution accuracy on a test warehouse, result-set comparison, plus RAGAS SQL metrics as a secondary signal | Execution-based checks beat string similarity ([Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md)) |
-| Tool calls | Deterministic checks on tool name + JSON-schema-valid args, plus trajectory judge for multi-step cases | Cheap and precise ([Agent, tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md)) |
-| RBAC | Custom test suite: same question asked as different roles; assert no forbidden rows/docs appear | No tool ships this ([Access control & RBAC](../04-guardrails/06-access-control-rbac.md)) |
-| CI gates | DeepEval/pytest or promptfoo in GitHub Actions; block on regressions beyond tolerance | Fast feedback |
-| Red teaming | promptfoo redteam or garak/PyRIT on staging, before each release | See [Guardrail tools](./02-guardrail-tools.md) |
-| Online | Sampled groundedness judge (1–10% of traffic), 100% deterministic checks, user feedback | See [Online evals](../03-online-evals-and-observability/01-online-evals.md) |
+| Tracing + datasets + annotations | One self-hosted platform (Langfuse or Phoenix) or your primary cloud platform | Keeps sensitive company docs and warehouse results in one controlled source of truth |
+| RAG metrics | RAGAS or DeepEval faithfulness, context precision, context recall, and answer relevancy | Mature, well-documented, and easy to calibrate against SME labels |
+| Text-to-SQL | Custom execution accuracy on a test warehouse, result-set comparison, plus RAGAS SQL metrics | Execution checks catch logic bugs that string similarity misses ([Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md)) |
+| Tool calls | Deterministic checks on tool name and JSON schema arguments, plus a trajectory judge for multi-step flows | Deterministic checks are fast and exact ([Agent, tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md)) |
+| RBAC | Custom test suite that runs identical queries across roles and checks that no forbidden rows or docs appear | No off-the-shelf eval tool tests your application's access rules ([Access control & RBAC](../04-guardrails/06-access-control-rbac.md)) |
+| CI gates | DeepEval with pytest or promptfoo in GitHub Actions to block regressions | Gives developers fast pass/fail feedback before merge |
+| Red teaming | promptfoo redteam, garak, or PyRIT against staging before each release | Catches jailbreaks and privilege escalation before production ([Guardrail tools](./02-guardrail-tools.md)) |
+| Online | Sampled groundedness judge on 1–10% of traffic, 100% deterministic checks, and user feedback capture | Controls judge cost while monitoring all live traffic ([Online evals](../03-online-evals-and-observability/01-online-evals.md)) |
 
 ---
 
@@ -492,32 +498,32 @@ flowchart LR
 
 | Mistake | Consequence | Do instead |
 |---|---|---|
-| Choosing a tool before defining metrics and datasets | Metrics follow what the tool ships, not what your users need | Start from [failure modes](../00-foundations/03-agentic-rag-failure-modes.md) → metrics → tools |
-| Trusting default judges and thresholds | False sense of quality; noisy CI | Calibrate against SME labels; set per-metric thresholds |
-| Comparing scores across tools or versions | Apples-to-oranges conclusions | Compare runs within one pinned tool + judge version |
-| Storing raw PII in a SaaS trace store | Compliance incident | Redact at the SDK/collector before export; or self-host |
-| Running everything through a judge | Cost and latency explode | Deterministic checks first, judges for what code can't check |
-| Ignoring project health | Stuck on an archived/unmaintained library | Check releases, maintainers, ownership changes yearly |
+| Choosing a tool before defining metrics and datasets | Your metrics reflect what the tool ships rather than what your users need | Start from [failure modes](../00-foundations/03-agentic-rag-failure-modes.md), define metrics, and then choose tools |
+| Trusting default judges and 0.5 thresholds | Creates a false sense of quality and noisy CI failures | Calibrate judges against SME labels and set per-metric thresholds |
+| Comparing scores across different tools or versions | Produces invalid, apples-to-oranges comparisons | Compare experiment runs only within one pinned tool and judge version |
+| Storing raw PII in a cloud SaaS trace store | Triggers security and compliance incidents | Redact PII in your SDK or OTel collector before export, or self-host |
+| Running every check through an LLM judge | Explodes token cost and evaluation latency | Run deterministic code checks first and reserve LLM judges for nuance |
+| Ignoring open-source project health | Leaves your pipeline stuck on an archived or unmaintained library | Audit release cadence, maintainers, and ownership changes every year |
 
 ---
 
 ## Key takeaways
 
-- Separate the **system of record** (traces, datasets, experiments, annotations) from **metric libraries**; choose the former carefully and keep the latter swappable.
-- Instrument with **OpenTelemetry** and keep datasets and judge prompts **in your own repo** to minimise lock-in.
-- Same metric name ≠ same metric. Calibrate every judge on your data and never compare scores across tools or versions.
-- Self-hosting/data residency is the most common hard filter: Langfuse, Opik, MLflow (OSI licenses) and Phoenix (ELv2) self-host fully; several commercial platforms offer enterprise or hybrid options.
-- Domain metrics (SQL execution accuracy, RBAC leakage, citation validity) will be **your code** regardless of tool.
-- The market is consolidating fast (Humanloop sunset, promptfoo → OpenAI, Langfuse → ClickHouse, Galileo → Splunk). Re-verify status before adopting and budget for migration.
+- **Separate your system of record from your metric libraries:** Choose one platform for traces and datasets, and keep metric libraries swappable.
+- **Prevent vendor lock-in early:** Instrument with **OpenTelemetry** and store your datasets and judge prompts in **your own Git repository**.
+- **Never equate metrics by name alone:** Calibrate every judge on your domain data and never compare raw scores across tools or versions.
+- **Filter by data residency first:** Self-host Langfuse, Opik, or MLflow (OSI licenses) or Phoenix (ELv2) when data cannot leave your network.
+- **Write domain checks in code:** Implement SQL execution accuracy, RBAC leakage, and citation checks as deterministic code.
+- **Re-verify tool status yearly:** The market consolidates quickly (Humanloop sunset, promptfoo → OpenAI, Langfuse → ClickHouse, Galileo → Splunk).
 
 ## Further reading
 
-- [Guardrail tools](./02-guardrail-tools.md) — companion landscape for runtime protection and red teaming
-- [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md) — what to capture in spans
-- [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md) — experiment design, significance, CI gates
-- [Implementation playbook](../05-decision-framework/04-implementation-playbook.md) — where tool choice fits in the rollout
-- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) — why tools come after error analysis
-- Eugene Yan, [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/) — what to check before trusting any tool's judge
+- [Guardrail tools](./02-guardrail-tools.md) — companion landscape for runtime guardrails, policy engines, and red teaming
+- [Observability & tracing](../03-online-evals-and-observability/02-observability-and-tracing.md) — what to record on every trace and span
+- [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md) — experiment design, statistical significance, and CI gates
+- [Implementation playbook](../05-decision-framework/04-implementation-playbook.md) — where tool selection fits in your rollout sequence
+- Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) — why error analysis must come before tool selection
+- Eugene Yan, [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/) — how to validate any tool's LLM judge
 - OpenAI, [Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)
 - Anthropic, [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
 - [References](../07-references/README.md) — full curated reading list

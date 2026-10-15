@@ -1,10 +1,16 @@
 # 06 · Tooling Landscape
 
-The rest of this repository is deliberately tool-agnostic: datasets, metrics, judges, guardrail layers and decision trees work no matter which product you use. This section is the exception. It maps the **actual tools** — open-source libraries, platforms, open models, cloud services and policy engines — onto those concepts so you can build a shortlist.
+> **TL;DR**
+> - **Map concepts to real products.** Connect datasets, metrics, judges, and guardrails to open-source libraries, platforms, and cloud services.
+> - **Treat this guide as a dated October 2026 snapshot.** Re-verify ownership, license, maintenance status, and pricing before you adopt any tool.
+> - **Avoid vendor lock-in.** Instrument traces with OpenTelemetry, store datasets in your repo, and wrap guardrails behind your own interface.
+> - **Run a bake-off on your own data.** Measure judge agreement, false positives, false negatives, and p95 latency on domain traffic.
 
-Both files are a **dated snapshot (October 2026)**. In the 18 months before this snapshot, several tools were acquired, rebranded, re-licensed, rewritten, archived or sunset (for example: Humanloop sunset, promptfoo joined OpenAI, Langfuse joined ClickHouse, Galileo became Splunk Agent Observability, Lakera joined Check Point, LLM Guard and Rebuff were archived). Re-check status, license and pricing before you adopt anything.
+The rest of this repository is tool-agnostic. Datasets, metrics, judges, guardrail layers, and decision trees work with any product. This section maps actual open-source libraries, platforms, open models, cloud services, and policy engines onto those concepts. Use it to build your tool shortlist.
 
-Running example used throughout: an **internal enterprise assistant** with docs RAG, text-to-SQL over a data warehouse, a `create_ticket` tool, and RBAC.
+Both files represent a **dated snapshot from October 2026**. In the 18 months before this snapshot, vendors acquired, rebranded, re-licensed, rewrote, archived, or sunset several tools. For example, Humanloop shut down, promptfoo joined OpenAI, Langfuse joined ClickHouse, and Galileo became Splunk Agent Observability. Lakera joined Check Point, while maintainers archived LLM Guard and Rebuff. Re-check project status, licenses, and pricing before you adopt any tool.
+
+We use one running example throughout this section: an **internal enterprise assistant**. It combines docs RAG, text-to-SQL over a data warehouse, a `create_ticket` tool, and role-based access control (RBAC).
 
 ```mermaid
 flowchart LR
@@ -18,14 +24,14 @@ flowchart LR
 
 | File | What it covers | Read when… |
 |---|---|---|
-| [01-eval-and-observability-tools.md](./01-eval-and-observability-tools.md) | Open-source eval libraries (RAGAS, DeepEval, TruLens, promptfoo, OpenAI Evals, Inspect, Giskard, lm-evaluation-harness, ARES); eval + observability platforms (LangSmith, Langfuse, Phoenix/Arize AX, Braintrust, W&B Weave, MLflow, Opik, Galileo, Patronus, Humanloop, Confident AI); cloud-native services (Microsoft Foundry, Amazon Bedrock, Google Gen AI evaluation service); capability matrix, metric crosswalk, how to choose, bake-off checklist | You need to pick a system of record for traces/datasets/experiments, or a metric library for CI |
-| [02-guardrail-tools.md](./02-guardrail-tools.md) | Frameworks (NeMo Guardrails, Guardrails AI, LlamaFirewall, LLM Guard); open safety models (Llama Guard, Prompt Guard, Granite Guardian, ShieldGemma, gpt-oss-safeguard); Presidio; managed APIs (Azure AI Content Safety, Bedrock Guardrails, Model Armor, OpenAI moderation, Lakera/Check Point); policy engines (OPA, Cedar, OpenFGA); red-teaming tools (garak, PyRIT, promptfoo, DeepTeam, Giskard); capability matrix, latency/cost, how to evaluate guardrails | You need runtime protection, PII redaction, authorization for tools and documents, or a red-teaming loop |
+| [01-eval-and-observability-tools.md](./01-eval-and-observability-tools.md) | Open-source eval libraries (RAGAS, DeepEval, TruLens, promptfoo, OpenAI Evals, Inspect, Giskard, lm-evaluation-harness, ARES). Eval and observability platforms (LangSmith, Langfuse, Phoenix/Arize AX, Braintrust, W&B Weave, MLflow, Opik, Galileo, Patronus, Humanloop, Confident AI). Cloud-native services (Microsoft Foundry, Amazon Bedrock, Google Gen AI evaluation service). Also covers a capability matrix, metric crosswalk, selection guide, and bake-off checklist. | You need to choose a system of record for traces, datasets, and experiments, or a metric library for CI. |
+| [02-guardrail-tools.md](./02-guardrail-tools.md) | Frameworks (NeMo Guardrails, Guardrails AI, LlamaFirewall, LLM Guard). Open safety models (Llama Guard, Prompt Guard, Granite Guardian, ShieldGemma, gpt-oss-safeguard) and Presidio. Managed APIs (Azure AI Content Safety, Bedrock Guardrails, Model Armor, OpenAI moderation, Lakera/Check Point). Policy engines (OPA, Cedar, OpenFGA) and red-teaming tools (garak, PyRIT, promptfoo, DeepTeam, Giskard). Also covers a capability matrix, latency/cost profiles, and guardrail evaluation methods. | You need runtime protection, PII redaction, tool and document authorization, or an automated red-teaming loop. |
 
 ## Suggested reading order
 
-1. Read the concepts first: [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), then the [eval selection](../05-decision-framework/01-eval-selection-decision-tree.md) and [guardrail selection](../05-decision-framework/02-guardrail-selection-decision-tree.md) decision trees. Know *what* you need before reading *who* sells it.
-2. **[01 · Eval & observability tools](./01-eval-and-observability-tools.md)** — start with "Ownership and status changes", then the comparison matrix, then "How to choose".
-3. **[02 · Guardrail tools](./02-guardrail-tools.md)** — start with the policy engines section (deterministic controls first), then the comparison matrix and "Evaluate guardrails on your own data".
+1. Read the core concepts first in [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md). Next, review the [eval selection](../05-decision-framework/01-eval-selection-decision-tree.md) and [guardrail selection](../05-decision-framework/02-guardrail-selection-decision-tree.md) decision trees. Know *what* you need before you read *who* sells it.
+2. Read **[01 · Eval & observability tools](./01-eval-and-observability-tools.md)**. Start with "Ownership and status changes", review the comparison matrix, and follow "How to choose".
+3. Read **[02 · Guardrail tools](./02-guardrail-tools.md)**. Start with the policy engines section for deterministic controls, review the comparison matrix, and follow "Evaluate guardrails on your own data".
 
 **In a hurry?** Read the two comparison matrices and the two "reference stack for the running example" sections.
 
@@ -33,34 +39,34 @@ flowchart LR
 
 ### Vendor lock-in
 
-Lock-in rarely comes from the SDK call; it comes from **data and definitions** that live only inside a vendor.
+SDK calls rarely cause vendor lock-in. Lock-in happens when your **data and metric definitions** live only inside a vendor platform.
 
-- [ ] **Traces:** instrument with OpenTelemetry (GenAI semantic conventions or OpenInference) so you can send spans to a different backend later.
-- [ ] **Datasets:** keep golden datasets, labels and annotations exportable — ideally versioned in your own storage, mirrored into the tool.
-- [ ] **Judge prompts and rubrics:** keep them in your repository, not only in a vendor UI. A "faithfulness" score is defined by its prompt, judge model and scale.
-- [ ] **Guardrails:** call every detector through your own `check(stage, payload, context) -> decision` interface so a vendor swap is a config change.
-- [ ] **Authorization:** never let a guardrail vendor or an LLM be the source of truth for who may see or do what. Keep it in your policy engine / IAM.
-- [ ] **Exit plan:** before signing, confirm export formats, self-host options, data retention and what happens if the product is acquired or sunset.
+- [ ] **Instrument traces with OpenTelemetry:** Use GenAI semantic conventions or OpenInference so you can switch trace backends later.
+- [ ] **Keep datasets exportable:** Version golden datasets, labels, and annotations in your own storage and sync them into tools.
+- [ ] **Store judge prompts in Git:** Keep prompts and rubrics in your repository because prompts, models, and scales define your metrics.
+- [ ] **Wrap guardrails behind one interface:** Call every detector through `check(stage, payload, context) -> decision` to make vendor swaps easy.
+- [ ] **Keep authorization in IAM or policy engines:** Never let a guardrail vendor or an LLM decide who can view data or run tools.
+- [ ] **Verify your exit plan:** Confirm export formats, self-host options, and data retention policies before you sign a contract.
 
 ### Evaluate tools against your own data
 
-Public benchmarks and vendor demos tell you little about your traffic.
+Public benchmarks and vendor demos tell you very little about your production traffic.
 
-- [ ] Build a small labeled set from your own domain (see [Dataset strategy](../01-datasets/01-dataset-strategy.md) and [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)) — including hard negatives such as benign security questions and long internal documents.
-- [ ] For eval metrics and judges: measure agreement with human labels before trusting a score (see [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)).
-- [ ] For guardrails: measure false-positive rate, false-negative rate and p95 latency per category and language.
-- [ ] Run the same set through 2–3 shortlisted tools and compare on the same judge model and thresholds.
-- [ ] Re-run the bake-off when a vendor ships a new model or when your traffic changes.
+- [ ] **Build a labeled domain dataset:** Include hard negatives like benign security questions and long internal docs ([Dataset strategy](../01-datasets/01-dataset-strategy.md), [SME golden datasets](../01-datasets/02-sme-golden-datasets.md)).
+- [ ] **Measure judge agreement with human labels:** Validate every eval metric and LLM judge before you trust its score ([LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)).
+- [ ] **Measure guardrail error rates and latency:** Track false-positive rate, false-negative rate, and p95 latency per category and language.
+- [ ] **Compare 2–3 shortlisted tools side by side:** Run the exact same dataset, judge model, and thresholds across all candidates.
+- [ ] **Re-run your bake-off regularly:** Re-test whenever a vendor ships a new model or your production traffic shifts.
 
 ### The snapshot will age
 
-- [ ] Check each project's last release, open issues and maintainers.
-- [ ] Check whether a repo is archived or moved (several moved organizations in 2025–2026).
-- [ ] Check license changes (some "open" platforms use source-available licenses such as ELv2, or separate enterprise folders).
+- [ ] **Check project activity:** Review each project's latest release date, open issues, and active maintainers.
+- [ ] **Check repository status:** Verify whether maintainers archived or moved the repo, as several changed organizations in 2025–2026.
+- [ ] **Check license terms:** Confirm whether an open platform uses source-available licenses like ELv2 or separate `ee/` enterprise folders.
 
 ## How this section connects to the rest
 
-- Concepts behind every eval tool: [02-offline-evals](../02-offline-evals/README.md) and [03-online-evals-and-observability](../03-online-evals-and-observability/README.md).
-- Concepts behind every guardrail tool: [04-guardrails](../04-guardrails/README.md).
-- Where tool choice fits in a rollout: [Implementation playbook](../05-decision-framework/04-implementation-playbook.md) and [Maturity model](../05-decision-framework/05-maturity-model.md).
-- Papers, standards, blogs and courses: [07-references](../07-references/README.md).
+- Review the concepts behind every eval tool in [02-offline-evals](../02-offline-evals/README.md) and [03-online-evals-and-observability](../03-online-evals-and-observability/README.md).
+- Review the concepts behind every guardrail tool in [04-guardrails](../04-guardrails/README.md).
+- See where tool choice fits into a rollout in [Implementation playbook](../05-decision-framework/04-implementation-playbook.md) and [Maturity model](../05-decision-framework/05-maturity-model.md).
+- Explore papers, standards, blogs, and courses in [07-references](../07-references/README.md).
