@@ -289,6 +289,9 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 | **AgentDojo / AgentHarm / ASB** | [AgentDojo repo](https://github.com/ethz-spylab/agentdojo) · [arXiv 2410.09024](https://arxiv.org/abs/2410.09024) · [arXiv 2410.02644](https://arxiv.org/abs/2410.02644) | Agent utility under prompt injection and harmful-task refusal | Check agent security before you enable write tools. |
 | **HarmBench / JailbreakBench** | [harmbench.org](https://www.harmbench.org/) · [jailbreakbench.github.io](https://jailbreakbench.github.io/) | Jailbreak attack success and refusal robustness | Compare base models and guard models. |
 | **SWE-bench** | [swebench.com](https://www.swebench.com/) | Resolving real-world GitHub issues | Relevant for coding agents, not enterprise RAG assistants. |
+| **Terminal-Bench** | [tbench.ai](https://www.tbench.ai/) | Hard tasks in a real terminal, graded by tests in a container | Check coding and operations agents that run shell commands. |
+| **WebArena / OSWorld** | [webarena.dev](https://webarena.dev/) · [os-world.github.io](https://os-world.github.io/) | Web and desktop tasks in self-hosted environments, graded by state checks | Check browser and computer-use agents before they act on real sites. |
+| **BrowseComp** | [arXiv 2504.12516](https://arxiv.org/abs/2504.12516) | Hard-to-find facts with short answers that are easy to check | Check deep research and browsing agents. |
 | **AgentBench** | [arXiv 2308.03688](https://arxiv.org/abs/2308.03688) | Agent performance across 8 interactive environments | Check broad agent capability across diverse environments. |
 | **HELM** | [crfm.stanford.edu/helm](https://crfm.stanford.edu/helm/) · [arXiv 2211.09110](https://arxiv.org/abs/2211.09110) | Holistic model evaluation across scenarios and metrics | Select base models and design multi-metric scorecards. |
 
@@ -306,6 +309,8 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 | Eugene Yan | [An LLM-as-Judge Won't Save The Product: Fixing Your Process Will](https://eugeneyan.com/writing/eval-process/) | Shows why evaluation is an iterative process of observing, annotating, and experimenting rather than a tool purchase. |
 | Anthropic | [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) | Contrasts deterministic workflows with autonomous agents and explains routing, chaining, and evaluator-optimizer loops. |
 | Anthropic (2026) | [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) | Offers practical guidance on agent graders, task design, and outcome evaluation versus transcript evaluation. Applies across model providers. |
+| METR (2025) | [Recent Frontier Models Are Reward Hacking](https://metr.org/blog/2025-06-05-recent-reward-hacking/) | Shows frontier models that edit tests or scoring code to get a high score. Explains why you must keep graders outside the agent's reach. |
+| Lilian Weng (2024) | [Reward Hacking in Reinforcement Learning](https://lilianweng.github.io/posts/2024-11-28-reward-hacking/) | Surveys how agents exploit flaws in reward functions and graders, with examples and mitigations. |
 | Anthropic (2025) | [Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) | Treats context as a limited budget. Explains context rot, compaction, and just-in-time retrieval for agents. |
 | Anthropic (2025) | [A postmortem of three recent issues](https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues) | Describes three infrastructure bugs that silently degraded response quality. Shows why you need continuous quality evals in production. |
 | Thinking Machines Lab (2025) | [Defeating Nondeterminism in LLM Inference](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/) | Traces temperature-0 variation to inference kernels that are not batch-invariant, not only to floating-point concurrency. |
@@ -354,6 +359,7 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 |---|---|---|
 | **Model Context Protocol (MCP) specification** | [modelcontextprotocol.io](https://modelcontextprotocol.io/specification/latest) | The current version is 2026-07-28 (stateless). Defines tools, resources, prompts, and authorization for agent integrations. |
 | **MCP security best practices** | [modelcontextprotocol.io](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices) | Covers confused-deputy attacks, token passthrough, session hijacking, and server-side request forgery. |
+| **Agent2Agent (A2A) protocol specification** | [a2a-protocol.org](https://a2a-protocol.org/latest/specification/) | Defines Agent Cards, tasks, and messages for calls between agents. Requires authentication on every request and HTTPS in production. See [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md#16-multi-agent-and-agent-to-agent-guardrails). |
 | **RFC 8707: Resource Indicators for OAuth 2.0** | [rfc-editor.org](https://www.rfc-editor.org/rfc/rfc8707) | Binds access tokens to one resource server. MCP authorization uses it to stop token reuse. |
 | **RFC 8693: OAuth 2.0 Token Exchange** | [rfc-editor.org](https://www.rfc-editor.org/rfc/rfc8693) | Exchanges a user token for a narrower downstream token. Use it for on-behalf-of tool calls. |
 | **SPIFFE** | [spiffe.io](https://spiffe.io/) | Gives workloads, including agents, cryptographic identities. |
@@ -375,21 +381,21 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 | Topic in this repo | Start with |
 |---|---|
 | [Why evals and guardrails](../00-foundations/01-why-evals-and-guardrails.md) | Goodhart variants, Codex `pass@k`, Agents Rule of Two, EU AI Act |
-| [Failure modes](../00-foundations/03-agentic-rag-failure-modes.md) | Seven Failure Points, MAST, MCP tool poisoning, context engineering |
-| [Agent archetypes](../00-foundations/05-agent-archetypes.md) | WebArena, OSWorld, METR time horizon, τ-bench |
+| [Failure modes](../00-foundations/03-agentic-rag-failure-modes.md) | Seven Failure Points, MAST, MCP tool poisoning, context engineering, METR reward hacking |
+| [Agent archetypes](../00-foundations/05-agent-archetypes.md) | Anthropic agent evals, SWE-bench, WebArena, OSWorld, BrowseComp, τ-bench, MAST, METR time horizon |
 | [Datasets](../01-datasets/README.md) | Hamel's field guide, Jason Liu on synthetic questions, label errors, Datasheets, Data Cards, Evol-Instruct, classifier two-sample tests, agreement statistics |
 | [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) | RAGAS, ARES, RAGChecker, Seven Failure Points, CRAG, FRAMES, RAGTruth |
 | [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md) | BEIR, MTEB, Lost in the Middle, HotpotQA, MuSiQue, nDCG/ERR/RBP classics |
 | [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) | FActScore, SelfCheckGPT, BERTScore, Llama Guard, XSTest, BBQ, BIPIA |
 | [Agent tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) | τ-bench, τ²-bench, Gorilla, BFCL, Codex `pass@k`, Anthropic agent evals |
-| [Agent eval environments & graders](../02-offline-evals/09-agent-eval-environments-and-graders.md) | WebArena, OSWorld, τ-bench, SWE-bench, METR time horizon |
+| [Agent eval environments & graders](../02-offline-evals/09-agent-eval-environments-and-graders.md) | Anthropic agent evals, SWE-bench, Terminal-Bench, WebArena, OSWorld, τ-bench, AgentDojo, METR reward hacking, METR time horizon, Weng on reward hacking |
 | [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md) | Spider, test-suite accuracy, BIRD, Spider 2.0, AmbiQT, AMBROSIA, BIRD-Interact |
 | [Instruction & citation adherence](../02-offline-evals/06-instruction-and-citation-adherence.md) | IFEval, IFBench, InFoBench, FollowBench, Multi-IF, ALCE, AIS, AttributionBench, LongCite, L-CiteEval |
 | [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) | MT-Bench judging, G-Eval, Who Validates the Validators, PoLL, Prometheus, CALM, JudgeDeceiver, PPI, Hamel's judge guide |
 | [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md) | Miller error bars, Codex `pass@k`, classic statistics |
 | [Online evals & observability](../03-online-evals-and-observability/README.md) | PPI, always-valid inference, delta method, non-determinism, Failing Loudly, ChatGPT drift, SRE burn-rate alerts, OTel GenAI |
 | [Guardrails](../04-guardrails/README.md) | Greshake, Spotlighting, StruQ, SecAlign, PoisonedRAG, LlamaFirewall, Attacker Moves Second, Design Patterns, CaMeL, lethal trifecta, OWASP |
-| [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md) | Agents Rule of Two, ASB, MCP spec and security best practices, OWASP MCP cheat sheet, RFC 8707 |
+| [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md) | Agents Rule of Two, ASB, MCP spec and security best practices, OWASP MCP cheat sheet, RFC 8707, A2A spec |
 | [Threat model](../04-guardrails/07-threat-model-owasp.md) | OWASP LLM Top 10 2026 + Agentic Top 10, MITRE ATLAS, NIST AI 600-1, EU AI Act |
 | [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md) | WildGuard, Qwen3Guard, NemoGuard, HarmBench, JailbreakBench, AgentHarm |
 | [Maturity model](../05-decision-framework/05-maturity-model.md) | NIST AI RMF, ISO/IEC 42001, Google SAIF |
