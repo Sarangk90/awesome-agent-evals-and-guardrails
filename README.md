@@ -31,7 +31,7 @@ Searchable docs with navigation, dark mode and zoomable diagrams.
 
 ## Contributing
 
-Corrections and additions are welcome, especially new metrics, tools, and real-world lessons. Please keep the existing page structure (TL;DR → content → Key takeaways → Further reading) and cite sources.
+Corrections and additions are welcome, especially new metrics, tools, and real-world lessons. Please follow the [Human-Friendly STE100 Style Guide](./STYLE-GUIDE.md), keep the existing page structure (TL;DR → content → Key takeaways → Further reading), and cite sources.
 
 The docs site is built from `research/` with [Zensical](https://zensical.org) and deployed to GitHub Pages on every push to `main`. Just add or edit markdown files; navigation is generated from the folder and file names (section titles come from each folder's `README.md` heading). To preview locally:
 
