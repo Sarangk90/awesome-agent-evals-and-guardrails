@@ -1,32 +1,40 @@
 # 01 · Datasets
 
-Offline evals run on datasets, and the dataset decides what an eval can see: which inputs are tested, what "correct" means, which metrics you can compute, and how far you can trust a score. This section covers how to design, build, label, grow, and maintain eval datasets for agentic RAG applications (RAG chatbots, tool-calling agents, text-to-SQL agents, multi-step agents), plus test sets for guardrails such as RBAC and prompt-injection checks.
+> **TL;DR**
+> - **Design your dataset before your metrics.** Offline evals are only as trustworthy as the inputs and reference labels they run on.
+> - **Anchor with SME golden data.** Build 20–50 human-verified examples for release gates and LLM-judge calibration.
+> - **Scale with filtered synthetic rows.** Generate synthetic queries, multi-hop chains, and red-team attacks, then filter out low-quality rows.
+> - **Close the loop from production.** Feed real production failures and user feedback back into your dataset every week.
 
-The running example is an internal enterprise assistant. It answers questions over company documents, queries a data warehouse through text-to-SQL, can call tools (for example, to create a ticket), and serves users who have different roles.
+---
 
-## Files in this section
+## Guides in this section
 
-| File | What it covers | Read when… |
+| Guide | What you will learn | Read this when… |
 |---|---|---|
-| [01 · Dataset strategy](./01-dataset-strategy.md) | Why datasets come first; the five dataset sources (SME/golden, synthetic, production, adversarial, regression); **JSON schemas per eval type** (RAG QA, retrieval, tool call, trajectory, text-to-SQL, multi-turn, guardrail/RBAC, citation); coverage design with slices and dimensions/tuples; sizing, confidence intervals, and paired significance tests | You're starting an eval effort, choosing what fields to collect, or deciding how many examples you need |
-| [02 · SME golden datasets](./02-sme-golden-datasets.md) | Working with subject-matter experts; annotation guidelines; binary rubrics; reference answers vs key-facts lists; unanswerable questions; inter-annotator agreement (Cohen's κ, Krippendorff's α, worked examples); adjudication; labeling tools; cost/time; pitfalls | You need trustworthy ground truth for release gates or to calibrate LLM judges |
-| [03 · Synthetic datasets](./03-synthetic-datasets.md) | Generation pipeline; dimensions → tuples → scenarios → queries; QA from chunks; knowledge-graph generation (RAGAS); query evolution (Evol-Instruct, DeepEval Synthesizer); edge cases; tool-call and text-to-SQL synthesis (back-translation, execution validation); guardrail/red-team variants; multi-turn persona simulation; quality filters; risks | You have no data yet, need to fill rare slices, or need volume for guardrail tests |
-| [04 · Production data flywheel](./04-production-data-flywheel.md) | Turning traces into eval data: sampling strategies (measurement vs discovery), annotation queues, error analysis → test cases, regression sets, dataset versioning, PII scrubbing and consent, keeping datasets fresh under document/schema drift, contamination, ownership | Your app has users and you want evals that match real traffic and improve every week |
+| [01 · Dataset Strategy](./01-dataset-strategy.md) | Why datasets come first, the five dataset sources, JSON schemas for all 8 eval types, slice coverage, and sample-size math | You are starting an eval project, choosing what fields to store, or deciding how many examples you need |
+| [02 · SME Golden Datasets](./02-sme-golden-datasets.md) | Working with domain experts, writing binary rubrics, reference answers vs. key facts, unanswerable questions, and Cohen's κ / Krippendorff's α | You need trustworthy reference data for release gates or LLM-judge calibration |
+| [03 · Synthetic Datasets](./03-synthetic-datasets.md) | Generating QA pairs, multi-hop questions, tool calls, SQL queries, and red-team attacks—plus automatic quality filters | You have no live traffic yet, need to fill rare slices, or need volume for guardrail tests |
+| [04 · Production Data Flywheel](./04-production-data-flywheel.md) | Sampling live traces, running annotation queues, turning errors into regression tests, scrubbing PII, and handling document drift | Your system has live users and you want your datasets to reflect real traffic |
 
-## Suggested reading order
+---
 
-1. **[Dataset strategy](./01-dataset-strategy.md)**: read this first. It gives you the vocabulary, the schemas, and the sizing rules that the other files rely on.
-2. **[SME golden datasets](./02-sme-golden-datasets.md)**: build a small, high-quality anchor set of 20–50 rows, then grow it to a few hundred.
-3. **[Synthetic datasets](./03-synthetic-datasets.md)**: expand coverage cheaply and validate the synthetic rows against the golden set.
-4. **[Production data flywheel](./04-production-data-flywheel.md)**: after launch, let real traffic drive dataset growth.
+## Recommended reading order
 
-**Shortcut paths:**
+1. **Read [01 · Dataset Strategy](./01-dataset-strategy.md) first.** It defines the JSON schemas, slice dimensions, and sample-size rules used across the repository.
+2. **Read [02 · SME Golden Datasets](./02-sme-golden-datasets.md) second.** Build a small, trusted anchor set of 20–50 rows before scaling up.
+3. **Read [03 · Synthetic Datasets](./03-synthetic-datasets.md) third.** Expand coverage across rare slices and validate synthetic rows against your golden set.
+4. **Read [04 · Production Data Flywheel](./04-production-data-flywheel.md) fourth.** Once you launch, feed real production failures back into your dataset every week.
 
-- *"I need an eval set by Friday."* Read [Dataset strategy §3](./01-dataset-strategy.md#3-matching-dataset-shape-to-eval-type) for the schemas and [§6](./01-dataset-strategy.md#6-what-to-do-first) for the checklist, then [Synthetic datasets §2–4](./03-synthetic-datasets.md#2-a-practical-generation-pipeline).
-- *"I'm testing guardrails and RBAC."* Read [Dataset strategy §3.8](./01-dataset-strategy.md#38-guardrail-test-sets), then [Synthetic datasets §8](./03-synthetic-datasets.md#8-synthetic-guardrail-and-red-team-test-cases).
-- *"Our scores look great but users complain."* Read [Production data flywheel §2](./04-production-data-flywheel.md#2-sampling-strategies) and [§4](./04-production-data-flywheel.md#4-error-analysis--new-test-cases), then [Synthetic datasets §11](./03-synthetic-datasets.md#11-risks).
+### Quick shortcuts by goal
 
-## How this section connects to the rest
+- **"I need a working eval dataset by Friday."** Read [Dataset Strategy §3](./01-dataset-strategy.md#3-matching-dataset-shape-to-eval-type) for the JSON schemas and [§6](./01-dataset-strategy.md#6-what-to-do-first) for the day-one checklist. Then follow [Synthetic Datasets §2–4](./03-synthetic-datasets.md#2-a-practical-generation-pipeline).
+- **"I am testing guardrails and RBAC."** Read [Dataset Strategy §3.8](./01-dataset-strategy.md#38-guardrail-test-sets), then [Synthetic Datasets §8](./03-synthetic-datasets.md#8-synthetic-guardrail-and-red-team-test-cases).
+- **"Our offline scores look great, but users still complain."** Read [Production Data Flywheel §2](./04-production-data-flywheel.md#2-sampling-strategies) and [§4](./04-production-data-flywheel.md#4-error-analysis--new-test-cases), then check [Synthetic Datasets §11](./03-synthetic-datasets.md#11-risks).
+
+---
+
+## How this section connects to the rest of the repo
 
 ```mermaid
 flowchart LR
@@ -37,8 +45,8 @@ flowchart LR
     O --> DF["05 Decision framework"]
 ```
 
-- Metrics that consume these datasets: [02 · Offline evals](../02-offline-evals/README.md)
-- Production traces and feedback that feed these datasets: [03 · Online evals & observability](../03-online-evals-and-observability/README.md)
-- Guardrails these test sets validate: [04 · Guardrails](../04-guardrails/README.md)
-- Which datasets to build first: [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)
-- Tools for datasets, annotation, and synthesis: [06 · Tooling landscape](../06-tooling-landscape/README.md)
+- **Metrics that run on these datasets:** [02 · Offline Evals](../02-offline-evals/README.md)
+- **Live traces and feedback that feed these datasets:** [03 · Online Evals & Observability](../03-online-evals-and-observability/README.md)
+- **Guardrails tested by these datasets:** [04 · Guardrails](../04-guardrails/README.md)
+- **Step-by-step rollout plan:** [Implementation Playbook](../05-decision-framework/04-implementation-playbook.md)
+- **Annotation and synthesis tools:** [06 · Tooling Landscape](../06-tooling-landscape/README.md)
