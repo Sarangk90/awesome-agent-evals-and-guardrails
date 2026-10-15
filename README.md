@@ -12,6 +12,10 @@ Building a demo agent is easy. Building one you can trust in production means an
 
 This repository synthesizes the answers into a navigable knowledge base with decision frameworks, metric cards, checklists and code snippets.
 
+## 📖 [Read it as a website →](https://sarangk90.github.io/awesome-agent-evals-and-guardrails/)
+
+Searchable docs with navigation, dark mode and zoomable diagrams.
+
 ## 👉 [Start with the research index](./research/README.md)
 
 | Section | What's inside |
