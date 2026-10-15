@@ -6,12 +6,14 @@
 > - **Tag every version and group into sessions.** Log prompt, model, index, and config versions plus `session_id` to isolate regressions fast.
 > - **Adopt OpenTelemetry conventions.** Use OTel GenAI semantic conventions or OpenInference and add application attributes under `app.*`.
 > - **Scrub PII before export and enforce ACLs.** Redact sensitive payloads at the source, restrict trace viewing by document permissions, and tier retention.
+> - **Plan for late signals and volume.** Link async scores and follow-up actions to the original span, and keep high-cardinality IDs out of metric labels.
 
 - **You will learn:**
     - Agentic RAG span hierarchy
     - Per-span logging specifications
     - OTel GenAI and OpenInference standards
     - Session grouping, version tagging, PII redaction, and tool selection
+    - Linking delayed signals with span links, and controlling telemetry cardinality
 - **Prerequisites:** [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Online evals](./01-online-evals.md)
 - **Related:** [User feedback](./03-user-feedback-and-implicit-signals.md), [Monitoring & drift](./04-monitoring-alerting-and-drift.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Eval & observability tools](../06-tooling-landscape/01-eval-and-observability-tools.md)
 
@@ -79,7 +81,7 @@ Use these tables as your engineering logging specification. **Must** denotes ess
 | Output: final answer and parsed citations | Must | Required for debugging, online evals, and dataset creation |
 | `status` (`ok`, `error`, `blocked`, `refused`, `timeout`), `refusal_reason` | Must | Drives reliability and refusal monitoring |
 | Total latency and time-to-first-token (TTFT) | Must | Measures latency SLO compliance |
-| Total tokens and **cost** (summed from child spans) | Must | Tracks per-turn and per-session cost |
+| Total tokens and **cost** (summed from inference spans only, to avoid double-counting) | Must | Tracks per-turn and per-session cost |
 | Number of LLM calls, tool calls, and agent steps | Should | Detects runaway loops and measures efficiency |
 | Channel (web, Slack, API) and user locale | Could | Supports channel and language segmentation |
 
@@ -108,7 +110,7 @@ Use these tables as your engineering logging specification. **Must** denotes ess
 | Attribute | Priority | Why |
 |---|---|---|
 | Provider, requested model, and **response model** (exact snapshot string) | Must | Catches silent provider model updates (see [Monitoring & drift](./04-monitoring-alerting-and-drift.md)) |
-| Prompt template ID, **version**, and template variables | Must | Isolates prompt regressions |
+| Prompt template ID, **version**, and template variables (OTel: `gen_ai.prompt.name`, `gen_ai.prompt.version`) | Must | Isolates prompt regressions |
 | Full input messages (system + user + context) or storage reference | Must (redacted) | Reconstructs exact model context during debugging |
 | Output messages, `finish_reason`, and requested tool calls | Must | Detects output truncation and bad tool calls |
 | Input and output tokens (including cached and reasoning tokens) | Must | Computes exact call cost |
@@ -138,7 +140,7 @@ Use these tables as your engineering logging specification. **Must** denotes ess
 | Redacted result sample (first $N$ rows) or result hash | Should |
 | Warehouse schema version or catalog snapshot ID | Should |
 
-Reuse OpenTelemetry's [database semantic conventions](https://opentelemetry.io/docs/specs/semconv/database/database-spans/) (`db.system.name`, `db.query.text`, `db.operation.name`) for SQL spans rather than inventing custom attribute names.
+Reuse OpenTelemetry's [database semantic conventions](https://opentelemetry.io/docs/specs/semconv/db/database-spans/) (`db.system.name`, `db.query.text`, `db.operation.name`) for SQL spans rather than inventing custom attribute names.
 
 #### Guardrail span
 
@@ -158,6 +160,8 @@ Reuse OpenTelemetry's [database semantic conventions](https://opentelemetry.io/d
 | Score, categorical label, rationale, and judge model + version | Must |
 | `sample_reason` (`uniform`, `triggered`, `canary`) | Must |
 | Score source (`llm_judge`, `heuristic`, `human`, `user_feedback`) | Must |
+
+If you send scores through OpenTelemetry, map them to the `gen_ai.evaluation.result` event (Section 3.1) and parent the event to the evaluated span.
 
 ### 2.2 Version tagging: the most under-rated attributes
 
@@ -187,26 +191,41 @@ Adopt a standard telemetry schema so you can switch observability vendors, combi
 
 ### 3.1 OpenTelemetry GenAI semantic conventions
 
-[OpenTelemetry](https://opentelemetry.io/) defines **semantic conventions** that standardize span and attribute names. The **GenAI** conventions cover LLM inference, embeddings, retrieval, tool calls, and agent workflows. These conventions are currently marked **Development** in [`open-telemetry/semantic-conventions-genai`](https://github.com/open-telemetry/semantic-conventions-genai), so pin the convention version your code emits.
+[OpenTelemetry](https://opentelemetry.io/) defines **semantic conventions** that standardize span and attribute names. The **GenAI** conventions cover LLM inference, embeddings, retrieval, tool calls, agent workflows, evaluation results, and MCP. These conventions are currently marked **Development** (not stable). They now live in their own repository, [`open-telemetry/semantic-conventions-genai`](https://github.com/open-telemetry/semantic-conventions-genai); the old opentelemetry.io GenAI pages point there. Development conventions can change in breaking ways, so pin the convention version your code emits.
 
 Key GenAI convention elements include:
 
-- **Operation names** (`gen_ai.operation.name`): Standard values include `chat`, `text_completion`, `generate_content`, `embeddings`, `retrieval`, `execute_tool`, `create_agent`, and `invoke_agent`. Span names follow patterns like `chat {model}` or `execute_tool {gen_ai.tool.name}`.
-- **Model and provider attributes**: `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, request settings (`gen_ai.request.temperature`, `gen_ai.request.max_tokens`), `gen_ai.response.finish_reasons`, and `gen_ai.response.id`.
-- **Token usage**: `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, plus cached token counters.
-- **Agent and conversation identifiers**: `gen_ai.agent.name`, `gen_ai.agent.id`, and `gen_ai.conversation.id`.
+- **Operation names** (`gen_ai.operation.name`): Standard values include `chat`, `text_completion`, `generate_content`, `embeddings`, `retrieval`, `execute_tool`, `create_agent`, `invoke_agent`, `invoke_workflow`, `plan`, and `fetch_response`, plus memory operations. Inference span names follow `{gen_ai.operation.name} {gen_ai.request.model}` (for example `chat gpt-x`). Tool spans use `execute_tool {gen_ai.tool.name}`, and agent spans use `invoke_agent {gen_ai.agent.name}`.
+- **Model and provider attributes**: `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, request settings (`gen_ai.request.temperature`, `gen_ai.request.max_tokens`, `gen_ai.request.seed`), `gen_ai.response.finish_reasons`, and `gen_ai.response.id`.
+- **Token usage**: `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, plus breakdowns such as `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_write.input_tokens`, and `gen_ai.usage.reasoning.output_tokens`. Record usage on each inference span. The `invoke_agent` span can also carry the turn's total input and output tokens. When you compute cost, sum either the inference spans or the agent span, never both, or you double-count. Take cache and reasoning breakdowns from the inference spans only: the spec removed them from the in-process `invoke_agent` span because totals across models mislead.
+- **Prompt templates and streaming**: `gen_ai.prompt.name`, `gen_ai.prompt.version`, and `gen_ai.response.time_to_first_chunk` (seconds).
+- **Agent and conversation identifiers**: `gen_ai.agent.name`, `gen_ai.agent.id`, `gen_ai.workflow.name`, and `gen_ai.conversation.id`.
 - **Tool execution**: `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type`, and opt-in `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`.
-- **Retrieval**: `gen_ai.data_source.id` plus query and retrieved document attributes.
-- **Opt-in content capture**: `gen_ai.input.messages`, `gen_ai.output.messages`, and `gen_ai.system_instructions` are disabled by default to protect sensitive data, or stored externally via URI references.
-- **Standard metrics**: Histograms and counters like `gen_ai.client.operation.duration` and token usage metrics power dashboards without parsing raw spans.
+- **Retrieval**: `gen_ai.data_source.id`, `gen_ai.retrieval.top_k`, and the opt-in `gen_ai.retrieval.query.text` and `gen_ai.retrieval.documents` (a list of `{id, score}` objects).
+- **Evaluation results**: the `gen_ai.evaluation.result` event with `gen_ai.evaluation.name` (required), `gen_ai.evaluation.score.value`, `gen_ai.evaluation.score.label`, and `gen_ai.evaluation.explanation`. Parent the event to the span you evaluated. If you cannot, set `gen_ai.response.id` so backends can join the score to the response.
+- **Opt-in content capture**: `gen_ai.input.messages`, `gen_ai.output.messages`, and `gen_ai.system_instructions` are off by default to protect sensitive data. Where an SDK cannot store structured attributes on spans, instrumentations serialize these values as JSON strings. The spec also lets an instrumentation call an **upload hook** that sends content to external storage. The format for recording a reference to that stored content is **not yet standardized**.
+- **Standard metrics**: Histograms power dashboards without parsing raw spans. Released core versions (for example v1.40.0) define `gen_ai.client.operation.duration` and `gen_ai.client.token.usage`. These metrics are changing. The current development spec says not to report `gen_ai.client.operation.duration` for inference calls. It uses `gen_ai.client.inference.duration` and per-type usage metrics such as `gen_ai.client.inference.usage.input_tokens` instead. Check which names your instrumentation emits before you build dashboards.
+- **MCP**: The same repository defines [MCP semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/mcp.md) for agent tool calls over the [Model Context Protocol](https://modelcontextprotocol.io/specification/latest).
 
-Read the official specification at [opentelemetry.io/docs/specs/semconv/gen-ai](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
+Older instrumentations emit a different layout: one log event per message (`gen_ai.user.message`, `gen_ai.choice`, and similar). Semantic conventions v1.37.0 deprecated these events. The replacements are the `gen_ai.input.messages` and `gen_ai.output.messages` attributes and the `gen_ai.client.inference.operation.details` event. Many installed libraries still emit the old layout, so check before you write queries.
+
+Configuration is implementation-specific. For example, the OpenTelemetry Python GenAI utilities ([`opentelemetry-util-genai`](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/util/opentelemetry-util-genai)) use these environment variables:
+
+| Variable | Effect |
+|---|---|
+| `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` | Emit the latest experimental GenAI conventions |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `NO_CONTENT` (default), `SPAN_ONLY`, `EVENT_ONLY`, or `SPAN_AND_EVENT` |
+| `OTEL_INSTRUMENTATION_GENAI_COMPLETION_HOOK=upload` with `OTEL_INSTRUMENTATION_GENAI_UPLOAD_BASE_PATH` | Upload content to external storage through the upload hook |
+
+Other languages and vendors use other names. Read your instrumentation's documentation.
+
+Read the specification in the GitHub repository: [GenAI spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md), [agent spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md), [events](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-events.md), [metrics](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-metrics.md), and the [attribute registry](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/registry/attributes/gen-ai.md).
 
 ### 3.2 OpenInference (Arize)
 
 [OpenInference](https://github.com/Arize-ai/openinference) is an OpenTelemetry-based convention and auto-instrumentation suite maintained by Arize and used by [Arize Phoenix](https://github.com/Arize-ai/phoenix). It centers on an explicit **span kind** attribute, `openinference.span.kind`, with domain-specific values:
 
-`LLM`, `EMBEDDING`, `CHAIN`, `RETRIEVER`, `RERANKER`, `TOOL`, `AGENT`, `GUARDRAIL`, `EVALUATOR`.
+`LLM`, `EMBEDDING`, `CHAIN`, `RETRIEVER`, `RERANKER`, `TOOL`, `AGENT`, `GUARDRAIL`, `EVALUATOR`, `PROMPT`, `DECISION`.
 
 OpenInference also standardizes attributes such as `input.value`, `output.value`, `llm.model_name`, `llm.token_count.prompt|completion|total`, `llm.prompt_template.template|variables|version`, `retrieval.documents` (`document.id`, `document.score`, `document.content`), `tool.name`, `session.id`, `user.id`, `metadata`, and `tag.tags`.
 
@@ -227,131 +246,156 @@ Regardless of which convention you pick, **log domain-specific attributes under 
 
 ## 4. Example trace for the running example
 
-In this scenario, a `finance_analyst` asks: *"What was EMEA revenue last quarter, and open a ticket if it's below plan?"* The assistant retrieves the revenue definition document, runs a SQL query, compares actuals against plan, opens a Jira ticket, and returns a cited answer.
+In this scenario, a user with the `finance` role asks: *"What was EMEA revenue last quarter, and open a ticket if it's below plan?"* The assistant retrieves the revenue definition and plan documents, runs a SQL query, compares actuals against plan, drafts a ticket, and returns a cited answer. `create_ticket` is a T1 tool, so the assistant shows an inline ticket preview and submits it only after the user confirms with one click (see [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md)).
 
-The JSON below shows a flattened, vendor-neutral representation combining OTel GenAI attributes with custom `app.*` fields. Production OTLP exporters serialize these spans as Protobuf or JSON with nanosecond timestamps.
+The JSON below is a simplified, vendor-neutral view. It combines OTel GenAI attributes, the OpenInference span kind, and custom `app.*` fields. All attribute values are primitives or arrays of primitives, except `gen_ai.retrieval.documents`, which the spec defines as a list of objects; SDKs that cannot store structured span attributes serialize it as a JSON string. Production OTLP exporters serialize spans as Protobuf or JSON with nanosecond timestamps.
 
 ```json
 {
   "trace_id": "4f1c9a7e2b3d4c5e8f60718293a4b5c6",
-  "session_id": "conv_8812",
-  "turn_index": 3,
   "start_time": "2026-10-15T09:12:03.120Z",
-  "duration_ms": 6840,
-  "attributes": {
-    "app.user.id_hash": "u_7d2e…",
-    "app.user.role": "finance_analyst",
-    "app.tenant": "acme-corp",
-    "app.env": "prod",
-    "app.deployment_ring": "canary",
-    "app.experiment": {"id": "exp_answer_style_v2", "variant": "B"},
-    "app.agent_version": "2026.10.2",
-    "app.config_hash": "cfg_a91b3f",
-    "app.status": "ok",
-    "app.cost_usd": 0.0183,
-    "gen_ai.usage.input_tokens": 9120,
-    "gen_ai.usage.output_tokens": 612,
-    "app.llm_calls": 3,
-    "app.tool_calls": 2
-  },
   "input": {"text": "What was EMEA revenue last quarter, and open a ticket if it's below plan?"},
   "output": {
-    "text": "EMEA revenue for Q3 FY26 was $41.2M, 6% below the $43.8M plan [doc:fin-defs-012]. I opened ticket FIN-4821 for the regional finance team.",
+    "text": "EMEA revenue for Q3 FY26 was $41.2M [doc:fin-defs-012], 6% below the $43.8M plan. I drafted a ticket for the regional finance team. Review the preview and select Submit to create it.",
     "citations": ["fin-defs-012"]
   },
   "spans": [
     {
-      "span_id": "s1", "parent": null, "name": "guardrail input", "kind": "GUARDRAIL", "duration_ms": 85,
-      "attributes": {"app.guardrail.names": ["prompt_injection_v3", "pii_detector_v2", "topic_scope_v1"],
+      "span_id": "s0", "parent": null, "name": "invoke_agent enterprise-assistant", "duration_ms": 6840,
+      "attributes": {"openinference.span.kind": "AGENT",
+                     "gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "enterprise-assistant",
+                     "gen_ai.conversation.id": "conv_8812", "app.turn_index": 3,
+                     "gen_ai.usage.input_tokens": 9120, "gen_ai.usage.output_tokens": 612,
+                     "app.user.id_hash": "u_7d2e…", "app.user.role": "finance", "app.tenant": "acme-corp",
+                     "app.env": "prod", "app.deployment_ring": "canary",
+                     "app.experiment.id": "exp_answer_style_v2", "app.experiment.variant": "B",
+                     "app.agent_version": "2026.10.2", "app.config_hash": "cfg_a91b3f",
+                     "app.status": "ok", "app.cost_usd": 0.0183, "app.llm_calls": 3, "app.tool_calls": 3}
+    },
+    {
+      "span_id": "s1", "parent": "s0", "name": "guardrail input", "duration_ms": 85,
+      "attributes": {"openinference.span.kind": "GUARDRAIL",
+                     "app.guardrail.names": ["prompt_injection_v3", "pii_detector_v2", "topic_scope_v1"],
                      "app.guardrail.decision": "allow", "app.guardrail.injection_score": 0.02}
     },
     {
-      "span_id": "s2", "parent": null, "name": "chat gpt-x-mini", "kind": "LLM", "duration_ms": 640,
-      "attributes": {"gen_ai.operation.name": "chat", "gen_ai.provider.name": "example-provider",
+      "span_id": "s2", "parent": "s0", "name": "chat gpt-x-mini", "duration_ms": 640,
+      "attributes": {"openinference.span.kind": "LLM",
+                     "gen_ai.operation.name": "chat", "gen_ai.provider.name": "example-provider",
                      "gen_ai.request.model": "gpt-x-mini", "gen_ai.response.model": "gpt-x-mini-2026-08-01",
-                     "app.prompt.id": "plan_and_route", "app.prompt.version": "v14",
+                     "gen_ai.prompt.name": "plan_and_route", "gen_ai.prompt.version": "v14",
                      "gen_ai.usage.input_tokens": 1450, "gen_ai.usage.output_tokens": 96,
                      "gen_ai.response.finish_reasons": ["tool_calls"],
                      "app.tool_calls_requested": ["search_docs", "run_sql", "create_ticket"]}
     },
     {
-      "span_id": "s3", "parent": null, "name": "retrieval finance-docs", "kind": "RETRIEVER", "duration_ms": 210,
-      "attributes": {"gen_ai.operation.name": "retrieval", "gen_ai.data_source.id": "finance-docs",
-                     "app.index.snapshot": "2026-10-14T02:00Z", "app.retrieval.query": "definition of regional revenue EMEA plan",
-                     "app.retrieval.top_k": 20, "app.retrieval.filters": {"acl_role": "finance_analyst"},
+      "span_id": "s3", "parent": "s0", "name": "execute_tool search_docs", "duration_ms": 650,
+      "attributes": {"openinference.span.kind": "TOOL",
+                     "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "search_docs",
+                     "gen_ai.tool.call.id": "call_00", "app.tool.side_effect": "read"}
+    },
+    {
+      "span_id": "s3a", "parent": "s3", "name": "chat gpt-x-mini", "duration_ms": 300,
+      "attributes": {"openinference.span.kind": "LLM",
+                     "gen_ai.operation.name": "chat", "gen_ai.provider.name": "example-provider",
+                     "gen_ai.request.model": "gpt-x-mini", "gen_ai.response.model": "gpt-x-mini-2026-08-01",
+                     "gen_ai.prompt.name": "query_rewrite", "gen_ai.prompt.version": "v6",
+                     "gen_ai.usage.input_tokens": 370, "gen_ai.usage.output_tokens": 36,
+                     "gen_ai.response.finish_reasons": ["stop"]}
+    },
+    {
+      "span_id": "s3b", "parent": "s3", "name": "retrieval finance-docs", "duration_ms": 210,
+      "attributes": {"openinference.span.kind": "RETRIEVER",
+                     "gen_ai.operation.name": "retrieval", "gen_ai.data_source.id": "finance-docs",
+                     "gen_ai.retrieval.query.text": "definition of regional revenue EMEA plan",
+                     "gen_ai.retrieval.top_k": 20,
+                     "gen_ai.retrieval.documents": [
+                       {"id": "fin-defs-012", "score": 0.83},
+                       {"id": "fin-plan-fy26", "score": 0.79},
+                       {"id": "emea-ops-faq", "score": 0.61}
+                     ],
+                     "app.index.snapshot": "2026-10-14T02:00Z", "app.retrieval.filter.acl_role": "finance",
                      "app.retrieval.count_before_acl": 20, "app.retrieval.count_after_acl": 17,
-                     "app.embedding.model": "embed-v3"},
-      "documents": [
-        {"id": "fin-defs-012", "score": 0.83, "rank": 1},
-        {"id": "fin-plan-fy26", "score": 0.79, "rank": 2},
-        {"id": "emea-ops-faq", "score": 0.61, "rank": 3}
-      ]
+                     "app.embedding.model": "embed-v3"}
     },
     {
-      "span_id": "s4", "parent": null, "name": "rerank", "kind": "RERANKER", "duration_ms": 120,
-      "attributes": {"app.reranker.model": "rerank-v2", "app.rerank.top_n": 5, "app.rerank.min_score": 0.3},
-      "documents": [
-        {"id": "fin-defs-012", "score": 0.94, "rank": 1},
-        {"id": "fin-plan-fy26", "score": 0.88, "rank": 2}
-      ]
+      "span_id": "s3c", "parent": "s3", "name": "rerank", "duration_ms": 120,
+      "attributes": {"openinference.span.kind": "RERANKER",
+                     "app.reranker.model": "rerank-v2", "app.rerank.top_n": 5, "app.rerank.min_score": 0.3,
+                     "app.rerank.output_doc_ids": ["fin-defs-012", "fin-plan-fy26"],
+                     "app.rerank.output_scores": [0.94, 0.88]}
     },
     {
-      "span_id": "s5", "parent": null, "name": "execute_tool run_sql", "kind": "TOOL", "duration_ms": 1730,
-      "attributes": {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "run_sql",
+      "span_id": "s4", "parent": "s0", "name": "execute_tool run_sql", "duration_ms": 1730,
+      "attributes": {"openinference.span.kind": "TOOL",
+                     "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "run_sql",
                      "gen_ai.tool.call.id": "call_01", "app.tool.side_effect": "read"}
     },
     {
-      "span_id": "s5a", "parent": "s5", "name": "guardrail sql", "kind": "GUARDRAIL", "duration_ms": 12,
-      "attributes": {"app.sql.parse_ok": true, "app.sql.statement_type": "SELECT",
+      "span_id": "s4a", "parent": "s4", "name": "guardrail sql", "duration_ms": 12,
+      "attributes": {"openinference.span.kind": "GUARDRAIL",
+                     "app.sql.parse_ok": true, "app.sql.statement_type": "SELECT",
                      "app.sql.tables": ["fct_revenue", "dim_region", "fct_plan"],
                      "app.guardrail.decision": "allow", "app.guardrail.rule": "readonly+allowlist_finance"}
     },
     {
-      "span_id": "s5b", "parent": "s5", "name": "SELECT analytics", "kind": "DB", "duration_ms": 1650,
+      "span_id": "s4b", "parent": "s4", "name": "SELECT analytics", "duration_ms": 1650,
       "attributes": {"db.system.name": "snowflake", "db.operation.name": "SELECT",
                      "db.query.text": "SELECT r.region, SUM(f.amount) … WHERE r.region = ? AND f.fiscal_quarter = ? …",
-                     "app.db.role": "ro_finance_analyst", "app.sql.row_count": 1, "app.sql.error": null,
+                     "app.db.role": "ro_finance", "app.sql.row_count": 1,
                      "app.schema.version": "dwh_2026_10_01"}
     },
     {
-      "span_id": "s6", "parent": null, "name": "execute_tool create_ticket", "kind": "TOOL", "duration_ms": 900,
-      "attributes": {"gen_ai.tool.name": "create_ticket", "gen_ai.tool.call.id": "call_02",
+      "span_id": "s5", "parent": "s0", "name": "execute_tool create_ticket", "duration_ms": 150,
+      "attributes": {"openinference.span.kind": "TOOL",
+                     "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "create_ticket",
+                     "gen_ai.tool.call.id": "call_02", "app.tool.tier": "T1",
                      "app.tool.side_effect": "write", "app.tool.args_valid": true,
-                     "app.approval.required": false, "app.approval.policy": "auto_for_finance_internal",
-                     "app.tool.result.ticket_id": "FIN-4821", "app.tool.status": "ok"}
+                     "app.approval.required": true, "app.approval.mode": "user_confirm_preview",
+                     "app.tool.status": "pending_user_confirmation"}
     },
     {
-      "span_id": "s7", "parent": null, "name": "chat gpt-x", "kind": "LLM", "duration_ms": 2950,
-      "attributes": {"gen_ai.operation.name": "chat", "gen_ai.request.model": "gpt-x",
-                     "gen_ai.response.model": "gpt-x-2026-09-15",
-                     "app.prompt.id": "answer_with_citations", "app.prompt.version": "v31",
+      "span_id": "s6", "parent": "s0", "name": "chat gpt-x", "duration_ms": 2950,
+      "attributes": {"openinference.span.kind": "LLM",
+                     "gen_ai.operation.name": "chat", "gen_ai.provider.name": "example-provider",
+                     "gen_ai.request.model": "gpt-x", "gen_ai.response.model": "gpt-x-2026-09-15",
+                     "gen_ai.response.id": "resp_9c1f…",
+                     "gen_ai.prompt.name": "answer_with_citations", "gen_ai.prompt.version": "v31",
                      "gen_ai.usage.input_tokens": 7300, "gen_ai.usage.output_tokens": 480,
-                     "gen_ai.response.finish_reasons": ["stop"], "app.ttft_ms": 690}
+                     "gen_ai.response.finish_reasons": ["stop"], "gen_ai.response.time_to_first_chunk": 0.69}
     },
     {
-      "span_id": "s8", "parent": null, "name": "guardrail output", "kind": "GUARDRAIL", "duration_ms": 70,
-      "attributes": {"app.guardrail.names": ["pii_detector_v2", "toxicity_v1", "citation_resolver_v1"],
-                     "app.guardrail.decision": "allow", "app.citations.dangling": [], "app.citations.leaked": []}
+      "span_id": "s7", "parent": "s0", "name": "guardrail output", "duration_ms": 70,
+      "attributes": {"openinference.span.kind": "GUARDRAIL",
+                     "app.guardrail.names": ["pii_detector_v2", "toxicity_v1", "citation_resolver_v1"],
+                     "app.guardrail.decision": "allow", "app.citations.dangling": [], "app.citations.leaked": [],
+                     "app.citations.parse_errors": 0}
     }
   ],
   "scores": [
     {"name": "empty_retrieval", "source": "heuristic", "value": false},
     {"name": "citation_resolves", "source": "heuristic", "value": true},
-    {"name": "faithfulness", "source": "llm_judge", "eval_version": "faith_v5", "judge_model": "judge-large-2026-07",
-     "label": "partially_supported", "rationale": "Revenue figure comes from SQL result, plan figure supported by fin-plan-fy26 but that doc was not cited.",
+    {"name": "faithfulness", "source": "llm_judge", "span_id": "s6", "eval_version": "faith_v5",
+     "judge_model": "judge-large-2026-07", "label": "supported",
+     "rationale": "Revenue figure matches the SQL result; plan figure matches fin-plan-fy26.",
      "sample_reason": "uniform"},
-    {"name": "user_feedback", "source": "user", "value": "thumbs_up", "timestamp": "2026-10-15T09:13:40Z"}
+    {"name": "citation_support", "source": "llm_judge", "span_id": "s6", "eval_version": "cite_v3",
+     "judge_model": "judge-large-2026-07", "label": "missing_citation",
+     "rationale": "The plan figure comes from fin-plan-fy26, but the answer does not cite it.",
+     "sample_reason": "uniform"},
+    {"name": "user_feedback", "source": "user_feedback", "value": "thumbs_up", "timestamp": "2026-10-15T09:13:40Z"}
   ]
 }
 ```
 
-Notice five diagnostic details in this trace:
+Notice six diagnostic details in this trace:
 
-- **The faithfulness judge caught a citation omission:** The plan number came from retrieved document `fin-plan-fy26`, which the answer failed to cite. You can diagnose this only because retrieved IDs, cited IDs, and SQL results live in the same trace.
+- **The citation-support judge caught a citation omission:** The faithfulness judge says the answer is `supported`, because both numbers appear in the context. The separate citation-support judge flags that the plan number came from `fin-plan-fy26`, which the answer does not cite. You can diagnose this only because retrieved IDs, cited IDs, and SQL results live in the same trace.
 - **Pre- and post-ACL counts isolate permission drops:** `count_before_acl: 20` vs `count_after_acl: 17` proves RBAC filtering removed 3 chunks.
 - **Exact response model tracking:** `gen_ai.response.model` records the dated snapshot `gpt-x-2026-09-15` rather than just the alias `gpt-x`.
-- **Write-tool audit trail:** Span `s6` records `side_effect: "write"`, the approval policy, and the created `ticket_id: "FIN-4821"`.
-- **Placeholder model names:** Names such as `gpt-x` and `judge-large-2026-07` represent your configured models.
+- **Token totals reconcile:** The three inference spans (`s2`, `s3a`, `s6`) sum to 9,120 input and 612 output tokens, the totals on the `invoke_agent` span. Sum one level only when you compute cost.
+- **Write-tool audit trail:** Span `s5` records `side_effect: "write"`, tier `T1`, and `pending_user_confirmation`. When the user selects Submit, the ticket is created in a follow-up trace. That trace's `execute_tool create_ticket` span carries a span link to `s5`, the approver ID, and the created `ticket_id`.
+- **Placeholder names:** Names such as `gpt-x`, `judge-large-2026-07`, and `example-provider` represent your configured models and provider. `snowflake` is a custom `db.system.name` value; use the well-known value for your database when the spec defines one.
 
 ---
 
@@ -366,14 +410,14 @@ Production traces contain some of your most sensitive enterprise data: user ques
 | **Drop content** (log metadata only) | SDK configuration | Maximizes privacy, but prevents debugging and reference-free judge evals |
 | **Redact at the source** (before export) using PII/secret detectors | Application / SDK span processor | Best default balance, though detectors can miss rare patterns or over-redact |
 | **Redact in the collector** (via an OTel Collector processor) | Telemetry pipeline | Centralizes redaction policy, but raw text still leaves the application process |
-| **Store content by reference** (encrypted blob store with strict ACL and short TTL) | Storage layer | Separates hot metadata from sensitive payloads (supported by OTel GenAI external storage) |
+| **Store content by reference** (encrypted blob store with strict ACL and short TTL) | Storage layer | Separates hot metadata from sensitive payloads. The OTel GenAI spec allows an upload hook that stores content outside the span, but it does not yet standardize the reference format, so define your own and keep it stable |
 | **Tokenize or pseudonymize** user IDs and named entities | Application | Preserves cross-trace joinability without exposing raw identities |
 | **Field-level encryption** on sensitive attributes | Application / storage | Strong protection, but restricts full-text search in the trace UI |
 
 Follow this privacy and security checklist:
 
 - [ ] Classify every trace attribute into a data tier (`metadata`, `user_content`, `retrieved_content`, `tool_results`, `sql_results`) and enforce policy per tier.
-- [ ] Scrub PII and secrets **before** export using tools like [Microsoft Presidio](https://github.com/microsoft/presidio) or your enterprise DLP service, logging only entity types and counts.
+- [ ] Scrub PII and secrets **before** export using tools like [Presidio](https://github.com/data-privacy-stack/presidio) (originally from Microsoft) or your enterprise DLP service, logging only entity types and counts.
 - [ ] Strip raw credentials, authorization headers, and database connection strings, and add a CI test that fails if secrets appear in spans.
 - [ ] **Enforce source document ACLs in your trace UI.** Engineers who lack permission to read an HR document must not see its chunks inside a trace.
 - [ ] Restrict who can **export traces into datasets** (see [Production data flywheel](../01-datasets/04-production-data-flywheel.md)) and run a second redaction pass on export.
@@ -398,41 +442,99 @@ Unlike online-eval sampling, **trace sampling** decides which traces you *store*
 - **Use tail-based sampling at high traffic volumes.** Decide after the turn finishes: keep 100% of errors, guardrail blocks, negative feedback, and high-latency/high-cost traces, plus a uniform random sample of healthy traffic (see [OTel sampling concepts](https://opentelemetry.io/docs/concepts/sampling/)).
 - **Buffer recent traces for delayed feedback.** Because users click thumbs-down or retry seconds after a response, buffer traces briefly so late signals can promote a trace to permanent storage.
 
+### 5.4 Link delayed signals and follow-up actions
+
+Many signals arrive after the trace ends: async judge scores, thumbs, a user confirmation of a T1 action, a ticket that a human closes days later. Attach each one to the trace it describes:
+
+- **Join scores by `trace_id` and `span_id`.** Store async judge results with the IDs of the evaluated span. With OTel, emit a `gen_ai.evaluation.result` event parented to that span, or set `gen_ai.response.id` on the event when you cannot parent it.
+- **Use span links for follow-up work.** When the user confirms the ticket preview, the submit runs in a new trace. Add a [span link](https://opentelemetry.io/docs/concepts/signals/traces/#span-links) from the new `execute_tool` span to the original preview span. A parent-child link is wrong here, because the original trace already ended.
+- **Make tail sampling aware of late signals.** A tail sampler that drops a healthy trace before the thumbs-down arrives loses the case you most need. Keep the buffer longer than your typical feedback delay, or always keep a small uniform sample so late joins have a target.
+- **Keep the join keys after redaction.** Redaction and pseudonymization must not change `trace_id`, `span_id`, `gen_ai.response.id`, or `gen_ai.conversation.id`.
+
 ---
 
 ## 6. Instrumentation patterns
 
-The Python snippet below shows vendor-neutral instrumentation using the standard `opentelemetry-api` tracer, combining OTel GenAI attributes with custom `app.*` attributes:
+The Python snippet below shows vendor-neutral instrumentation with the standard OpenTelemetry API. It uses OTel GenAI attributes where the spec defines them and custom `app.*` attributes for the rest. It runs as shown with `opentelemetry-api` and `opentelemetry-sdk` installed. The vector store, redactor, and guardrail are stubs, and an in-memory exporter replaces your OTLP exporter.
 
 ```python
-from opentelemetry import trace
+# Runnable demo: needs opentelemetry-api and opentelemetry-sdk.
+# vector_search, redact, and the guardrail check are stubs; replace them with your own.
+import re
+from dataclasses import dataclass
+from typing import Callable, Optional
 
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+exporter = InMemorySpanExporter()           # use BatchSpanProcessor + OTLP exporter in production
+provider = TracerProvider()
+provider.add_span_processor(SimpleSpanProcessor(exporter))
+trace.set_tracer_provider(provider)
 tracer = trace.get_tracer("enterprise-assistant")
 
-def retrieve(query: str, user):
+INDEX_SNAPSHOT = "2026-10-14T02:00Z"
+CAPTURE_CONTENT = True                      # opt-in, as for OTel content capture
+
+@dataclass
+class Doc:
+    id: str
+    score: float
+
+@dataclass
+class GuardrailResult:
+    decision: str                           # "allow" | "flag" | "block"
+    score: Optional[float]                  # None when the check is rule-based
+    reason: str
+
+def vector_search(query: str, top_k: int) -> list[Doc]:      # stub
+    return [Doc("fin-defs-012", 0.83), Doc("hr-comp-007", 0.80), Doc("fin-plan-fy26", 0.79)][:top_k]
+
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+def redact(text: str) -> str:                                # stub: use Presidio or your DLP service
+    return EMAIL_RE.sub("<EMAIL>", text)
+
+def retrieve(query: str, can_read: Callable[[str], bool], top_k: int = 20) -> list[Doc]:
     with tracer.start_as_current_span("retrieval finance-docs") as span:
         span.set_attribute("gen_ai.operation.name", "retrieval")
         span.set_attribute("gen_ai.data_source.id", "finance-docs")
+        span.set_attribute("gen_ai.retrieval.top_k", top_k)
         span.set_attribute("app.index.snapshot", INDEX_SNAPSHOT)
-        span.set_attribute("app.retrieval.query", query)
-        docs = vector_search(query, top_k=20)
+        if CAPTURE_CONTENT:
+            span.set_attribute("gen_ai.retrieval.query.text", redact(query))
+        docs = vector_search(query, top_k=top_k)
         span.set_attribute("app.retrieval.count_before_acl", len(docs))
-        docs = [d for d in docs if user.can_read(d.id)]
+        docs = [d for d in docs if can_read(d.id)]
         span.set_attribute("app.retrieval.count_after_acl", len(docs))
         span.set_attribute("app.retrieval.doc_ids", [d.id for d in docs])
         span.set_attribute("app.retrieval.scores", [float(d.score) for d in docs])
         return docs
 
-def guardrail(name: str, stage: str, fn, payload):
+def guardrail(name: str, stage: str, fn: Callable[[str], GuardrailResult], payload: str) -> GuardrailResult:
     with tracer.start_as_current_span(f"guardrail {name}") as span:
         span.set_attribute("app.guardrail.name", name)
         span.set_attribute("app.guardrail.stage", stage)
-        result = fn(payload)                      # returns decision, score, reason
+        result = fn(payload)
         span.set_attribute("app.guardrail.decision", result.decision)
-        span.set_attribute("app.guardrail.score", result.score)
+        if result.score is not None:        # None is not a valid OTel attribute value
+            span.set_attribute("app.guardrail.score", float(result.score))
         span.set_attribute("app.guardrail.reason", result.reason)
         return result
+
+if __name__ == "__main__":
+    docs = retrieve("EMEA revenue? mail me at ana@acme.com", can_read=lambda d: d.startswith("fin-"))
+    guardrail("pii_detector_v2", "input", lambda p: GuardrailResult("allow", None, "no_pii"), "hello")
+    for s in exporter.get_finished_spans():
+        print(s.name, dict(s.attributes))
 ```
+
+Notes on the snippet:
+
+- **Redact before you set content attributes.** The query goes through `redact()` before it enters the span, and only when content capture is on.
+- **Skip missing values.** A rule-based guardrail has no score. `None` is not a valid attribute value, so do not set the attribute.
+- **Log ACL counts, not only results.** The before/after counts show permission drops without exposing the dropped documents.
 
 Follow these instrumentation practices in production:
 
@@ -441,6 +543,15 @@ Follow these instrumentation practices in production:
 - **Return `trace_id` to the client UI.** Include `trace_id` in the response payload or header so the frontend can attach user feedback directly to the trace (see [User feedback](./03-user-feedback-and-implicit-signals.md)).
 - **Export telemetry asynchronously.** Use batch span processors with bounded queues so a collector outage never blocks user requests or crashes the application.
 - **Calculate token cost in one central module.** Look up prices in a versioned table keyed by `gen_ai.response.model`.
+
+### Control telemetry volume and cardinality
+
+Agent traces grow fast. A loop of 10 tool calls with retries can emit 50+ spans per turn, and content attributes can add tens of kilobytes each.
+
+- **Know the SDK limits.** By default the OTel SDK keeps at most 128 attributes, 128 events, and 128 links per span, and sets no limit on attribute value length ([SDK environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/), [attribute limits](https://opentelemetry.io/docs/specs/otel/common/#attribute-limits)). Set `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT` so one large tool result cannot bloat a span. Count truncations, so you know when debugging data is missing.
+- **Keep high-cardinality values out of metric labels.** Never use `trace_id`, user ID, raw query text, or document ID as a metric attribute. Each unique value creates a new time series. The OTel metrics SDK caps each instrument at 2,000 series by default and folds the rest into an overflow series marked `otel.metric.overflow=true` ([metrics SDK: cardinality limits](https://opentelemetry.io/docs/specs/otel/metrics/sdk/#cardinality-limits)). Put these values on spans instead, and use low-cardinality labels such as role, tool name, model, and release.
+- **Cap agent loops in telemetry as well as in logic.** Record the step count on the root span (`app.llm_calls`, `app.tool_calls`). Alert on traces that hit the step limit, because they cost the most and often fail.
+- **Store large payloads once.** Do not copy the same retrieved chunk into the retrieval, rerank, and LLM spans. Keep the text on one span, or in external storage, and refer to it by document ID elsewhere.
 
 ---
 
@@ -451,10 +562,10 @@ The platforms below provide LLM tracing and online evaluation capabilities. Chec
 | Tool | Type | Notes (high level) |
 |---|---|---|
 | [Langfuse](https://langfuse.com/docs) | Open-source (self-hostable) + cloud | Traces, sessions, prompt registry, scores API, online LLM judges, datasets, and native OpenTelemetry ingestion |
-| [LangSmith](https://docs.smith.langchain.com/) | Commercial (LangChain) | Deep LangChain/LangGraph support plus framework-agnostic SDK, online evaluators, annotation queues, and datasets |
+| [LangSmith](https://docs.langchain.com/langsmith/observability) | Commercial (LangChain) | Deep LangChain/LangGraph support plus framework-agnostic SDK, online evaluators, annotation queues, and datasets |
 | [Arize Phoenix](https://github.com/Arize-ai/phoenix) | Open-source (self-hostable) + Arize AX commercial platform | Built natively on OpenTelemetry and OpenInference with tracing, online evals, datasets, and experiments |
-| [Braintrust](https://www.braintrust.dev/docs) | Commercial | Eval-first platform offering production logging/tracing, online scoring, datasets, and prompt playground |
-| [Weights & Biases Weave](https://github.com/wandb/weave) | Open-source SDK + W&B platform | LLM application tracing, evaluation pipelines, and custom scorers |
+| [Braintrust](https://www.braintrust.dev/docs/observe) | Commercial | Eval-first platform offering production logging/tracing, online scoring, datasets, and prompt playground |
+| [Weights & Biases Weave](https://docs.coreweave.com/products/wandb/weave) ([GitHub](https://github.com/wandb/weave)) | Open-source SDK + W&B platform (now part of CoreWeave) | LLM application tracing, evaluation pipelines, and custom scorers |
 | [MLflow Tracing](https://mlflow.org/docs/latest/genai/tracing/) | Open-source + managed cloud offerings | OpenTelemetry-compatible tracing and GenAI evaluation integrated into MLflow |
 | [Datadog LLM Observability](https://docs.datadoghq.com/llm_observability/) | Commercial APM add-on | Combines LLM traces with enterprise APM/infrastructure monitoring, online evals, and security checks |
 
@@ -476,7 +587,7 @@ Evaluate observability tools against this checklist:
 ## 8. Using traces day to day
 
 - **Run weekly error-analysis reviews.** Filter traces by low judge scores, thumbs-down feedback, or guardrail blocks, inspect 30–100 traces, and categorize root causes (see [Hamel Husain's field guide](https://hamel.dev/blog/posts/field-guide/)).
-- **Save filtered views per failure mode.** Create team bookmarks such as *"empty retrieval for finance_analyst"*, *"SQL errors by table"*, and *"create_ticket with approval overridden"*.
+- **Save filtered views per failure mode.** Create team bookmarks such as *"empty retrieval for role=finance"*, *"SQL errors by table"*, and *"create_ticket previews the user did not confirm"*.
 - **Diff traces across versions.** Compare span trees for the same query across two `config_hash` versions when investigating a regression.
 - **Replay production traces offline.** Re-run captured queries and retrieved contexts against a candidate prompt or model offline to verify fixes before deployment (see [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md)).
 
@@ -489,16 +600,20 @@ Evaluate observability tools against this checklist:
 - Standardize on **OpenTelemetry** using **OTel GenAI conventions** or **OpenInference**, and add custom business attributes under `app.*`.
 - Return `trace_id` to the client application so user feedback and asynchronous eval scores attach cleanly.
 - Protect trace data: **redact PII before export**, enforce document ACLs in the trace viewer, tier storage retention, and support user deletion requests.
+- Attach late signals (async judge scores, feedback, user confirmations) to the original span with span IDs, `gen_ai.evaluation.result` events, or span links.
+- Count tokens and cost at one level only, and keep IDs and raw text out of metric labels.
 - Select observability platforms based on OTel compatibility, data residency, session grouping, score APIs, and payload access control.
 
 ## Further reading
 
 - OpenTelemetry, [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (now maintained in [open-telemetry/semantic-conventions-genai](https://github.com/open-telemetry/semantic-conventions-genai))
 - OpenTelemetry blog, [OpenTelemetry for Generative AI](https://opentelemetry.io/blog/2024/otel-generative-ai/)
-- OpenTelemetry, [Database span conventions](https://opentelemetry.io/docs/specs/semconv/database/database-spans/) and [Sampling](https://opentelemetry.io/docs/concepts/sampling/)
+- OpenTelemetry, [Database span conventions](https://opentelemetry.io/docs/specs/semconv/db/database-spans/) and [Sampling](https://opentelemetry.io/docs/concepts/sampling/)
 - Arize, [OpenInference specification & instrumentation](https://github.com/Arize-ai/openinference), [Phoenix tracing docs](https://arize.com/docs/phoenix/tracing/llm-traces)
-- [Langfuse docs](https://langfuse.com/docs/observability/overview) · [LangSmith observability](https://docs.smith.langchain.com/observability) · [Braintrust logs](https://www.braintrust.dev/docs/guides/logs) · [W&B Weave docs](https://weave-docs.wandb.ai/) · [MLflow Tracing](https://mlflow.org/docs/latest/genai/tracing/) · [Datadog LLM Observability](https://docs.datadoghq.com/llm_observability/)
-- Microsoft, [Presidio](https://github.com/microsoft/presidio) (PII detection/anonymization)
+- [Langfuse docs](https://langfuse.com/docs/observability/overview) · [LangSmith observability](https://docs.langchain.com/langsmith/observability) · [Braintrust observability](https://www.braintrust.dev/docs/observe) · [W&B Weave docs](https://docs.coreweave.com/products/wandb/weave) · [MLflow Tracing](https://mlflow.org/docs/latest/genai/tracing/) · [Datadog LLM Observability](https://docs.datadoghq.com/llm_observability/)
+- [Presidio](https://github.com/data-privacy-stack/presidio) (PII detection/anonymization; originally from Microsoft)
+- OpenTelemetry, [Span links](https://opentelemetry.io/docs/concepts/signals/traces/#span-links), [Attribute limits](https://opentelemetry.io/docs/specs/otel/common/#attribute-limits), and [Metrics SDK cardinality limits](https://opentelemetry.io/docs/specs/otel/metrics/sdk/#cardinality-limits)
+- OpenTelemetry, [MCP semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/mcp.md)
 - Chip Huyen, [Building A Generative AI Platform](https://huyenchip.com/2024/07/25/genai-platform.html) (observability and guardrails in the overall architecture)
 - Hamel Husain, [A Field Guide to Rapidly Improving AI Products](https://hamel.dev/blog/posts/field-guide/)
 - Within this repo: [Online evals](./01-online-evals.md), [Access control & RBAC](../04-guardrails/06-access-control-rbac.md), [Threat model / OWASP](../04-guardrails/07-threat-model-owasp.md)

@@ -3,7 +3,8 @@
 > **TL;DR**
 >
 > - **Segment KPIs by version, role, and intent.** Track quality, retrieval, safety, SQL, latency, and cost metrics with confidence intervals across slices.
-> - **Set 4–7 user-facing SLOs and hard safety invariants.** Alert on sustained budget burn or hard invariant breaches rather than noisy single-point spikes.
+> - **Set a few user-facing SLOs and hard safety invariants.** Four to seven SLOs is a common starting point, not a rule. Alert on multi-window budget burn or hard invariant breaches rather than noisy single-point spikes.
+> - **Use real statistics for drift and regressions.** Compare rates with a two-proportion or sequential test, read PSI and KS with effect sizes, and correct for many slices.
 > - **Monitor all four drift axes.** Detect shifts in user queries, corpus and warehouse schemas, hosted model snapshots, and LLM judge behavior.
 > - **Prepare an AI incident runbook and kill switches.** Use runtime config rollbacks, tool kill switches, and mandatory regression tests for every incident.
 
@@ -11,6 +12,7 @@
     - Segmented KPI catalog and dashboard design
     - AI SLOs and low-fatigue alerting
     - Query, corpus, model, and judge drift detection
+    - Drift statistics: PSI, KS, Wasserstein, and embedding drift, with thresholds and caveats
     - Incident response runbooks, kill switches, and re-evaluation cadences
 - **Prerequisites:** [Online evals](./01-online-evals.md), [Observability & tracing](./02-observability-and-tracing.md)
 - **Related:** [User feedback](./03-user-feedback-and-implicit-signals.md), [Guardrails architecture](../04-guardrails/01-guardrails-architecture.md), [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md), [Maturity model](../05-decision-framework/05-maturity-model.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md)
@@ -19,7 +21,7 @@
 
 ## 1. What makes AI monitoring different
 
-Traditional service monitoring tracks **availability, latency, errors, and saturation**. Agentic RAG systems need those metrics too, but an agent can return HTTP 200 in 800 ms while hallucinating financial numbers. AI monitoring differs from classic APM in three ways:
+Traditional service monitoring tracks the four golden signals: **latency, traffic, errors, and saturation** ([Google SRE book](https://sre.google/sre-book/monitoring-distributed-systems/)). Agentic RAG systems need those metrics too, but an agent can return HTTP 200 in 800 ms while hallucinating financial numbers. AI monitoring differs from classic APM in three ways:
 
 1. **Quality is a statistical metric, not an HTTP status code.** Quality signals come from [online evals](./01-online-evals.md), so they are sampled, asynchronous, and noisy.
 2. **External dependencies shift silently.** Prompts, hosted models, document corpora, warehouse schemas, user queries, and LLM judges all change over time.
@@ -80,7 +82,7 @@ Organize your monitoring workspace into seven focused views:
 
 ## 3. SLOs for AI features
 
-A **Service Level Indicator (SLI)** measures a specific performance or quality rate, a **Service Level Objective (SLO)** sets the target threshold over a time window, and the **error budget** defines how much failure the system can tolerate before freezing feature releases (see the [Google SRE book on SLOs](https://sre.google/sre-book/service-level-objectives/)).
+A **Service Level Indicator (SLI)** measures a specific performance or quality rate, a **Service Level Objective (SLO)** sets the target threshold over a time window, and the **error budget** is the share of failures the SLO allows over that window: $1 - \text{SLO}$. For a 95% SLO, the budget is 5% of events. An **error-budget policy** is a separate decision: it states what the team does when the budget runs out, for example a release freeze (see the Google SRE book on [SLOs](https://sre.google/sre-book/service-level-objectives/) and [Embracing risk](https://sre.google/sre-book/embracing-risk/), and the workbook's [error budget policy](https://sre.google/workbook/error-budget-policy/)).
 
 ### 3.1 Example SLOs for the running example (heuristic starting points)
 
@@ -88,7 +90,7 @@ A **Service Level Indicator (SLI)** measures a specific performance or quality r
 |---|---|---|---|
 | **End-to-end latency (doc Q&A)** | 95% of turns $< 6\text{ s}$ and TTFT p95 $< 1.5\text{ s}$ | 28 days | Track a separate latency SLO for slower multi-step SQL/agent turns |
 | **Availability (non-error responses)** | $\ge 99.5\%$ | 28 days | Count valid guardrail refusals as successful responses, not system errors |
-| **Grounded answers** | $\ge 95\%$ of judged answers labeled `supported` | 7 days (rolling) | Requires a calibrated faithfulness judge and confidence intervals |
+| **Grounded answers** | $\ge 95\%$ of judged answers labeled `supported` | 7 days (rolling) | Requires a calibrated faithfulness judge and confidence intervals. Bad events are all verdicts other than `supported`, including `partially_supported` |
 | **Citation integrity** | $\ge 99.9\%$ of cited answers resolve all citations | 7 days | Deterministic check on 100% of responses |
 | **RBAC integrity** | **0** leaked citations or unauthorized tool executions | Always | Treat as a **hard invariant** with zero error budget |
 | **SQL execution reliability** | $\ge 97\%$ of generated SQL queries execute without error | 7 days | Exclude expected user RBAC permission denials |
@@ -96,10 +98,10 @@ A **Service Level Indicator (SLI)** measures a specific performance or quality r
 
 Follow these rules when setting AI SLOs:
 
-- **Limit SLOs to 4–7 user-facing indicators.** Keep component metrics as diagnostic indicators rather than paging SLOs.
+- **Keep the number of SLOs small.** Four to seven user-facing indicators is a common heuristic. Keep component metrics as diagnostic indicators rather than paging SLOs.
 - **Pin the judge version behind quality SLOs.** Upgrading a judge model changes the measurement scale, so re-baseline your SLO whenever you update a judge (Section 5.4).
 - **Never assign error budgets to security invariants.** Treat RBAC leaks or unauthorized write actions as immediate incidents.
-- **Enforce error budgets on release velocity.** When a rollout burns the weekly grounded-answer budget, freeze feature changes and prioritize quality fixes.
+- **Write an error-budget policy.** Agree in advance what happens when the budget runs out. For example, when a rollout burns the weekly grounded-answer budget, freeze feature changes and prioritize quality fixes.
 
 ---
 
@@ -120,8 +122,8 @@ Follow these rules when setting AI SLOs:
 | **Static threshold** | `metric > X for N minutes` | Hard safety invariants and strict limits | `leaked_citations > 0` pages security and on-call immediately |
 | **SLO burn-rate** | Error budget consumed faster than threshold across short and long windows | Latency, availability, citation resolution, groundedness | Multi-window burn-rate alerts from the [SRE workbook](https://sre.google/workbook/alerting-on-slos/) |
 | **Relative / seasonal anomaly** | Compare against same hour last week or rolling z-score | Guardrail trigger rates, empty retrieval, refusal rates, token cost | Prompt-injection blocks $> 5\times$ seasonal baseline for 30 minutes |
-| **Canary vs. control** | Two-sample difference exceeds threshold with minimum sample count | New prompt, model, or retriever rollouts | Canary SQL failure rate exceeds control by $> 2\text{ pp}$ with $n \ge 300$ |
-| **Two-proportion statistical test** | Non-overlapping confidence intervals on sampled judge rates | Daily or weekly quality regressions | Unsupported-answer rate jumps significantly week over week |
+| **Canary vs. control** | Two-proportion test, or a sequential test because you check the canary repeatedly, with $n$ from a power calculation | New prompt, model, or retriever rollouts | Canary SQL failure rate is higher than control with a one-sided sequential test at $\alpha = 0.05$. At a 3% base rate and 300 turns per arm, a 2 pp gap is only about 1.4 standard errors, so do not use a fixed 2 pp rule at that size |
+| **Two-proportion statistical test** | z-test, or a confidence interval on the *difference*, of sampled judge rates. Do not use "the two CIs do not overlap": that rule is much stricter than $\alpha = 0.05$ and misses real regressions ([Schenker & Gentleman, 2001](https://doi.org/10.1198/000313001317097960)) | Daily or weekly quality regressions | Unsupported-answer rate this week is higher than last week at $p < 0.05$, after BH correction across slices |
 | **Drift detector** | Embedding cluster distance or PSI exceeds threshold (Section 5) | Query distribution or corpus shifts | New query cluster exceeds 5% of daily traffic |
 | **Pipeline heartbeat** | Expected ingestion or evaluation job fails to report | Index freshness and async judge queues | Zero documents indexed in 24 hours, or eval queue backlog growing |
 
@@ -136,15 +138,33 @@ Follow these rules when setting AI SLOs:
 
 ### 4.4 Example alert rules (illustrative)
 
+The burn rate is how fast you spend the error budget. A burn rate of 1 spends exactly the whole budget over the SLO window. The [SRE workbook](https://sre.google/workbook/alerting-on-slos/) recommends pairing a long window, which shows the problem is significant, with a short window about 1/12 as long, which shows the problem is still happening. Its starting values for a 30-day SLO are: page at 14.4× over 1 hour and 5 minutes (2% of budget spent), page at 6× over 6 hours and 30 minutes (5%), and ticket at 1× over 3 days and 6 hours (10%). These pairs need many events per window. Sampled judge metrics have few events per hour, so use longer windows and minimum sample counts for them, as in the example below.
+
 ```yaml
 # illustrative: adapt to your alerting system's syntax
 - name: rbac_citation_leak
   expr: sum(increase(app_citations_leaked_total[5m])) > 0
   severity: sev1
-  action: page security + AI on-call; runbook: rbac-leak
+  action: page security + AI on-call
+  runbook: rbac-leak
 
+# Multi-window burn rate, 30-day latency SLO (95% of turns < 6 s, budget 5%).
+# Pairs and factors from the SRE workbook: 14.4x over 1h AND 5m; 6x over 6h AND 30m.
+- name: latency_slo_fast_burn
+  expr: slow_turn_ratio_1h > 14.4 * 0.05 and slow_turn_ratio_5m > 14.4 * 0.05
+  severity: sev2
+  runbook: latency-regression
+- name: latency_slo_slow_burn
+  expr: slow_turn_ratio_6h > 6 * 0.05 and slow_turn_ratio_30m > 6 * 0.05
+  severity: sev2
+  runbook: latency-regression
+
+# Sampled judge SLO (95% supported over 7 days, budget 5%). Judges see only ~500 turns
+# a day, so use longer window pairs and a minimum sample size. not_supported = 1 - supported.
 - name: grounded_answer_slo_burn
-  expr: unsupported_rate_1d > 3 * (1 - 0.95) and judged_samples_1d >= 200   # 3x budget burn, min sample size
+  expr: >
+    not_supported_rate_24h > 3 * 0.05 and judged_samples_24h >= 200
+    and not_supported_rate_6h > 3 * 0.05 and judged_samples_6h >= 50
   severity: sev2
   runbook: quality-regression
 
@@ -190,7 +210,7 @@ flowchart LR
     - Shifts in traffic share across existing clusters.
     - Rising **novelty rate** (share of queries whose nearest centroid distance exceeds threshold $r$).
     - Dense new clusters formed by previously unseen topics.
-- **Measure categorical distribution distance.** Compute Population Stability Index (PSI), Jensen–Shannon divergence, or chi-square statistics on intent, user role, language, and selected tools using libraries such as [Evidently](https://github.com/evidentlyai/evidently).
+- **Measure categorical distribution distance.** Compute Population Stability Index (PSI), Jensen–Shannon divergence, or chi-square statistics on intent, user role, language, and selected tools using libraries such as [Evidently](https://github.com/evidentlyai/evidently). See Section 5.6 for thresholds and caveats.
 - **Watch downstream retrieval symptoms:** Rising weak-retrieval rates, `no_context` refusals, and user rephrase rates within a specific slice.
 
 **How to respond:**
@@ -236,13 +256,13 @@ flowchart LR
 
 ### 5.3 Model / provider drift
 
-**What changes:** Hosted LLM behavior changes even when you deploy zero code changes. Model providers update weights behind unpinned aliases, tweak default safety filters, change quantization, or deprecate endpoints (see Chen, Zaharia & Zou, ["How is ChatGPT's behavior changing over time?"](https://arxiv.org/abs/2307.09009)).
+**What changes:** Hosted LLM behavior changes even when you deploy zero code changes. Model providers update weights behind unpinned aliases, tweak default safety filters, or deprecate endpoints (see Chen, Zaharia & Zou, ["How is ChatGPT's behavior changing over time?"](https://arxiv.org/abs/2307.09009), which compares dated snapshots of the same alias). Changes in the serving stack can also change the output of a pinned snapshot. In September 2025, Anthropic reported three infrastructure bugs (a context-window routing error, a TPU server misconfiguration, and an XLA:TPU compiler bug) that lowered Claude's output quality for some requests with no model change ([postmortem](https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues)).
 
 **How to detect it:**
 
 - [ ] Log the exact **`gen_ai.response.model`** string on every LLM span (see [Observability & tracing](./02-observability-and-tracing.md)) and alert whenever it changes.
-- [ ] **Pin dated model snapshots** in production configurations and treat snapshot upgrades as full releases requiring offline evals and canary rollouts.
-- [ ] **Run a scheduled sentinel prompt suite:** Execute 20–50 fixed prompts (covering JSON formatting, refusals, tool calls, and SQL) hourly or daily against production and alert on deterministic or embedding-similarity shifts.
+- [ ] **Pin dated model snapshots** in production configurations and treat snapshot upgrades as full releases requiring offline evals and canary rollouts. Pinning reduces drift but does not remove it, so keep the sentinel suite running against pinned models too.
+- [ ] **Run a scheduled sentinel prompt suite:** Execute 20–50 fixed prompts (covering JSON formatting, refusals, tool calls, and SQL) hourly or daily against production. Hosted models are not deterministic even at temperature 0 ([Atil et al., 2024](https://arxiv.org/abs/2408.04667)), so do not alert on single-output diffs. Run each prompt several times (for example 5), score each run pass/fail with deterministic checks, and compare the pass rate with the baseline using a two-proportion or binomial test. Alert on a significant drop, not on one changed answer.
 - [ ] Monitor sudden changes in **output token length, refusal rates, tool-call frequency, JSON schema validity, `finish_reason` distributions, and provider content-filter blocks**.
 - [ ] Track **provider deprecation calendars** and schedule model migrations weeks before forced cutovers.
 
@@ -257,7 +277,7 @@ flowchart LR
 **How to detect and prevent it:**
 
 - [ ] **Version every judge configuration** (model snapshot + prompt template + parser + threshold) and log `eval_version` on every score record.
-- [ ] **Maintain a pinned judge calibration dataset:** Score every candidate judge version against 100–300 human-labeled traces and require minimum Cohen's $\kappa$, precision, and recall before deployment.
+- [ ] **Maintain a pinned judge calibration dataset:** Score every candidate judge version against human-labeled traces before deployment. Use the bar from [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md): at least 100 labeled items with at least 30–50 FAIL cases, TPR and TNR $\ge 0.85$, and Cohen's $\kappa \ge 0.60$ ($\ge 0.90$ for high-risk checks such as RBAC). Use the measured TPR and TNR to correct online rates for judge error (Rogan–Gladen; see [Online evals §4.1](./01-online-evals.md)).
 - [ ] **Run weekly or monthly SME spot checks:** Have domain experts label a fresh random sample of judged production traces and alert if human–judge agreement drops.
 - [ ] **Never change the system and the judge simultaneously.** When upgrading a judge, re-score a historical baseline window with both judge versions to re-baseline your dashboards and SLOs.
 - [ ] Run the exact same judge version offline and online (see [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)).
@@ -269,8 +289,75 @@ flowchart LR
 | **Query drift** | Rising novelty rate, new embedding clusters, higher weak-retrieval and `no_context` refusal rates | Query embedding clustering and PSI/JS divergence on metadata | Sample and label new clusters, and check corpus coverage |
 | **Corpus / knowledge drift** | Ingestion lag, older retrieved doc timestamps, rising *Outdated* feedback chips | Ingestion monitors and index-to-source reconciliation jobs | Re-index, purge stale chunks, and refresh golden references |
 | **Schema drift** | Spikes in SQL `unknown column` errors and SQL-alignment judge failures | Warehouse catalog change feeds and prompt-to-catalog schema diffs | Update SQL schema prompts and add SQL regression tests |
-| **Model / provider drift** | Changed `response.model` string, shifts in output length, refusal rate, or JSON validity | Hourly sentinel prompt suite and response model version alerts | Pin or roll back model snapshot and run offline eval suite |
+| **Model / provider drift** | Changed `gen_ai.response.model` string, shifts in output length, refusal rate, or JSON validity | Hourly sentinel prompt suite and response model version alerts | Pin or roll back model snapshot and run offline eval suite |
 | **Judge drift** | Quality metric shifts without matching feedback or deterministic changes, lower SME κ | Pinned judge calibration dataset and periodic SME spot audits | Roll back judge version and re-score baseline window |
+
+
+### 5.6 Drift statistics: thresholds and caveats
+
+Pick the statistic by signal type, and always report an effect size next to any p-value.
+
+| Signal type | Examples | Statistic | Starting threshold (heuristic) |
+|---|---|---|---|
+| **Categorical** | Intent, role, language, tool chosen, refusal reason | PSI, chi-square, Jensen–Shannon distance | PSI < 0.10 stable; 0.10–0.25 moderate shift, investigate; > 0.25 major shift |
+| **Continuous** | Output tokens, latency, rerank scores, retrieval count | Two-sample Kolmogorov–Smirnov (KS) test, Wasserstein distance, PSI on quantile bins | Alert on effect size (KS $D$, Wasserstein in the signal's units) above a value you calibrate on stable weeks |
+| **Embeddings** | Query and answer embeddings | Domain-classifier AUC, maximum mean discrepancy (MMD), centroid novelty rate (Section 5.1) | Domain-classifier AUC clearly above 0.5; calibrate with a permutation or bootstrap test |
+
+Follow these rules when you apply them:
+
+- **Treat PSI thresholds as rules of thumb.** The 0.10 and 0.25 values come from credit-risk practice, not from a statistical test. Their behavior depends on the number of bins and the sample size ([Yurdakul, 2018](https://scholarworks.wmich.edu/dissertations/3208/)). Calibrate them on your own stable weeks.
+- **Fix the bins on the reference window.** Use quantile bins of the reference data, keep the same edges for every comparison, and add open-ended outer bins for values outside the reference range. Smooth empty bins with a small epsilon, or PSI becomes infinite.
+- **Expect tests to fire at large $n$.** With 200,000 turns per window, KS and chi-square tests find trivially small shifts "significant". Gate alerts on the effect size and use the p-value only as a second check.
+- **Use a domain classifier for embeddings.** Train a simple classifier to tell reference queries from current queries. An AUC near 0.5 means no detectable drift. Higher values mean drift, and the most confidently classified examples show you what changed. Rabanser et al. found that two-sample tests on low-dimensional representations detected shift best, and that domain classifiers help explain what shifted and whether it is harmful ([Failing Loudly, NeurIPS 2019](https://arxiv.org/abs/1810.11953)). MMD is a kernel two-sample test for the same job ([Gretton et al., 2012](https://jmlr.org/papers/v13/gretton12a.html)). [Evidently](https://www.evidentlyai.com/blog/embedding-drift-detection) implements domain-classifier, distance, and MMD methods, and uses a domain classifier by default for text drift ([docs](https://docs.evidentlyai.com/metrics/customize_data_drift)).
+- **Correct for many slices.** Testing 20 roles × intents per day yields false alarms by chance. Apply Benjamini–Hochberg across the slices (`scipy.stats.false_discovery_control`), or require the shift to persist across two windows.
+- **Drift is a reason to look, not a verdict.** A shift in query mix is not a quality drop. Pair every drift alert with the quality metrics for the drifted slice.
+
+The snippet below computes PSI for numeric and categorical signals and a KS test with effect sizes. It runs as shown with numpy and scipy.
+
+```python
+# Requires numpy and scipy.
+import numpy as np
+from scipy import stats
+
+def _psi(ref_pct: np.ndarray, cur_pct: np.ndarray, eps: float = 1e-4) -> float:
+    ref_pct = np.clip(ref_pct, eps, None)   # smoothing: an empty bin would give log(0)
+    cur_pct = np.clip(cur_pct, eps, None)
+    return float(np.sum((cur_pct - ref_pct) * np.log(cur_pct / ref_pct)))
+
+def psi_numeric(reference, current, bins: int = 10) -> float:
+    """PSI for a numeric signal. Bin edges are quantiles of the reference window."""
+    reference = np.asarray(reference, dtype=float)
+    current = np.asarray(current, dtype=float)
+    inner = np.unique(np.quantile(reference, np.linspace(0, 1, bins + 1)[1:-1]))
+    edges = np.concatenate(([-np.inf], inner, [np.inf]))   # catch values outside the reference range
+    ref_pct = np.histogram(reference, edges)[0] / len(reference)
+    cur_pct = np.histogram(current, edges)[0] / len(current)
+    return _psi(ref_pct, cur_pct)
+
+def psi_categorical(reference: dict, current: dict) -> float:
+    """PSI for counts per category (intent, role, tool). New categories count too."""
+    cats = sorted(set(reference) | set(current))
+    ref = np.array([reference.get(c, 0) for c in cats], dtype=float)
+    cur = np.array([current.get(c, 0) for c in cats], dtype=float)
+    return _psi(ref / ref.sum(), cur / cur.sum())
+
+def continuous_drift(reference, current) -> dict:
+    """KS test plus effect sizes. At large n, read the effect size, not only the p-value."""
+    ks = stats.ks_2samp(reference, current)
+    return {"ks_d": float(ks.statistic), "ks_p": float(ks.pvalue),
+            "wasserstein": float(stats.wasserstein_distance(reference, current)),
+            "psi": psi_numeric(reference, current)}
+
+if __name__ == "__main__":
+    rng = np.random.default_rng(0)
+    ref = rng.normal(400, 120, 5_000)                          # e.g. output tokens last month
+    print(continuous_drift(ref, rng.normal(400, 120, 5_000)))  # no change
+    print(continuous_drift(ref, rng.normal(520, 120, 5_000)))  # +1 SD shift
+    print(psi_categorical({"policy": 600, "sql": 300, "ticket": 100},
+                          {"policy": 450, "sql": 300, "ticket": 100, "benefits_enrollment": 150}))
+```
+
+In the demo, a 1 standard-deviation shift in output length gives PSI ≈ 0.95 and KS $D$ ≈ 0.39, and a new intent that takes 15% of traffic gives PSI ≈ 1.1. In a separate test with 200,000 samples per window and a 0.02 standard-deviation shift, KS gives $p < 10^{-6}$ while $D < 0.01$ and PSI < 0.001: the shift is "significant" but too small to matter.
 
 ---
 
@@ -385,18 +472,26 @@ Even when no alerts fire, production systems slowly drift. Run this recurring ev
 ## Key takeaways
 
 - Track quality, retrieval, safety, behavior, tool/SQL, latency, cost, and reliability KPIs **sliced by version, role, intent, and data source**, and display confidence intervals on all sampled metrics.
-- Maintain **4–7 user-facing SLOs**, and enforce zero-tolerance **hard invariants** for RBAC leaks and unauthorized write actions.
+- Maintain **a small set of user-facing SLOs** (four to seven is a common heuristic), and enforce zero-tolerance **hard invariants** for RBAC leaks and unauthorized write actions. The error budget is $1 - \text{SLO}$; what you do when it runs out is a separate error-budget policy.
 - Design low-fatigue alerts using minimum sample sizes, multi-window burn rates, seasonal baselines, and direct links to runbooks and filtered traces.
-- Monitor all four drift axes (**query**, **corpus/schema**, **model/provider**, and **judge**), because faithfulness judges cannot detect stale source documents and judges themselves drift.
+- Compare rates with a **two-proportion or sequential test**, not with overlapping confidence intervals or a fixed percentage-point gap.
+- Read drift statistics as **effect sizes**: PSI thresholds are rules of thumb, KS p-values shrink with $n$, and many slices need Benjamini–Hochberg correction.
+- Monitor all four drift axes (**query**, **corpus/schema**, **model/provider**, and **judge**), because faithfulness judges cannot detect stale source documents, pinned models can still change through serving bugs, and judges themselves drift.
 - Prepare for AI incidents ahead of time with **granular kill switches, runtime config rollback, fallback models, write-tool rate limits**, and a runbook that mandates **an offline regression test for every incident**.
 - Follow a disciplined re-evaluation cadence: daily sentinel runs, weekly error analysis, monthly full benchmarks, and quarterly golden-dataset refreshes.
 
 ## Further reading
 
-- Google SRE, [Service Level Objectives](https://sre.google/sre-book/service-level-objectives/), [Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/), [Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/), [Postmortem Culture](https://sre.google/workbook/postmortem-culture/)
+- Google SRE, [Service Level Objectives](https://sre.google/sre-book/service-level-objectives/), [Embracing Risk](https://sre.google/sre-book/embracing-risk/), [Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/), [Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/), [Error Budget Policy](https://sre.google/workbook/error-budget-policy/), [Postmortem Culture](https://sre.google/workbook/postmortem-culture/)
+- Schenker & Gentleman, [On Judging the Significance of Differences by Examining the Overlap Between Confidence Intervals](https://doi.org/10.1198/000313001317097960), *The American Statistician*, 2001
+- Anthropic, [A postmortem of three recent issues](https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues) (2025; quality loss from serving bugs, with no model change)
+- Atil et al., [Non-Determinism of "Deterministic" LLM Settings](https://arxiv.org/abs/2408.04667)
 - Chen, Zaharia & Zou, [How is ChatGPT's behavior changing over time?](https://arxiv.org/abs/2307.09009)
 - Shankar et al., [Who Validates the Validators?](https://arxiv.org/abs/2404.12272) (criteria drift and evaluator alignment)
-- Evidently, [open-source data & ML monitoring / drift detection](https://github.com/evidentlyai/evidently) ([docs](https://docs.evidentlyai.com))
+- Evidently, [open-source data & ML monitoring / drift detection](https://github.com/evidentlyai/evidently) ([docs](https://docs.evidentlyai.com)), [Embedding drift detection](https://www.evidentlyai.com/blog/embedding-drift-detection)
+- Yurdakul, [Statistical Properties of Population Stability Index](https://scholarworks.wmich.edu/dissertations/3208/) (PhD dissertation, Western Michigan University, 2018)
+- Rabanser, Günnemann & Lipton, [Failing Loudly: An Empirical Study of Methods for Detecting Dataset Shift](https://arxiv.org/abs/1810.11953) (NeurIPS 2019)
+- Gretton et al., [A Kernel Two-Sample Test](https://jmlr.org/papers/v13/gretton12a.html) (JMLR 2012; MMD)
 - NIST, [AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework) (the *Measure* and *Manage* functions cover ongoing monitoring)
 - OWASP, [GenAI Security Project / Top 10 for LLM Applications](https://genai.owasp.org/)
 - Chip Huyen, [Building A Generative AI Platform](https://huyenchip.com/2024/07/25/genai-platform.html)

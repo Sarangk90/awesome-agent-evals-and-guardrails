@@ -85,6 +85,7 @@ Implicit signals come from natural user behavior. Every session generates implic
 Convert raw clickstream events into structured **per-trace and per-session signal records** stored alongside your online eval scores:
 
 ```python
+# Requires Python 3.10+ (uses the `int | None` syntax).
 from dataclasses import dataclass
 
 @dataclass
@@ -129,14 +130,14 @@ Calibrate these weights against human judgment. Hand-label ~200 traces as good o
 | Bias | What happens | How to mitigate it |
 |---|---|---|
 | **Self-selection / non-response** | Only very frustrated or very happy users click rating buttons | Never report raw 👎 rate as your true error rate; use uniform-sample judges instead |
-| **Negativity bias** | Users report failures much more often than successes | Track 👍 and 👎 counts separately alongside overall feedback coverage |
+| **Negativity bias** | Users often report failures more readily than successes; check the 👍/👎 ratio in your own product | Track 👍 and 👎 counts separately alongside overall feedback coverage |
 | **Position / presentation bias** | First citations get the most clicks, and below-the-fold buttons get ignored | Compare click rates within the same rank position and keep feedback UI placement stable |
 | **Power-user skew** | A small group of heavy users generates most feedback events | Cap per-user weight or stratify feedback metrics by user tenure |
 | **Expectation / policy conflation** | Users click 👎 when they dislike a company policy the bot quoted accurately | Use reason chips and SME review to separate *incorrect answers* from *unwelcome policies* |
 | **Latency conflation** | Users click 👎 because the response was slow rather than inaccurate | Join trace latency to feedback and include a *Too slow* reason chip |
 | **Novelty / fatigue** | Feedback submission rates drop steadily after product launch | Normalize by feedback coverage and avoid comparing launch week to month three |
 | **Survivorship** | Dissatisfied early users churn and stop generating feedback | Monitor cohort retention alongside feedback ratios |
-| **Role/segment imbalance** | Finance analysts submit frequent feedback while HR users submit almost none | Stratify metrics by role and run targeted feedback sessions with quiet segments |
+| **Role/segment imbalance** | Users with the `finance` role submit frequent feedback while `hr_partner` users submit almost none | Stratify metrics by role and run targeted feedback sessions with quiet segments |
 | **Gaming / adversarial feedback** | Coordinated 👎 attacks or prompt injections hidden inside free-text feedback | Rate-limit submissions, flag anomalies, and **never inject raw feedback text into prompts** |
 
 As Joachims et al. demonstrated in ["Accurately Interpreting Clickthrough Data as Implicit Feedback"](https://www.cs.cornell.edu/people/tj/publications/joachims_etal_05a.pdf), click data works best as a **relative** preference signal due to strong position bias. Apply the same principle to citation clicks.
@@ -145,7 +146,7 @@ As Joachims et al. demonstrated in ["Accurately Interpreting Clickthrough Data a
 
 - **Report feedback coverage:** Compute `feedback_rate = traces_with_explicit_feedback / total_traces` and display it next to every feedback chart.
 - **Aggregate over sufficient volume:** Compute 👎 rates over weekly or biweekly windows with confidence intervals rather than noisy daily slices.
-- **Combine explicit and implicit signals:** Use the composite `implicit_failure_score` (Section 3.1) to rank all traces, not just the 1–3% with thumbs.
+- **Combine explicit and implicit signals:** Use the composite `implicit_failure_score` (Section 3.1) to rank all traces, not just the small share with thumbs (often low single-digit percent; measure your own feedback rate).
 - **Avoid running A/B tests on thumbs alone** unless power calculations confirm sufficient sample size (see [Online evals §5.3](./01-online-evals.md)).
 - **Solicit targeted feedback sparingly:** Prompt users for ratings slightly more often on canary versions or new intents, and tag those events `solicited = true`.
 
@@ -232,9 +233,9 @@ Follow these practices during weekly review sessions:
 
 ### 7.1 Example: from feedback to fix
 
-1. **Detect the spike:** The 👎 rate with the *Wrong numbers* reason chip doubles for `finance_analyst` users over seven days.
-2. **Isolate the slice:** Filtering those traces reveals that all failing queries filter on `fiscal_quarter`, and the online SQL-alignment judge flags 40% of them.
-3. **Diagnose root cause:** SME review shows the LLM generated calendar-quarter logic because the data engineering team renamed the fiscal calendar warehouse table without updating the SQL prompt schema description (see [Monitoring & drift](./04-monitoring-alerting-and-drift.md)).
+1. **Detect the spike:** The 👎 rate with the *Wrong numbers* reason chip doubles for users with the `finance` role over seven days.
+2. **Isolate the slice:** Filtering those traces reveals that all failing queries mention a quarter, and the online SQL-alignment judge flags 40% of them.
+3. **Diagnose root cause:** SME review shows the generated SQL used `DATE_TRUNC('quarter', …)` (calendar quarters) instead of joining the fiscal calendar table, because the data engineering team renamed the fiscal calendar warehouse table without updating the SQL prompt schema description (see [Monitoring & drift](./04-monitoring-alerting-and-drift.md)).
 4. **Ship the fix:** Update the SQL prompt's schema documentation and add a deterministic SQL check requiring the fiscal calendar table join whenever a query mentions quarters.
 5. **Lock in regression coverage:** Add 25 SME-reviewed queries with gold SQL to the [text-to-SQL benchmark](../02-offline-evals/05-text-to-sql-evals.md), roll out via canary, and confirm the *Wrong numbers* chip rate returns to baseline.
 
