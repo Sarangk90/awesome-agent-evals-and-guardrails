@@ -393,7 +393,7 @@ Use these numbers as starting rules of thumb and calibrate them on your data. Ke
 
 Report the **Wilson interval** rather than the normal approximation. The normal interval is poor for small rates and small $n$. If a slice has zero failures in $n$ samples, the 95% upper bound is about $3/n$ (the rule of three).
 
-To correct a judged rate for judge error, use the Rogan–Gladen estimator with the judge's TPR and TNR from its validation set. "Positive" here means the judge labels the trace `unsupported`. When you have a small human-labelled sample from the same traffic, prediction-powered inference (PPI) gives a corrected rate with a valid confidence interval. See [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) for both methods, and see [Dataset strategy](../01-datasets/01-dataset-strategy.md) and [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md) for sample-size and power math.
+To correct a judged rate for judge error, use the Rogan–Gladen estimator with the judge's TPR and TNR from its validation set. Use the same convention as [LLM-as-a-judge §7.3](../02-offline-evals/07-llm-as-a-judge.md#73-agreement-metrics): `PASS` (supported) is the positive class. TPR is the share of supported answers that the judge passes. TNR is the share of unsupported answers that the judge fails. Correct the pass rate, then convert it back to an unsupported rate. When you have a small, random human-labelled sample from the same traffic, prediction-powered inference (PPI) gives a corrected rate with a valid confidence interval. See [LLM-as-a-judge §8](../02-offline-evals/07-llm-as-a-judge.md#8-correcting-pass-rate-estimates-for-judge-error) for Rogan–Gladen and [§8.1](../02-offline-evals/07-llm-as-a-judge.md#81-prediction-powered-inference-ppi) for PPI (the canonical explanation), and see [Dataset strategy](../01-datasets/01-dataset-strategy.md) and [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md) for sample-size and power math.
 
 This helper computes the Wilson interval and the Rogan–Gladen correction. It uses only the standard library.
 
@@ -412,19 +412,21 @@ def wilson_interval(failures: int, n: int, z: float = 1.96) -> tuple[float, floa
     return (max(0.0, centre - half), min(1.0, centre + half))
 
 
-def rogan_gladen(observed_rate: float, tpr: float, tnr: float) -> float:
-    """Correct an observed judge rate for judge error. Clip to [0, 1]."""
+def rogan_gladen(observed_pass_rate: float, tpr: float, tnr: float) -> float:
+    """Correct an observed judge pass rate for judge error (PASS = positive). Clip to [0, 1]."""
     if tpr + tnr <= 1:
         raise ValueError("Judge is no better than chance (TPR + TNR <= 1).")
-    return min(1.0, max(0.0, (observed_rate + tnr - 1) / (tpr + tnr - 1)))
+    return min(1.0, max(0.0, (observed_pass_rate + tnr - 1) / (tpr + tnr - 1)))
 
 
 lo, hi = wilson_interval(30, 500)            # judge says 30/500 = 6.0% unsupported
 print(f"observed 6.0%, Wilson 95% CI {lo:.1%}-{hi:.1%}")      # 4.2%-8.4%
-print(f"corrected {rogan_gladen(0.06, tpr=0.90, tnr=0.95):.1%}")  # 1.2%
+# Judge validation: passes 95% of supported answers (TPR), fails 90% of unsupported ones (TNR).
+corrected_pass = rogan_gladen(1 - 0.06, tpr=0.95, tnr=0.90)
+print(f"corrected unsupported rate {1 - corrected_pass:.1%}")  # 1.2%
 ```
 
-In this example, the judge's 5% false-positive rate on supported answers explains most of the observed 6%. The corrected rate is about 1.2%. A small difference in TNR changes the result a lot when the true rate is low. Validate the judge on traffic that looks like production before you trust the corrected number. The Rogan–Gladen point estimate does not include the uncertainty in TPR and TNR; PPI or a bootstrap over the validation set does.
+In this example, the judge wrongly fails 5% of supported answers (TPR = 0.95). That error explains most of the observed 6%. The corrected rate is about 1.2%. A small difference in TPR changes the result a lot when the true unsupported rate is low. Validate the judge on traffic that looks like production before you trust the corrected number. The Rogan–Gladen point estimate does not include the uncertainty in TPR and TNR; PPI or a bootstrap over the validation set does.
 
 ### 4.2 Sampling strategies
 

@@ -373,7 +373,7 @@ def scope_check(query_vec: np.ndarray, intent_vecs: dict[str, np.ndarray],
 
 - **Regex + checksum validation:** match structured identifiers like emails, phone numbers, credit cards (with **Luhn checksum** validation), IBANs (mod-97), and SSNs.
 - **NER models (spaCy, transformers):** detect unstructured entities such as `PERSON`, `LOCATION`, and `ORGANIZATION`.
-- **[Microsoft Presidio](https://microsoft.github.io/presidio/):** combine regex recognizers, checksums, NER, and context words (`presidio-analyzer`) with redaction, masking, hashing, or encryption (`presidio-anonymizer`). Add custom recognizers for internal formats like employee IDs.
+- **[Presidio](https://presidio.dataprivacystack.org/)** (originally from Microsoft): combine regex recognizers, checksums, NER, and context words (`presidio-analyzer`) with redaction, masking, hashing, or encryption (`presidio-anonymizer`). Add custom recognizers for internal formats like employee IDs.
 - **Hosted cloud DLP APIs:** use managed PII detection services when data crosses trust boundaries.
 
 ### Actions
@@ -750,7 +750,7 @@ Re-validate the resolved IP at fetch time and on every HTTP redirect so attacker
 - Morris et al., [Text Embeddings Reveal (Almost) As Much As Text](https://arxiv.org/abs/2310.06816)
 - OWASP, [Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/) · [LLM Prompt Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)
 - Meta, [PurpleLlama (Llama Prompt Guard 2, Llama Guard)](https://github.com/meta-llama/PurpleLlama)
-- [Microsoft Presidio](https://microsoft.github.io/presidio/) · [Yelp detect-secrets](https://github.com/Yelp/detect-secrets) · [gitleaks](https://github.com/gitleaks/gitleaks) · [sqlglot](https://github.com/tobymao/sqlglot) · [LLM Guard](https://github.com/protectai/llm-guard) (archived)
+- [Presidio](https://presidio.dataprivacystack.org/) · [Yelp detect-secrets](https://github.com/Yelp/detect-secrets) · [gitleaks](https://github.com/gitleaks/gitleaks) · [sqlglot](https://github.com/tobymao/sqlglot) · [LLM Guard](https://github.com/protectai/llm-guard) (archived)
 - Unicode, [UTS #39: Unicode Security Mechanisms (confusables)](https://www.unicode.org/reports/tr39/) · Butler, [Smuggling arbitrary data through an emoji](https://paulbutler.org/2025/smuggling-arbitrary-data-through-an-emoji/)
 - Red-teaming tools: [garak](https://github.com/NVIDIA/garak) · [PyRIT](https://github.com/Azure/PyRIT) · [promptfoo](https://www.promptfoo.dev/docs/red-team/)
 - **In this repo:**

@@ -494,7 +494,7 @@ flowchart TD
 | If your top risk is … | Start with | Add if needed |
 |---|---|---|
 | Prompt injection (direct + indirect) | Prompt Guard 2 on user input and on every retrieved chunk and tool output, plus tool isolation and tool tiers | A managed injection API with document-attack detection, or LlamaFirewall AlignmentCheck (experimental) for agents |
-| Data leakage across roles | Policy engine (OPA, Cedar, OpenFGA) + retrieval ACL filtering | Output PII scanning and canary tokens for system prompt leaks |
+| Data leakage across roles | Policy engine (OPA, Cedar, OpenFGA) + retrieval ACL filtering | Output PII scanning and canary tokens for hidden context exposure (`LLM08:2026`) |
 | PII exposure | Presidio (self-hosted) or your cloud's managed PII filter | Custom regex and context recognizers for internal IDs |
 | Hallucination | Strict citation checks + a groundedness model (Granite Guardian, Azure, or Bedrock for single-turn flows) | Offline faithfulness evaluations ([Eval & observability tools](./01-eval-and-observability-tools.md)) |
 | Harmful content | Llama Guard or Qwen3Guard (self-hosted), or OpenAI moderation (free API) | ShieldGemma for custom harm policies or managed cloud APIs |

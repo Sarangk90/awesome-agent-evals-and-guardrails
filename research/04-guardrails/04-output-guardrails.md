@@ -24,7 +24,7 @@ flowchart TD
     D["Draft answer + retrieved context + citations + trace"] --> S["1 · Structural: schema / format validation"]
     S -->|invalid| RT["Repair or re-ask with errors, bounded retries"]
     RT --> S
-    S -->|valid| C["2 · Cheap deterministic: citation IDs, canary / system prompt leakage, secrets regex, link and markdown sanitization"]
+    S -->|valid| C["2 · Cheap deterministic: citation IDs, canary / hidden context leakage, secrets regex, link and markdown sanitization"]
     C --> M["3 · Classifiers: PII, toxicity, policy topics, brand rules"]
     M --> G["4 · Groundedness: NLI or LLM judge"]
     G --> DEC{"Decision"}
@@ -49,7 +49,7 @@ flowchart TD
 |---|---|---|---|---|
 | Schema / format | Pydantic / JSON Schema | Re-ask with errors → fallback | Closed | µs–ms |
 | Citation verification | Set membership + optional NLI | Drop invalid citations, or regenerate if none are valid | Closed | ms (set check) |
-| Secrets / canary / system prompt leakage | Regex + canary + n-gram overlap | Block or redact | Closed | ms |
+| Secrets / canary / hidden context exposure (LLM08:2026) | Regex + canary + n-gram overlap | Block or redact | Closed | ms |
 | Unsafe links / markdown | Allowlist + sanitizer | Modify (strip) | Closed | ms |
 | PII leakage | Regex + NER, compared to permitted context | Redact | Open with regex fallback | 10–100 ms |
 | Toxicity / profanity | Classifier / moderation API | Regenerate → refuse | Open + flag | 10–100 ms |
@@ -364,7 +364,7 @@ term_rule("Project Falcon ships with Q3.", {"Project Falcon": "the upcoming rele
 
 ---
 
-## 9. System prompt and configuration leakage
+## 9. Hidden context exposure: system prompt and configuration leakage
 
 **What.** Detect when the output reproduces the system prompt, hidden instructions, tool definitions, internal configuration, or other users' data.
 
@@ -494,7 +494,7 @@ Streaming makes answers feel fast, but users can see content before whole-answer
 
 | Rail | Works on chunks? | Recommended streaming strategy |
 |---|---|---|
-| Secrets / canary / system prompt leakage | Yes (pattern-local) | Check chunks with a hold-back window ≥ longest pattern. **Never** stream optimistically |
+| Secrets / canary / hidden context exposure | Yes (pattern-local) | Check chunks with a hold-back window ≥ longest pattern. **Never** stream optimistically |
 | PII redaction | Mostly (entity-local) | Check chunks with a sentence-sized hold-back window |
 | Markdown/link sanitization | Partly | A reference-style link can be defined at the end of the answer, so a per-chunk check is not enough. Re-parse the whole buffer on each release and send only sanitized, rendered output; or buffer any answer that contains `[` or `<` |
 | Toxicity / profanity | Mostly | Check sentence-level chunks |

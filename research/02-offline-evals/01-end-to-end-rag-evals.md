@@ -554,7 +554,7 @@ flowchart TD
 ## 7. Practical setup checklist
 
 - [ ] Build a dataset with `q`, `a*`, an `answerable` label, slice tags, and relevant chunk IDs ([dataset strategy](../01-datasets/01-dataset-strategy.md)).
-- [ ] Pin the judge model, judge temperature (`0`), judge prompts, and embedding model version.
+- [ ] Pin the judge model snapshot, judge prompts, and embedding model version. Use the lowest temperature the judge model supports, or a fixed reasoning effort for reasoning models ([LLM-as-a-judge §4.1](./07-llm-as-a-judge.md#41-principles)).
 - [ ] For agentic runs, build `C` from every tool output and memory item the agent saw, not only the last search.
 - [ ] Log `C` with chunk IDs and ranks on every run so you can recompute retrieval metrics offline.
 - [ ] Validate every LLM-judged metric before gating releases: at least 100 human-labelled items with at least 30–50 failures, and TPR ≥ 0.85, TNR ≥ 0.85, and Cohen's κ ≥ 0.60 on a held-out split (≥ 0.90 for high-risk slices). See [LLM-as-a-judge](./07-llm-as-a-judge.md).

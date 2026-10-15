@@ -2,7 +2,7 @@
 
 > **TL;DR**
 >
-> - **Agents break in predictable places:** query understanding, routing, retrieval, generation, citations, tool calls, SQL generation, security, and multi-turn memory and context.
+> - **Agents break in predictable places:** query understanding, routing, retrieval, generation, citations, tool calls, SQL generation, security, memory, and long-horizon or multi-agent runs.
 > - **Always debug upstream first.** What looks like a generator hallucination is often a retriever failure in disguise.
 > - **Use this page as a field manual.** For every failure mode below, you will find the **symptom** you see, the **root cause**, the **eval** that measures it, and the **guardrail or fix** that stops it.
 
@@ -10,6 +10,7 @@
     - How to separate retrieval bugs from generation bugs
     - Barnett et al.'s seven RAG failure points
     - Stage-by-stage failures for RAG, tools, SQL, security (including MCP and agent memory), and multi-turn chat
+    - Failures that appear only in long-horizon, autonomous, and multi-agent runs
     - How to trace a broken answer back to its root cause
 - **Prerequisites:**
     - [Why Evals and Guardrails](./01-why-evals-and-guardrails.md)
@@ -146,7 +147,7 @@ Use the tables below to diagnose traces during error analysis. Every table lists
 | **Infinite loop** | Calls the same failing search tool 15 times in a row | No loop detector or step budget | Step count and repeated-call detector ([Agent Evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md)) | Enforce a hard maximum step count (e.g., 5 steps) and a token or cost budget (Unbounded Consumption, `LLM06:2026`); block identical consecutive tool calls |
 | **Excessive agency** | Deletes a record or sends an email without asking the user first | Write tools lack confirmation gates (Excessive Agency, `LLM03:2026`) | Red-team action scenarios; check that write tools trigger confirmation | Require confirmation before writes, scaled by tool tier: an inline preview and one-click confirmation for reversible writes such as `create_ticket` (T1), and stricter approval for external or destructive tools such as `send_email` and `delete_ticket` (T2–T3) ([Tool Guardrails](../04-guardrails/05-tool-and-action-guardrails.md)) |
 
-> **Multi-agent failures:** If you run multiple collaborating agents, see Cemri et al. (2025), *Why Do Multi-Agent LLM Systems Fail?* ([arXiv:2503.13657](https://arxiv.org/abs/2503.13657)), which proposes the MAST taxonomy: **14 failure modes** in three groups, **specification and system-design issues**, **inter-agent misalignment**, and **task verification** (for example, no verification, incomplete verification, or stopping too early).
+> **Multi-agent failures:** If you run multiple collaborating agents, see Cemri et al. (2025), *Why Do Multi-Agent LLM Systems Fail?* ([arXiv:2503.13657](https://arxiv.org/abs/2503.13657)). It proposes the MAST taxonomy: **14 failure modes** in three groups. The groups are **specification and system-design issues**, **inter-agent misalignment**, and **task verification** (for example, no verification, incomplete verification, or stopping too early). See [§3.11](#311-long-horizon-autonomy-and-multi-agent) for the multi-agent and long-horizon failures that matter most in practice.
 
 ### 3.7 Text-to-SQL
 
@@ -192,6 +193,21 @@ Use the tables below to diagnose traces during error analysis. Every table lists
 | **Silent model drift** | Answer quality or formatting shifts overnight with zero code changes | Cloud provider updated a floating model alias | Daily online eval trends ([Monitoring & Drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)) | Pin exact model version strings and run your offline eval suite before switching versions |
 | **Index / data drift** | Retrieval accuracy slowly drops over months | New company wikis use new terminology or break chunking | Weekly scheduled retrieval evals and online context-relevance tracking | Monitor ingestion pipelines and refresh your golden dataset quarterly |
 | **Judge drift** | Your dashboard score jumps 10% even though the app did not change | The LLM used inside your judge was updated | Periodic check of judge agreement against a fixed human-labeled set ([LLM-as-a-Judge](../02-offline-evals/07-llm-as-a-judge.md)) | Pin the judge model version and version your judge prompts |
+
+### 3.11 Long-horizon, autonomy, and multi-agent
+
+These failures appear when an agent runs for many steps, runs without a human watching, or works with other agents. They apply to every archetype in [Agent Archetypes](./05-agent-archetypes.md), not only to RAG.
+
+| Failure mode | Symptom | Root cause | Detect (Eval) | Mitigate (Guardrail / Fix) |
+|---|---|---|---|---|
+| **False completion claim** | The agent says *"All tests pass"* or *"Done"*, but the final state shows unfinished work | The agent did not verify its work, or it stopped too early | Compare the final reply with the final state ([Environments and Graders](../02-offline-evals/09-agent-eval-environments-and-graders.md)) | Make the harness verify the state before it reports success. Require evidence such as test output in the reply |
+| **Goal drift** | After 40 steps, the agent works on a side problem and never returns to the user's task | The original goal is far back in the context or was lost in a summary | Long-horizon tasks graded on the original goal. Milestone completion | Restate the goal and constraints at each checkpoint. Keep the task spec outside the summarized history |
+| **Compounding errors** | Success rate falls quickly as tasks get longer, even when each step looks fine | Small early mistakes build on each other across many steps | Success rate grouped by task length. Milestone completion ([Environments and Graders §9](../02-offline-evals/09-agent-eval-environments-and-graders.md#9-long-horizon-tasks)) | Verify after each milestone. Split long tasks into smaller sub-tasks. Add human checkpoints for high-risk work |
+| **Grader or reward hacking** | Tests pass, but the agent edited the tests, hard-coded outputs, or patched the checker | The agent can see or change what decides success ([METR, 2025](https://metr.org/blog/2025-06-05-recent-reward-hacking/)) | Hidden tests, protected-path diff, and manual review of passing transcripts | Make tests and CI files read-only to the agent. Require human review for changes to tests |
+| **Runaway run** | A background agent keeps running for hours and spends far more than planned | No budget on time, tokens, or tool calls (Unbounded Consumption, `LLM06:2026`) | Cost per successful task. Distribution of run length | Set per-task budgets for steps, tokens, money, and wall-clock time. Add a kill switch ([Tool Guardrails](../04-guardrails/05-tool-and-action-guardrails.md)) |
+| **Hand-off context loss** | A sub-agent files a ticket for the wrong team because it never got the user's role or constraint | The orchestrator passes a short free-text summary instead of the facts the sub-agent needs | Hand-off completeness check: does each hand-off carry the user, constraints, and goal? | Use a structured hand-off schema with user identity, permissions, constraints, and budget |
+| **Unverified peer output** | The orchestrator repeats a sub-agent's wrong or injected claim as fact | Agents trust each other's messages without checks (`ASI07` Insecure Inter-Agent Communication, `ASI08` Cascading Failures) | Multi-agent red-team: inject into one agent and measure how far the attack spreads | Treat peer messages as untrusted data. Validate them against a schema. Verify claims against the source system ([Tool Guardrails §16](../04-guardrails/05-tool-and-action-guardrails.md#16-multi-agent-and-agent-to-agent-guardrails)) |
+| **Duplicated or conflicting work** | Two agents create the same ticket, or edit the same file in different ways | No single owner for each resource. No locks | Final-state check for duplicates and conflicts | Give each resource one owner. Use idempotency keys and locks for writes |
 
 ---
 
@@ -258,6 +274,10 @@ Treat these tables as a **starter menu**, not a checklist you must implement all
 | **PII leakage** | PII detection rate | Input and output PII redaction |
 | **Multi-turn context loss** | Multi-turn task success rate | Standalone query rewriter |
 | **Memory poisoning** | Planted-memory red-team tests | Per-user memory scope + no instructions from untrusted content |
+| **False completion claim** | Final-state check vs. the agent's reply | Harness verifies state before it reports success |
+| **Grader or reward hacking** | Hidden tests + protected-path diff + passing-transcript review | Read-only tests and CI files for the agent |
+| **Runaway run** | Cost per successful task + run-length distribution | Per-task step, token, money, and time budgets + kill switch |
+| **Unverified peer output** | Multi-agent injection-spread test | Peer messages treated as untrusted + schema validation |
 
 ---
 
@@ -268,6 +288,7 @@ Treat these tables as a **starter menu**, not a checklist you must implement all
 - **Faithfulness checks cannot catch stale documents.** If the retriever fetches an outdated 2022 policy, the answer will look 100% faithful. Use runtime metadata checks (`status`, `effective_date`) to block superseded sources, and offline reference-based evals with domain experts to find the cases that metadata misses.
 - **Block high-severity risks with code, not prompts.** Enforce RBAC permissions, read-only SQL, and tool confirmation gates in application code outside the LLM.
 - **Treat tools, tool descriptions, and memory as untrusted input.** Agents add new attack paths (MCP tool poisoning, memory poisoning, goal hijack). Use the lethal trifecta and the Agents Rule of Two to decide where a human must approve.
+- **Do not trust an agent's own report of success.** Check the final state, protect what you grade, and treat messages from other agents as untrusted input.
 
 ## Further reading
 
@@ -282,6 +303,7 @@ Treat these tables as a **starter menu**, not a checklist you must implement all
 - Simon Willison, 2025, [The lethal trifecta for AI agents](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/)
 - Meta, 2025, [Agents Rule of Two: A Practical Approach to AI Agent Security](https://ai.meta.com/blog/practical-ai-agent-security/)
 - Anthropic, 2025, [Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
+- METR, 2025, [Recent Frontier Models Are Reward Hacking](https://metr.org/blog/2025-06-05-recent-reward-hacking/)
 - Simon Willison, [Prompt injection series](https://simonwillison.net/series/prompt-injection/)
 - Yu et al., 2018, [Spider: Text-to-SQL benchmark](https://arxiv.org/abs/1809.08887) · Li et al., 2023, [BIRD benchmark](https://arxiv.org/abs/2305.03111) · Zhong, Yu & Klein, 2020, [Semantic Evaluation for Text-to-SQL with Distilled Test Suites](https://arxiv.org/abs/2010.02840)
 - PostgreSQL docs, [EXPLAIN](https://www.postgresql.org/docs/current/sql-explain.html) · [Data-modifying statements in WITH](https://www.postgresql.org/docs/current/queries-with.html)

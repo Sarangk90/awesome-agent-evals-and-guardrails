@@ -99,7 +99,7 @@ flowchart TD
 | **Routing / intent** | Classified intent | Route to the right pipeline; restrict tool set per intent and role | Over-broad agent capability | [02 §Topic](./02-input-guardrails.md), [05](./05-tool-and-action-guardrails.md) |
 | **Retrieval / context** | Retrieved chunks, tool results, memory | Permission filtering, provenance/allowlists, indirect injection scanning, spotlighting, freshness, relevance threshold, data minimization | Data leakage across permissions, indirect prompt injection, poisoned or stale context | [03](./03-retrieval-and-context-guardrails.md) |
 | **Tool / action** | Planned tool calls, arguments, generated SQL | Schema/arg validation, tool allowlist per role, read-only enforcement, SQL AST checks, rate/budget limits, human approval | Excessive agency, destructive actions, SQL injection, runaway loops | [05](./05-tool-and-action-guardrails.md) |
-| **Output** | Draft answer (whole or streamed) | Groundedness, citation verification, PII/secret leakage, toxicity, schema validation, policy compliance, system prompt leakage, unsafe markdown/links | Hallucination, leakage, harmful or off-policy content, broken downstream parsing | [04](./04-output-guardrails.md) |
+| **Output** | Draft answer (whole or streamed) | Groundedness, citation verification, PII/secret leakage, toxicity, schema validation, policy compliance, hidden context exposure (system prompt, tool schemas; `LLM08:2026`), unsafe markdown/links | Hallucination, leakage, harmful or off-policy content, broken downstream parsing | [04](./04-output-guardrails.md) |
 | **Policy / authorization** (cross-cutting) | Identity + resource + action | RBAC/ABAC checks, row/document-level security, entitlement propagation into every tool | Unauthorized access (never trust a probabilistic detector with permissions) | [06](./06-access-control-rbac.md) |
 
 **Design principles for the layered model**
@@ -273,7 +273,7 @@ Use the **most severe action wins** rule to combine verdicts (block > escalate >
 When you run guardrails sequentially, order them by cost and trigger frequency:
 
 1. **Run deterministic, near-free checks first:** length limits, normalization, regex denylists, allowlists, and schema checks.
-2. **Run small ML classifiers second:** models taking 10–100 ms on CPU or GPU.
+2. **Run small ML classifiers second:** models that take tens of milliseconds per call (for example, Meta reports about 19–92 ms per 512-token Prompt Guard 2 call on an A100 GPU). Benchmark on your own hardware; CPU latency is usually higher.
 3. **Run LLM-based rails last:** invoke them only for remaining ambiguous cases.
 
 A **cascade** uses a cheap detector's confidence score to decide whether to invoke an expensive detector. Resolve high-confidence allows and blocks with the cheap classifier, and route only the gray zone to the LLM judge. This pattern cuts LLM-rail volume sharply while preserving accuracy (validate the threshold on your dataset).

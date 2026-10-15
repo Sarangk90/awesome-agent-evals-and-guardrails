@@ -13,7 +13,7 @@
     - Sandboxed final-state checks, pass^k, and the unbiased pass@k estimator
     - Routing confusion matrices and simulated users
 - **Prerequisites:** [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)
-- **Related:** [Text-to-SQL evals](./05-text-to-sql-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Tool and action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Tracing & OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md)
+- **Related:** [Agent eval environments & graders](./09-agent-eval-environments-and-graders.md), [Text-to-SQL evals](./05-text-to-sql-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Tool and action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Tracing & OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md)
 
 ---
 
@@ -413,6 +413,7 @@ When a task admits many valid tool sequences, use a rubric-based LLM judge inste
     - **Ignore volatile fields** such as auto-generated UUIDs and timestamps when diffing database state.
     - **Assert the absence of unintended side effects** (verify that no extra tickets were created and no unrelated rows were modified).
     - **Invest in deterministic sandboxes.** Sandboxed state fixtures take engineering effort to build, but they pay for themselves on every write-capable agent.
+    - **Protect the grader from the agent.** Keep tests and assertions outside the agent's write access. See [Agent eval environments & graders](./09-agent-eval-environments-and-graders.md#7-grader-hacking-and-how-to-stop-it).
 - **When to use it:** Use final-state checks for every agent that mutates external state. For read-only Q&A agents, evaluate the final response with [answer correctness](./01-end-to-end-rag-evals.md#33-answer-correctness).
 - **Implemented in:** τ-bench and custom sandbox assertions in promptfoo, Braintrust, LangSmith, or pytest.
 
@@ -624,7 +625,7 @@ Single-turn evals miss multi-turn failures such as forgetting user constraints f
 | Metric | What it measures | How to compute it | Implemented in |
 |---|---|---|---|
 | **Goal / conversation completion** | Whether the assistant satisfied the user's overall goal by the end of the dialogue | Run an LLM judge over the full transcript with scenario criteria, or check final sandbox state | DeepEval (`ConversationCompletenessMetric`), RAGAS (`AgentGoalAccuracyWithReference` / `WithoutReference`), τ-bench, τ²-bench |
-| **Knowledge retention** | Whether the assistant remembers facts the user stated in earlier turns ("I work in Pune", "I am a contractor") | Prompt a judge to flag later turns that contradict or re-ask facts already provided | DeepEval (`KnowledgeRetentionMetric`) |
+| **Knowledge retention** | Whether the assistant remembers facts the user stated in earlier turns ("I work in Pune", "I joined last week") | Prompt a judge to flag later turns that contradict or re-ask facts already provided | DeepEval (`KnowledgeRetentionMetric`) |
 | **Role adherence** | Whether the assistant stays within its assigned persona and scope across turns | Score each assistant turn against the system role description | DeepEval (`RoleAdherenceMetric`) |
 | **Topic adherence** | Whether the conversation stays inside approved business domains | Classify each turn's topic against your allowed topic list | RAGAS (`TopicAdherence`; legacy name `TopicAdherenceScore`) |
 | **Turn relevancy** | Whether each assistant reply addresses the immediate conversation context | Run a sliding-window relevance judge across turns | DeepEval (`TurnRelevancyMetric`) |
@@ -653,9 +654,9 @@ sequenceDiagram
 Scenario specification:
 
 ```json
-{"persona": "Contractor in Pune, terse, not technical",
+{"persona": "New employee in Pune, terse, not technical",
  "goal": "Get VPN access approved; you don't know which form to use",
- "hidden_facts": {"employee_type": "contractor", "manager": "a.rao"},
+ "hidden_facts": {"role": "employee", "start_date": "last week", "manager": "a.rao"},
  "rules": ["Only reveal manager if asked", "If asked for a password, refuse"],
  "success": ["access request ticket created with manager a.rao", "user told expected SLA"],
  "max_turns": 10}

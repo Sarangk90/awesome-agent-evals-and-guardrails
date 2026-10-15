@@ -12,6 +12,7 @@
     - Human approval UX, dry runs, and idempotency
     - Step, cost, and loop budgets plus code sandboxing
     - Text-to-SQL execution guards and MCP security controls
+    - Multi-agent, agent-to-agent (A2A), coding-agent, and computer-use controls
 - **Prerequisites:** [Guardrails architecture](./01-guardrails-architecture.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)
 - **Related:** [Access control & RBAC](./06-access-control-rbac.md), [Threat model & OWASP](./07-threat-model-owasp.md), [Agent tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md), [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md), [Guardrail tools](../06-tooling-landscape/02-guardrail-tools.md)
 
@@ -49,7 +50,7 @@ Our internal enterprise assistant exposes nine tools:
 | `run_python` | Runs analysis code on query results | Sandbox |
 | `delete_ticket` | Deletes a ticket | Ticketing system |
 
-Users hold one of five roles: `employee`, `analyst`, `hr_partner`, `support_agent`, and `admin`. [Access control & RBAC](./06-access-control-rbac.md) defines what each role can read.
+Users hold one of seven roles: `employee`, `manager`, `analyst`, `support_agent`, `hr_partner`, `finance`, and `admin`. [Access control & RBAC](./06-access-control-rbac.md) defines what each role can read.
 
 ---
 
@@ -397,7 +398,7 @@ def allowed_given_taint(tool: ToolSpec, run_state) -> bool:
 
 ## 12. Text-to-SQL execution guardrails
 
-Text-to-SQL is the highest-risk read tool in our running example because the model writes code that queries your warehouse. [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md) cover query accuracy, whereas this section covers *safe execution*.
+Text-to-SQL is the highest-risk read tool in our running example because the model writes code that queries your warehouse. [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md) cover query accuracy, whereas this section covers *safe execution*. For a per-dialect table of database-enforced read-only controls (PostgreSQL, BigQuery, Snowflake, SQLite) and the dialect-specific write paths to block, see [Text-to-SQL evals §3.4](../02-offline-evals/05-text-to-sql-evals.md#34-enforce-read-only-at-the-database).
 
 ### Defence in depth
 
@@ -432,7 +433,7 @@ The database is a boundary only if agent-written SQL cannot change its own secur
 
 - [ ] Create a dedicated database role for the agent with `SELECT` privileges only on approved schemas and views.
 - [ ] Grant zero `INSERT`, `UPDATE`, `DELETE`, DDL, or table-ownership privileges to the agent role.
-- [ ] Set the session or transaction to read-only (`SET TRANSACTION READ ONLY`), or route queries to a read replica. A read-only transaction also rejects `SELECT ... FOR UPDATE`.
+- [ ] Set the session or transaction to read-only (`SET TRANSACTION READ ONLY`), or route queries to a read replica. A read-only transaction also rejects `SELECT ... FOR UPDATE`. Treat this as a safety net, not the boundary: PostgreSQL read-only mode still allows writes to temporary tables, and a client can override the default. The grants above are the boundary ([Text-to-SQL evals §3.4](../02-offline-evals/05-text-to-sql-evals.md#34-enforce-read-only-at-the-database)).
 - [ ] Configure a strict statement timeout (`statement_timeout` in PostgreSQL or the warehouse equivalent).
 - [ ] Enable row-level security for tenant and user scoping ([PostgreSQL RLS](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)). If you expose pre-filtered views instead, create them with `security_invoker = true` ([CREATE VIEW](https://www.postgresql.org/docs/current/sql-createview.html)) so RLS applies to the caller.
 - [ ] Make sure the agent role is not a superuser, has no `BYPASSRLS` attribute, and owns no tables.
@@ -464,7 +465,7 @@ The database is a boundary only if agent-written SQL cannot change its own secur
 
 > `# illustrative: tested against sqlglot 30.23; pin your version and rerun the test corpus on upgrades.`
 >
-> This guard is a pre-execution filter. It is **not** the security boundary. Run it in front of the database controls above: a read-only role, RLS, column grants, and a revoked `set_config`.
+> This guard is a pre-execution filter. It is **not** the security boundary. Run it in front of the database controls above: a read-only role, RLS, column grants, and a revoked `set_config`. Also block the dialect write paths listed in [Text-to-SQL evals §3.4](../02-offline-evals/05-text-to-sql-evals.md#34-enforce-read-only-at-the-database) (for example Snowflake `COPY INTO @stage`, BigQuery `EXPORT DATA`).
 
 ```python
 from dataclasses import dataclass, field
@@ -729,9 +730,9 @@ Use this table as a baseline policy and tune the limits with your security team:
 | Tool | Tier | Allowed roles | Key arg constraints | Approval | Budget per run | Credentials | Egress |
 |---|---|---|---|---|---|---|---|
 | `search_docs` | T0 | all | `query` ≤ 1,000 chars, `top_k` ≤ 20, ACL filter injected from session | No | 10 calls | User identity → ACL pre-filter | None |
-| `run_sql` | T0 | `analyst` (sales and product data), `hr_partner` (HR views for assigned business units), `admin`. Other roles: no SQL | Passes `guard_sql`, ≤ 1,000 rows, EXPLAIN under cap | No | 5 calls, 30 s each | Read-only DB role + RLS keyed on tenant and business unit | None |
+| `run_sql` | T0 | `analyst` (sales and product data), `finance` (finance views for assigned business units), `hr_partner` (HR views for assigned business units), `admin`. Other roles: no SQL | Passes `guard_sql`, ≤ 1,000 rows, EXPLAIN under cap | No | 5 calls, 30 s each | Read-only DB role + RLS keyed on tenant and business unit | None |
 | `get_ticket` | T0 | all | `ticket_id: int`, must be visible to user | No | 20 calls | OBO token `tickets:read` | None |
-| `create_ticket` | T1 | all | `queue` enum, `title` 5–200 chars, body PII-scanned | Inline preview and one-click user confirmation before submit (other staff can read the ticket, so it is a potential exfiltration sink) | 2 calls, idempotency key | OBO token `tickets:write` | None |
+| `create_ticket` | T1 | all | `queue` enum, `title` 5–200 chars, body PII-scanned | Inline preview and one-click user confirmation before submit (other staff can read the ticket, so it is a potential exfiltration sink). `priority = high` pages on-call, so it also needs on-call approval ([output guardrails §6](./04-output-guardrails.md#6-structured-output-and-schema-validation)) | 2 calls, idempotency key | OBO token `tickets:write` | None |
 | `update_ticket` | T1 | `support_agent`, `admin`, `hr_partner` (HR queue only) | `status` enum, only tickets in user's queues | Approval if > 5 tickets or status = `closed` | 10 calls | OBO token `tickets:write` | None |
 | `send_email` | T2 | all | Recipients `@company.com` only, ≤ 5 recipients, DLP scan | **Always** (and blocked if context tainted + sensitive) | 1 call | OBO token `mail.send` | Mail API only |
 | `fetch_url` | T2 | `analyst`, `admin` | Domain allowlist via egress proxy, GET only, query strings stripped (defense in depth) | Approval if context contains sensitive data | 5 calls | None | Egress proxy, allowlist |
@@ -768,6 +769,80 @@ Track five operational metrics:
 
 ---
 
+## 16. Multi-agent and agent-to-agent guardrails
+
+Acme splits its assistant into an **orchestrator** and three sub-agents: a search agent, a SQL agent, and a ticket agent. Later, Acme also calls a vendor's remote travel agent over the network. Each new agent adds a new boundary. Each boundary needs the same gate as a tool call.
+
+Agents can talk in two ways:
+
+- **Inside one system.** The orchestrator calls sub-agents as functions or tools. You own all the code.
+- **Across systems.** Your agent calls a remote agent that another team or vendor runs. The **Agent2Agent (A2A) protocol** is an open standard for this ([A2A specification](https://a2a-protocol.org/latest/specification/)). A remote agent publishes an **Agent Card**: a JSON document that lists its identity, skills, endpoint, and authentication requirements.
+
+```mermaid
+flowchart LR
+    U["User"] --> O["Orchestrator agent"]
+    O -->|"gate"| S["Search agent"]
+    O -->|"gate"| Q["SQL agent"]
+    O -->|"gate"| T["Ticket agent"]
+    O -->|"gate + A2A auth"| R["Remote vendor agent"]
+    S -->|"untrusted result"| O
+    Q -->|"untrusted result"| O
+    T -->|"untrusted result"| O
+    R -->|"untrusted result"| O
+```
+
+How to read this diagram:
+
+1. **Every arrow down is a delegation.** Run it through a gate that checks identity, permissions, arguments, and budget.
+2. **Every arrow up is untrusted data.** A result from another agent is like a tool result. It can be wrong, or it can carry an injection.
+
+### Rules for multi-agent systems
+
+1. **Authenticate every agent.** Give each agent its own workload identity. For remote agents, use the authentication schemes in the Agent Card, such as OAuth 2.0 or mutual TLS. The A2A spec requires servers to authenticate every request and requires HTTPS or TLS in production.
+2. **Allowlist remote agents.** Keep a registry of approved remote agents with owner, endpoint, skills, and Agent Card hash. Verify the Agent Card signature when the agent provides one. Re-approve when the card changes.
+3. **Pass the user's identity and authorize the intersection.** A sub-agent may use only the permissions that the user **and** every agent in the chain hold. See [Agent identity and delegation chains](./06-access-control-rbac.md#agent-identity-and-delegation-chains).
+4. **Treat peer messages as untrusted data.** Apply the same taint rules as for tool results (§11). Never follow instructions found inside another agent's output.
+5. **Validate hand-offs against a schema.** A hand-off must carry the goal, the user identity, the constraints, and the remaining budget. Reject a hand-off with missing fields.
+6. **Verify claims before you act on them.** If a sub-agent says *"Ticket INC-1042 is closed"*, check the ticket system before you report it or act on it.
+7. **Gate actions where they run.** The agent that calls a T2 or T3 tool runs its own gate. Another agent cannot approve the action. Only a human can.
+8. **Limit delegation depth and fan-out.** Set a maximum chain length (for example, 2) and a maximum number of sub-agent calls per task.
+9. **Share one budget across the task.** Count steps, tokens, money, and time across all agents in the task, not per agent.
+10. **Stop the spread of failures.** If a peer agent fails or behaves strangely, stop delegating to it (a circuit breaker). Do not retry the same failing peer again and again.
+11. **Keep one audit chain.** Propagate one trace ID across all agents. Log who delegated what to whom, and with which permissions ([Observability and Tracing](../03-online-evals-and-observability/02-observability-and-tracing.md)).
+
+These rules address `ASI07` Insecure Inter-Agent Communication, `ASI08` Cascading Failures, and `ASI03` Identity and Privilege Abuse in the [OWASP Agentic Top 10](./07-threat-model-owasp.md).
+
+### How to test multi-agent guardrails
+
+| Test | What to check | Pass condition |
+|---|---|---|
+| **Injection spread** | Plant an instruction in a document that only the search agent reads | No other agent acts on it |
+| **Privilege escalation** | An `employee` asks the orchestrator for data that only the SQL agent's service role can read | The SQL agent denies the request |
+| **Unknown remote agent** | Point the orchestrator at a remote agent that is not in the registry | The call is blocked |
+| **Changed Agent Card** | Change a remote agent's skills or endpoint between runs | The call is blocked until re-approval |
+| **Shared budget** | Run a task in which sub-agents loop | The whole task stops at the shared limit |
+| **False peer claim** | A sub-agent reports a success that did not happen | The orchestrator detects it from the source system |
+
+---
+
+## 17. Coding and computer-use agents
+
+Coding agents and computer-use agents have very broad tools: a shell, a file system, a browser, or a whole desktop. One tool can do almost anything. So the controls move from **per-tool rules** to the **environment** around the agent.
+
+| Control | Coding agent (A6) | Browser or computer-use agent (A7) |
+|---|---|---|
+| **Isolation** | Container or microVM per task (§10) | Isolated browser profile or VM per task |
+| **Credentials** | No production secrets. Short-lived, repo-scoped tokens only | No saved passwords. Inject credentials per site, per task |
+| **Network** | Egress off. Allow only the package mirror and the Git host | Domain allowlist through an egress proxy |
+| **Protected paths** | Block writes to CI configuration, deploy keys, and test fixtures that need review | Block downloads to and uploads from sensitive folders |
+| **Irreversible actions** | No push to protected branches. Merge only after human review | Confirm before "Submit", "Pay", "Delete", or "Send" |
+| **Untrusted content** | Treat issue text, code comments, and docs as untrusted | Treat page text, hidden HTML, and images as untrusted |
+| **Audit** | Log every command and diff | Log every action with a screenshot |
+
+See [Agent Archetypes](../00-foundations/05-agent-archetypes.md) for the eval side of these agents, and [Agent Eval Environments and Graders](../02-offline-evals/09-agent-eval-environments-and-graders.md) for how to test them in a sandbox.
+
+---
+
 ## Key takeaways
 
 - **Route every tool call through one deterministic gate.** Enforce allowlists, argument validation, budgets, approvals, scoped credentials, and audit logging in code.
@@ -778,6 +853,7 @@ Track five operational metrics:
 - **Sandbox code execution with zero credentials and no network by default.** Police every egress channel, including markdown links and images.
 - **Enforce text-to-SQL security in the database first.** Combine a read-only role, RLS, and timeouts with a `sqlglot` AST guard and `EXPLAIN` limits. Make sure agent SQL cannot change its own RLS context (`set_config`, stacked `SET`) or read through owner-rights views.
 - **Treat MCP servers, tool descriptions, and tool outputs as untrusted.** Hash and pin tool definitions, allowlist tools per agent, bind tokens to one server, and enforce your gate in front of every call.
+- **Treat other agents like tools.** Authenticate them, authorize the intersection of permissions, validate hand-offs, and treat their output as untrusted data.
 
 ## Further reading
 
@@ -794,6 +870,7 @@ Track five operational metrics:
 - [PostgreSQL: Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
 - [PostgreSQL: CREATE VIEW (`security_invoker`)](https://www.postgresql.org/docs/current/sql-createview.html)
 - [Beurer-Kellner et al.: Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837)
+- [Agent2Agent (A2A) Protocol Specification](https://a2a-protocol.org/latest/specification/)
 - **Within this repo:**
     - [Threat model & OWASP](./07-threat-model-owasp.md)
     - [Access control & RBAC](./06-access-control-rbac.md)

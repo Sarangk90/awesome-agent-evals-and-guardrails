@@ -1,11 +1,12 @@
 # Awesome Agent Evals & Guardrails
 
-> A practitioner's guide to building **reliable, safe agentic RAG applications**: how to evaluate them (offline and online) and how to guard them at runtime.
+> A practitioner's guide to building **reliable, safe AI agents**: how to evaluate them (offline and online) and how to guard them at runtime. Agentic RAG is the worked example. The same methods apply to coding, browser, research, and workflow agents.
 
 Building a demo agent is easy. Building one you can trust in production means answering hard questions:
 
 - *Is it actually correct?* How do I measure answer correctness, faithfulness, and retrieval quality?
 - *Where does it break?* Is it the retriever, the tool call, the generated SQL, or the final answer?
+- *Did the task really get done?* Did the code pass hidden tests, or did the agent only claim success?
 - *What data do I evaluate on?* SME-curated golden sets, synthetic data, or production traces?
 - *How do I keep it safe?* Prompt injection, PII leakage, toxic output, unauthorized data access, runaway actions.
 - *What should I do first?* And what can wait?
@@ -20,11 +21,11 @@ Searchable docs with navigation, dark mode and zoomable diagrams.
 
 | Section | What's inside |
 |---|---|
-| [00 Foundations](./research/00-foundations/README.md) | Why evals & guardrails, the master taxonomy, failure modes, glossary |
-| [01 Datasets](./research/01-datasets/README.md) | SME golden sets, synthetic generation, production data flywheel |
-| [02 Offline evals](./research/02-offline-evals/README.md) | End-to-end RAG, retrieval metrics, generation & safety, agents/tools, text-to-SQL, citations, LLM-as-a-judge, experiments & CI |
-| [03 Online evals & observability](./research/03-online-evals-and-observability/README.md) | Online evals, tracing, user feedback, monitoring & drift |
-| [04 Guardrails](./research/04-guardrails/README.md) | Architecture, input / retrieval / output / tool guardrails, RBAC, OWASP threat model |
+| [00 Foundations](./research/00-foundations/README.md) | Why evals & guardrails, the master taxonomy, failure modes, a ~200-term glossary, and how to apply the guide to other agent archetypes |
+| [01 Datasets](./research/01-datasets/README.md) | Dataset strategy and sizing, SME golden sets and reviewer agreement, synthetic generation, production data flywheel |
+| [02 Offline evals](./research/02-offline-evals/README.md) | End-to-end RAG, retrieval metrics, generation & safety, agents/tools, text-to-SQL, citations, LLM-as-a-judge, experiments & CI, agent eval environments & graders |
+| [03 Online evals & observability](./research/03-online-evals-and-observability/README.md) | Online evals and A/B tests, OpenTelemetry tracing, user feedback, SLOs, monitoring & drift |
+| [04 Guardrails](./research/04-guardrails/README.md) | Architecture, input / retrieval / output / tool guardrails, MCP safety, RBAC, threat model with OWASP LLM Top 10 (2026) and Agentic Top 10 (2026) |
 | [05 Decision framework](./research/05-decision-framework/README.md) | Which evals and guardrails to pick, metric cheatsheet, implementation playbook, maturity model |
 | [06 Tooling landscape](./research/06-tooling-landscape/README.md) | Eval, observability and guardrail tools compared |
 | [07 References](./research/07-references/README.md) | Papers, blogs, standards, benchmarks |

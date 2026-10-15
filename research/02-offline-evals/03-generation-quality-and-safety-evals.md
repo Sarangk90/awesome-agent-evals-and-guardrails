@@ -41,7 +41,7 @@ You can reuse the same detector in both places, but run **stronger, slower judge
 | **Deterministic rules** | Regex, word lists, length limits, readability formulas, JSON Schema | Free, fast, reproducible, and explainable | Brittle, ignores context, and triggers substring false positives (the Scunthorpe problem) | Profanity, structured PII patterns, length limits, banned phrases |
 | **Specialised classifiers** | Detoxify, Llama Guard, OpenAI moderation, Azure AI Content Safety, Presidio (PII NER) | Cheap per call, multi-category, return a score per category (the scores are not calibrated probabilities; set thresholds on your own labeled data) | Fixed taxonomy, domain shift, and misses company-specific policies | Toxicity, hate, harassment, unsafe content categories, PII entities |
 | **NLI models** | Cross-encoder NLI, hallucination detectors | Fast and focused on entailment | Struggles with long contexts and numerical reasoning | Groundedness and self-consistency |
-| **LLM-as-a-judge** | G-Eval rubrics, DeepEval `GEval`, RAGAS `AspectCritic`, promptfoo `llm-rubric` | Flexible and understands nuance and custom company policies | Higher cost, output variance, and judge biases that require validation against human labels | Tone, helpfulness, harmful advice, refusal appropriateness, contextual bias |
+| **LLM-as-a-judge** | G-Eval rubrics, DeepEval `GEval`, RAGAS custom metrics (`@discrete_metric` in v0.4; legacy `AspectCritic`), promptfoo `llm-rubric` | Flexible and understands nuance and custom company policies | Higher cost, output variance, and judge biases that require validation against human labels | Tone, helpfulness, harmful advice, refusal appropriateness, contextual bias |
 | **Human review** | SMEs, trust & safety reviewers | Gold-standard ground truth | Slow and expensive | Validating all automated detectors above |
 
 **Recommended stack:** Run deterministic rules first, specialized classifiers second, and LLM judges on ambiguous cases. Have humans review a sample of disagreements to validate your stack and tune thresholds (see [LLM-as-a-judge](./07-llm-as-a-judge.md)).
@@ -50,11 +50,11 @@ You can reuse the same detector in both places, but run **stronger, slower judge
 
 ## 3. Quality dimensions
 
-Apply these rules to every quality judge. Evaluate **one dimension per call**, write an anchored 2- or 3-point rubric, require reasoning first, and set temperature to `0`. Before a judge gates a release, validate it on at least 100 human-labelled items with at least 30–50 failures: TPR ≥ 0.85, TNR ≥ 0.85, and Cohen's κ ≥ 0.60 on a held-out split (≥ 0.90 for high-risk dimensions). See [LLM-as-a-judge](./07-llm-as-a-judge.md).
+Apply these rules to every quality judge. Evaluate **one dimension per call**, write an anchored 2- or 3-point rubric, require reasoning first, and use the lowest temperature the judge model supports (or a fixed reasoning effort for reasoning models; see [LLM-as-a-judge §4.1](./07-llm-as-a-judge.md#41-principles)). Before a judge gates a release, validate it on at least 100 human-labelled items with at least 30–50 failures: TPR ≥ 0.85, TNR ≥ 0.85, and Cohen's κ ≥ 0.60 on a held-out split (≥ 0.90 for high-risk dimensions). See [LLM-as-a-judge](./07-llm-as-a-judge.md).
 
 Control judge variance and cost:
 
-- **Measure judge noise.** Run the judge 3 times on a sample of 50 items. If the verdict changes on more than a few items, fix the rubric before you trust small score differences. Temperature `0` does not make hosted models fully deterministic.
+- **Measure judge noise.** Run the judge 3 times on a sample of 50 items. If the verdict changes on more than a few items, fix the rubric before you trust small score differences. A low temperature does not make hosted models fully deterministic.
 - **Swap positions in pairwise judgments.** Run each pair in both orders. Count a win only if both orders agree; else count a tie.
 - **Budget cost per metric.** Judge calls cost (items × dimensions × repeats). Run cheap rules on every item and LLM judges on the subsets that need them. [Running offline experiments](./08-running-offline-experiments.md) covers repeats and paired comparisons.
 
@@ -75,7 +75,7 @@ Control judge variance and cost:
 - **Score range & interpretation:** Normalize to 0–1 via `(score - 1) / 2`. Frontier LLMs score near 1.0 on coherence, so focus on the rare low-scoring outliers.
 - **Pitfalls and gotchas:** High baseline scores make coherence a weak release gate for frontier models. It provides much more signal when you evaluate small fine-tuned models or long multi-section reports.
 - **When to use it:** Use coherence for long-form generation, summarization, and small models. Skip it for short factoid Q&A.
-- **Implemented in:** TruLens (coherence feedback), RAGAS (`AspectCritic`), DeepEval (`GEval`).
+- **Implemented in:** TruLens (coherence feedback), RAGAS (custom `@discrete_metric`; legacy `AspectCritic`), DeepEval (`GEval`).
 
 ### 3.2 Fluency
 
@@ -96,7 +96,7 @@ Control judge variance and cost:
 - **Worked example:** For `q` = "What is the guest Wi-Fi password?", three paragraphs of security policy before the password fails the verbosity judge at a `9×` length ratio.
 - **Pitfalls and gotchas:** Conciseness trades off directly against [response completeness](./01-end-to-end-rag-evals.md#310-response-completeness), so always evaluate them together. Because LLM judges naturally favor longer answers (verbosity bias), a dedicated conciseness check counterbalances judge bias.
 - **When to use it:** Track deterministic length metrics on every suite, and add a conciseness judge whenever users report rambling answers.
-- **Implemented in:** TruLens (conciseness), RAGAS (`AspectCritic`), promptfoo (`javascript`/`python` length assertions, `llm-rubric`).
+- **Implemented in:** TruLens (conciseness), RAGAS (custom `@discrete_metric`; legacy `AspectCritic`), promptfoo (`javascript`/`python` length assertions, `llm-rubric`).
 
 ### 3.4 Tone, style, and brand voice
 
@@ -108,7 +108,7 @@ Control judge variance and cost:
 - **Score range & interpretation:** Percentage of answers that pass each style rule.
 - **Pitfalls and gotchas:** Human style guides often use vague adjectives like "warm yet professional". Rewrite vague guidelines into concrete, testable rules with positive and negative examples before building a judge (see [instruction adherence](./06-instruction-and-citation-adherence.md)).
 - **When to use it:** Prioritize tone and style evals for customer-facing assistants and regulated communications.
-- **Implemented in:** DeepEval (`GEval`), RAGAS (`AspectCritic`), promptfoo (`llm-rubric`, `not-contains`, `regex`).
+- **Implemented in:** DeepEval (`GEval`), RAGAS (custom `@discrete_metric`; legacy `AspectCritic`), promptfoo (`llm-rubric`, `not-contains`, `regex`).
 
 ### 3.5 Helpfulness
 
@@ -253,7 +253,7 @@ def counterfactual_suite(templates: list[str], groups: dict[str, list[str]],
 - **What it measures:** Whether the answer exposes unauthorized personal data (emails, phone numbers, national IDs, salaries, addresses, or health records) for the user's role.
 - **Inputs required:** `a`, the user's role and entitlements, your PII policy, and a **seeded corpus** containing synthetic canary PII records.
 - **How to compute it:**
-    - **Detect PII in outputs:** Use regexes for structured PII (emails, phones, Luhn credit cards, IDs) and NER models like [Microsoft Presidio](https://github.com/microsoft/presidio) for names and locations. Add an LLM judge for contextual PII ("the engineer on medical leave in Pune").
+    - **Detect PII in outputs:** Use regexes for structured PII (emails, phones, Luhn credit cards, IDs) and NER models like [Presidio](https://presidio.dataprivacystack.org/) for names and locations. Add an LLM judge for contextual PII ("the engineer on medical leave in Pune").
     - **Run canary leakage probes:** Seed restricted documents with fake canary PII allowed only for role `X`. Query the assistant as role `Y` using direct and indirect prompts ("Summarize all documents mentioning Priya"), and check whether any canary values appear:
 
         ```text
@@ -280,7 +280,7 @@ def counterfactual_suite(templates: list[str], groups: dict[str, list[str]],
 
 - **Pitfalls and gotchas:** Off-the-shelf safety classifiers do not know your internal security rules (such as never pasting production API keys into chat). Write explicit enterprise policy clauses into your judge rubric.
 - **When to use it:** Run harmful-advice evals on IT helpdesks, security assistants, HR bots, finance tools, and any domain with legal or physical risk.
-- **Implemented in:** Llama Guard, DeepEval (`GEval`), promptfoo (`llm-rubric`, harmful red-team plugins), RAGAS (`AspectCritic`).
+- **Implemented in:** Llama Guard, DeepEval (`GEval`), promptfoo (`llm-rubric`, harmful red-team plugins), RAGAS (custom `@discrete_metric`; legacy `AspectCritic`).
 
 ### 4.6 Hallucination detection without references
 
@@ -485,7 +485,7 @@ A gate of "0" or "≈ 0" is a statement about your sample, not the true rate. Wi
 - Yi et al., *Benchmarking and Defending Against Indirect Prompt Injection Attacks on Large Language Models* (BIPIA), [arXiv:2312.14197](https://arxiv.org/abs/2312.14197)
 - Zhan et al., *InjecAgent: Benchmarking Indirect Prompt Injections in Tool-Integrated Large Language Model Agents*, [arXiv:2403.02691](https://arxiv.org/abs/2403.02691)
 - Debenedetti et al., *AgentDojo: A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for LLM Agents*, [arXiv:2406.13352](https://arxiv.org/abs/2406.13352) · [repo](https://github.com/ethz-spylab/agentdojo)
-- [Detoxify](https://github.com/unitaryai/detoxify) · [Microsoft Presidio](https://github.com/microsoft/presidio) · [Perspective API (sunsetting)](https://perspectiveapi.com/)
+- [Detoxify](https://github.com/unitaryai/detoxify) · [Presidio](https://presidio.dataprivacystack.org/) · [Perspective API (sunsetting)](https://perspectiveapi.com/)
 - **Within this repo:**
     - [LLM-as-a-judge](./07-llm-as-a-judge.md)
     - [Output guardrails](../04-guardrails/04-output-guardrails.md)

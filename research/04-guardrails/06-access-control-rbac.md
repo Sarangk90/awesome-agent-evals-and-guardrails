@@ -35,13 +35,15 @@ The [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/ow
 
 ### Running example
 
-Our internal enterprise assistant serves five roles across a single deployment:
+Our internal enterprise assistant serves seven roles across a single deployment:
 
 | Role | Docs | Warehouse | Tools |
 |---|---|---|---|
 | `employee` | Public + own department's docs | No direct SQL | `search_docs`, `get_ticket`, `create_ticket`, `send_email` |
+| `manager` | Same as employee + team-management docs and HR summaries for direct reports (no salary or case details) | No direct SQL | Same as employee |
 | `analyst` | Same as employee + data-team docs | `sales.*`, `product.*` (no PII columns) | + `run_sql`, `run_python`, `fetch_url` |
 | `hr_partner` | + HR policy and case docs for assigned business units | HR views for assigned units (RLS by business unit) | + `run_sql` (HR views), `update_ticket` on the HR queue |
+| `finance` | Same as employee + finance policy and reporting docs | `finance.*` views for assigned business units (RLS by business unit), `sales.*` | + `run_sql` (finance views) |
 | `support_agent` | Support KB + customer tickets for assigned accounts | No direct SQL | + `update_ticket` |
 | `admin` | Everything except `legal_hold` content | Everything except restricted schemas | All tools, T3 with approval |
 
