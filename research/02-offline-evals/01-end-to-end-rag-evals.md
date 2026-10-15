@@ -8,7 +8,8 @@
 > - **Diagnose failures with the 2×2 matrix.** Cross-reference context recall and faithfulness to isolate retrieval bugs from generation bugs.
 
 - **You will learn:**
-    - The RAG triad and RAGAS-style metrics
+    - The RAG triad and RAGAS-style metrics (v0.4 names)
+    - Faithfulness when the answer uses tool outputs
     - Abstention evaluation
     - Scorecard design
     - Retrieval × generation 2×2 diagnosis
@@ -72,9 +73,13 @@ Framework terminology mapping:
 
 | Concept | TruLens | RAGAS | DeepEval |
 |---|---|---|---|
-| q → C | Context relevance | Context precision (without reference) / Context relevance (Nvidia metrics) | Contextual relevancy |
-| C → a | Groundedness | Faithfulness | Faithfulness |
-| q → a | Answer relevance | Answer (response) relevancy | Answer relevancy |
+| q → C | Context relevance | `ContextRelevance` (from the Nvidia metrics) | Contextual relevancy |
+| C → a | Groundedness | `Faithfulness` | Faithfulness |
+| q → a | Answer relevance | `AnswerRelevancy` (legacy alias `ResponseRelevancy`) | Answer relevancy |
+
+RAGAS context precision *without reference* (`ContextUtilization`) is **not** a pure q → C check. It asks whether each chunk was useful for the generated answer `a`, so a wrong answer moves the score.
+
+**RAGAS versions.** RAGAS v0.4 added a collections API (`from ragas.metrics.collections import ...`) with async `ascore()` methods that return a `MetricResult`. Imports from `ragas.metrics` still work but are deprecated and will be removed in v1.0. Some metrics were removed (for example `AspectCritic`; use the `@discrete_metric` decorator). Pin the RAGAS version and the judge model, because prompts change between versions and scores are not comparable across versions. See the [v0.3 → v0.4 migration guide](https://docs.ragas.io/en/stable/howtos/migrations/migrate_from_v03_to_v04/).
 
 Start with the RAG triad because it requires no ground-truth labels. Add reference-based metrics as soon as you build a golden dataset.
 
@@ -107,7 +112,7 @@ Start with the RAG triad because it requires no ground-truth labels. Add referen
     - **Claim decomposition quality drives the score.** Long answers generate more claims and increase judge variance. Very short answers like "Yes." may produce zero claims. Track zero-claim answers separately as `None` rather than inflating your mean score.
     - **Common-knowledge claims may fail verification.** A strict judge marks "Paris is in France" as unsupported if the context omits it. Decide upfront whether your enterprise assistant may use parametric knowledge.
     - **Paraphrases and rounding confuse judges.** Expressions like "~26 weeks" or "six months" can trigger false negatives under strict entailment. Spot-check judge disagreements regularly.
-- **When to use it:** Run faithfulness on every RAG answer as your primary reference-free hallucination check. If the answer uses tool outputs, include those tool outputs in `C` before scoring.
+- **When to use it:** Run faithfulness on every RAG answer as your primary reference-free hallucination check. In an agentic app, the answer can also use tool outputs and memory, so build `C` from the whole trajectory (see [Faithfulness in agentic runs](#faithfulness-in-agentic-runs-build-c-from-the-trajectory) below).
 - **Implemented in:** RAGAS (`Faithfulness`), TruLens (groundedness), DeepEval (`FaithfulnessMetric`), Phoenix (hallucination eval), promptfoo (`context-faithfulness`).
 
 ```python
@@ -127,12 +132,24 @@ without outside knowledge. Otherwise answer "no". Give a one-sentence reason fir
 Return JSON: [{"statement": ..., "reason": ..., "verdict": "yes"|"no"}]
 ```
 
+#### Faithfulness in agentic runs: build `C` from the trajectory
+
+In an agentic RAG app, the final answer can draw on more than one `search_docs` call. It can also use `run_sql` rows, a `get_ticket` result, earlier turns, and memory. If `C` holds only the last search result, a correct answer that quotes a SQL result scores as unfaithful. If `C` holds everything, the judge sees too much text and misses errors.
+
+- [ ] Build `C` from **every tool output that the agent saw before the answer**, in trace order, with a source label (`[search_docs#2]`, `[run_sql#1]`). Keep tool error messages: an answer that ignores an error is a false-success failure.
+- [ ] Add the conversation turns and memory items that the answer may rely on. Keep them separate from tool outputs, so you can tell "supported by a tool" from "supported only by what the user said".
+- [ ] Exclude content that the agent should **not** trust as evidence, such as instructions inside a fetched web page. Score it with the [indirect prompt injection](./03-generation-quality-and-safety-evals.md#48-indirect-prompt-injection-via-retrieved-content-and-tool-outputs) tests instead.
+- [ ] Truncate long tool outputs per source, not at the end of `C`, so that late tool calls are not cut off.
+- [ ] Log which source supports each claim. This also gives you citation checks ([06](./06-instruction-and-citation-adherence.md)).
+
+RAGAS `MultiTurnSample` stores the full message list, including `ToolMessage` outputs, for agent metrics. For faithfulness, flatten the tool messages into `retrieved_contexts` yourself. Trajectory-level checks (tool choice, order, final state) are in [agent and trajectory evals](./04-agent-tool-and-trajectory-evals.md).
+
 ---
 
 ### 3.2 Answer relevancy (response relevancy)
 
 - **What it measures:** How directly the answer addresses the question. It penalizes incomplete, evasive, or padded answers, but it does **not** measure factual correctness.
-- **Inputs required:** `q`, `a` (some RAGAS versions also use `C`). Requires an embedding model, but no ground truth.
+- **Inputs required:** `q`, `a` (some RAGAS versions also use `C`). Requires an LLM to generate questions and an embedding model, but no ground truth.
 - **How to compute it (RAGAS reverse-question method):**
     1. Prompt an LLM to generate `N` questions that the answer `a` would directly answer (typically `N = 3`).
     2. Embed each generated question `g_i` and the original question `q`.
@@ -152,7 +169,7 @@ Return JSON: [{"statement": ..., "reason": ..., "verdict": "yes"|"no"}]
     - **Noncommittal rules penalize valid abstentions.** An honest "I don't have information about that" receives a 0 score. **Exclude unanswerable questions** from this metric and evaluate them with [abstention correctness](#311-abstention-correctness-i-dont-know).
     - **Scores shift across embedding models.** Pin your embedding model version.
 - **When to use it:** Use it as a fast triad check to catch topic drift and verbosity. Never use it as a proxy for factual correctness.
-- **Implemented in:** RAGAS (`ResponseRelevancy`/`AnswerRelevancy`), TruLens (answer relevance), DeepEval (`AnswerRelevancyMetric`), promptfoo (`answer-relevance`).
+- **Implemented in:** RAGAS (`AnswerRelevancy` in the v0.4 collections API; legacy alias `ResponseRelevancy`), TruLens (answer relevance), DeepEval (`AnswerRelevancyMetric`), promptfoo (`answer-relevance`).
 
 ---
 
@@ -191,7 +208,7 @@ Return JSON: [{"statement": ..., "reason": ..., "verdict": "yes"|"no"}]
     - **Reference answers grow stale** when company policies change. Version your golden dataset alongside your document corpus.
     - **LLM judges are overkill for short factoids.** Use normalized exact match or numeric tolerance for single numbers, dates, or names.
 - **When to use it:** Use answer correctness as the primary metric for offline regression suites with golden datasets. You cannot run it on unlabeled production traffic.
-- **Implemented in:** RAGAS (`AnswerCorrectness`, `FactualCorrectness`), Phoenix (QA correctness eval), promptfoo (`factuality`), DeepEval (`GEval` with a correctness rubric).
+- **Implemented in:** RAGAS (`FactualCorrectness` with `mode="f1"`, `"precision"`, or `"recall"`, which is on the current RAGAS metrics list; the weighted `AnswerCorrectness` described above is still available but no longer listed), Phoenix (QA correctness eval), promptfoo (`factuality`), DeepEval (`GEval` with a correctness rubric).
 
 ```python
 def factual_f1(tp: int, fp: int, fn: int) -> float:
@@ -252,7 +269,7 @@ print(answer_correctness(tp=1, fp=2, fn=1, sem_sim=0.88))  # 0.52
     - **The denominator only counts retrieved relevant chunks.** It ignores relevant chunks that your retriever missed completely. Always pair context precision with context recall.
     - **Judge calls scale with `K`.** Scoring 500 questions at `K = 10` requires 5,000 judge calls. Cache judgments by `(q, chunk_id)`.
 - **When to use it:** Use it when tuning rerankers, chunk sizes, or cutoff `K`. If you already have labeled chunk IDs, use deterministic retrieval metrics from [02 · Retrieval metrics](./02-retrieval-metrics.md) instead.
-- **Implemented in:** RAGAS (`ContextPrecision`, `ContextUtilization`, LLM and non-LLM variants), DeepEval (`ContextualPrecisionMetric`).
+- **Implemented in:** RAGAS (`ContextPrecisionWithReference`, `ContextPrecisionWithoutReference` / `ContextUtilization`, and the non-LLM `NonLLMContextPrecisionWithReference`), DeepEval (`ContextualPrecisionMetric`).
 
 ```python
 def context_precision(relevance: list[int]) -> float:
@@ -431,7 +448,7 @@ Always evaluate quality metrics alongside latency and cost budgets. A variant th
 ## 4. Other E2E evaluation frameworks worth knowing
 
 - **RAGAS** (Es et al., 2023) introduced reference-free LLM metrics for faithfulness, answer relevance, and context relevance. It popularized the claim-decomposition and reverse-question recipes covered in section 3.
-- **ARES** (Saad-Falcon et al., 2023) evaluates context relevance, answer faithfulness, and answer relevance by **fine-tuning lightweight judge models** on synthetic data. It then uses **prediction-powered inference (PPI)** with a small human-labeled sample to compute confidence intervals. Even if you do not use ARES directly, follow its core principle: *calibrate automated judges against human labels and report confidence intervals* (see [LLM-as-a-judge](./07-llm-as-a-judge.md)).
+- **ARES** (Saad-Falcon et al., 2023) evaluates context relevance, answer faithfulness, and answer relevance by **fine-tuning lightweight judge models** on synthetic data. It then uses **prediction-powered inference (PPI)** with a small human-labeled sample to compute confidence intervals. Even if you do not use ARES directly, follow its core principle: *validate automated judges against human labels and report confidence intervals* (see [LLM-as-a-judge](./07-llm-as-a-judge.md)).
 - **TruLens** packages the RAG triad into reusable feedback functions that run directly on application traces.
 
 ---
@@ -444,7 +461,7 @@ Do not collapse all metrics into a single composite number too early. Build a sc
 
 | Metric | Type | Ground truth? | Starting gate (heuristic) | Why it belongs on the scorecard |
 |---|---|---|---|---|
-| Answer correctness | Quality | Yes | ≥ baseline − 2 pts (set target with SMEs) | Primary user outcome |
+| Answer correctness | Quality | Yes | No statistically significant drop vs baseline (paired test on the same items), plus an SME-set floor | Primary user outcome |
 | Faithfulness | Hallucination | No | ≥ 0.90 mean, and track % of answers < 0.7 | Primary hallucination safety signal |
 | Answer relevancy | Quality | No | No regression vs baseline | Catches topic drift and verbosity |
 | Context recall | Retrieval | Yes | ≥ 0.85 | Caps maximum achievable correctness |
@@ -453,7 +470,9 @@ Do not collapse all metrics into a single composite number too early. Build a sc
 | Citation precision | Attribution | No | ≥ 0.90 | Verifies source attribution ([06](./06-instruction-and-citation-adherence.md)) |
 | p95 latency, $ / query | Budget | No | ≤ baseline + 20% | Tracks cost and speed trade-offs |
 
-Treat these thresholds as starting heuristics rather than fixed standards. Have SMEs label 50–100 outputs as acceptable or unacceptable, then pick thresholds that best separate the two groups.
+Treat these thresholds as starting heuristics rather than fixed standards. Have SMEs label at least 100 outputs as acceptable or unacceptable (oversample so that at least 30–50 are unacceptable), then pick thresholds that best separate the two groups on a held-out split.
+
+A fixed tolerance such as "baseline − 2 points" is only valid if you state the sample size and the run-to-run noise. On 200 items, a pass rate of 0.80 has a 95% Wilson interval of about ±0.055, so a 2-point drop is usually noise. Re-run the baseline on the same dataset and compare with a paired test (McNemar for pass/fail, paired bootstrap for continuous scores). See [running offline experiments](./08-running-offline-experiments.md).
 
 ### 5.2 Aggregation rules
 
@@ -461,7 +480,7 @@ Treat these thresholds as starting heuristics rather than fixed standards. Have 
 - **Break down scores by slice.** Group results by question type (factoid, procedural, comparison, multi-hop), source system, user role, language, and answerability. Most regressions happen inside a single slice.
 - **Gate releases on per-sample pass rates.** Define a clear pass rule such as `pass = correctness >= 0.7 AND faithfulness >= 0.8 AND not hallucinated_on_unanswerable`. Stakeholders understand pass rates much better than weighted averages.
 - **Keep raw metrics visible** even if leadership requests a single weighted composite score.
-- **Report statistical uncertainty.** On a 200-sample dataset, a 2-point difference is often random noise. See [running offline experiments](./08-running-offline-experiments.md) for significance testing.
+- **Report statistical uncertainty.** On a 200-sample dataset, a 2-point difference is often random noise. Report each pass rate with its sample size and a Wilson interval (code below). When you test many slices, correct for multiple comparisons (for example Benjamini–Hochberg). See [running offline experiments](./08-running-offline-experiments.md) for significance testing.
 
 ```python
 def per_sample_pass(s: dict) -> bool:
@@ -471,12 +490,33 @@ def per_sample_pass(s: dict) -> bool:
             and s["answer_correctness"] >= 0.7
             and (s["faithfulness"] is None or s["faithfulness"] >= 0.8))
 
+def wilson_interval(passes: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a pass rate (better than p ± z·SE at small n or p near 0/1)."""
+    if n == 0:
+        return (0.0, 1.0)
+    p = passes / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / (1 + z * z / n)
+    return (max(0.0, centre - half), min(1.0, centre + half))
+
 def pass_rate(samples: list[dict], slice_key: str | None = None) -> dict:
     groups: dict[str, list[bool]] = {}
     for s in samples:
         key = s.get(slice_key, "all") if slice_key else "all"
         groups.setdefault(key, []).append(per_sample_pass(s))
-    return {k: sum(v) / len(v) for k, v in groups.items()}
+    return {k: {"rate": sum(v) / len(v), "n": len(v), "ci95": wilson_interval(sum(v), len(v))}
+            for k, v in groups.items()}
+
+
+samples = [
+    {"answerable": True, "abstained": False, "answer_correctness": 0.9, "faithfulness": 0.95, "type": "policy"},
+    {"answerable": True, "abstained": False, "answer_correctness": 0.5, "faithfulness": 1.0, "type": "policy"},
+    {"answerable": False, "abstained": True, "type": "out_of_scope"},
+]
+report = pass_rate(samples, slice_key="type")
+assert report["policy"]["rate"] == 0.5 and report["out_of_scope"]["rate"] == 1.0
+lo, hi = wilson_interval(160, 200)
+assert (round(lo, 2), round(hi, 2)) == (0.74, 0.85)   # 0.80 on n = 200
 ```
 
 ---
@@ -515,8 +555,10 @@ flowchart TD
 
 - [ ] Build a dataset with `q`, `a*`, an `answerable` label, slice tags, and relevant chunk IDs ([dataset strategy](../01-datasets/01-dataset-strategy.md)).
 - [ ] Pin the judge model, judge temperature (`0`), judge prompts, and embedding model version.
+- [ ] For agentic runs, build `C` from every tool output and memory item the agent saw, not only the last search.
 - [ ] Log `C` with chunk IDs and ranks on every run so you can recompute retrieval metrics offline.
-- [ ] Validate every LLM-judged metric against 50–100 human labels before gating releases ([LLM-as-a-judge](./07-llm-as-a-judge.md)).
+- [ ] Validate every LLM-judged metric before gating releases: at least 100 human-labelled items with at least 30–50 failures, and TPR ≥ 0.85, TNR ≥ 0.85, and Cohen's κ ≥ 0.60 on a held-out split (≥ 0.90 for high-risk slices). See [LLM-as-a-judge](./07-llm-as-a-judge.md).
+- [ ] Pin the RAGAS (or other framework) version. Metric prompts change between versions.
 - [ ] Cache judge responses by `(metric_version, q, a, C_hash)` to cut evaluation cost and latency.
 - [ ] Gate releases on per-sample pass rates and slice-level regression checks ([running offline experiments](./08-running-offline-experiments.md)).
 - [ ] Promote reference-free metrics (faithfulness, answer relevancy, context relevance) to [online eval pipelines](../03-online-evals-and-observability/01-online-evals.md).
@@ -530,14 +572,16 @@ flowchart TD
 - **Invest in claim decomposition and verification.** Judge quality directly determines the reliability of faithfulness, correctness, context recall, and noise sensitivity.
 - **Include an unanswerable slice.** Measure both missed abstentions and false refusals on out-of-scope and RBAC-restricted queries.
 - **Use the retrieval × generation 2×2 matrix.** Combine context recall and faithfulness to decide whether to fix retrieval or generation first.
-- **Track distributions, slices, latency, and cost.** Gate releases on per-sample pass rates rather than aggregate means alone.
+- **Track distributions, slices, latency, and cost.** Gate releases on per-sample pass rates rather than aggregate means alone, and report each rate with `n` and a confidence interval.
+- **In agentic runs, score faithfulness against everything the agent saw.** Include tool outputs and memory in `C`, with source labels.
+- **Pin the framework version.** RAGAS renamed and removed metrics in v0.4; scores are not comparable across versions.
 
 ## Further reading
 
 - Es et al., *RAGAS: Automated Evaluation of Retrieval Augmented Generation*, [arXiv:2309.15217](https://arxiv.org/abs/2309.15217)
 - Saad-Falcon et al., *ARES: An Automated Evaluation Framework for Retrieval-Augmented Generation Systems*, [arXiv:2311.09476](https://arxiv.org/abs/2311.09476)
 - TruLens, [The RAG Triad](https://www.trulens.org/getting_started/core_concepts/rag_triad/)
-- RAGAS docs, [List of available metrics](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/)
+- RAGAS docs, [List of available metrics](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/) · [Migration from v0.3 to v0.4](https://docs.ragas.io/en/stable/howtos/migrations/migrate_from_v03_to_v04/)
 - DeepEval, [Metrics introduction](https://deepeval.com/docs/metrics-introduction)
 - Hamel Husain, [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/)
 - **Within this repo:**

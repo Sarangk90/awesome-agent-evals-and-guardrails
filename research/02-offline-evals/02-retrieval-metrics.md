@@ -6,12 +6,14 @@
 > - **Use nDCG@k and MRR for ranking.** Evaluate whether your pipeline ranks the most relevant chunks near the top.
 > - **Label at stable span granularity.** Anchor relevance labels to document character spans so re-chunking does not break your evals.
 > - **Evaluate every retrieval stage separately.** Measure query rewriting, hybrid search, RBAC filters, and rerankers on the same queries.
+> - **State your nDCG gain formula.** Linear gain is the library default. Compare systems with paired per-query tests, not with means alone.
 
 - **You will learn:**
-    - Hit rate, precision/recall/F1@k, MRR, MAP, nDCG, and R-precision
-    - Relevance labeling and pooling
-    - Chunk vs document matching
-    - Per-stage retrieval evals
+    - Hit rate, precision/recall/F1@k, MRR, MAP, nDCG, R-precision, ERR, and RBP
+    - Paired significance tests for retrieval runs
+    - Relevance labeling, pooling, and incomplete judgments (judged@k, bpref)
+    - Chunk vs document matching and span coverage
+    - Per-stage retrieval evals, including agentic and multi-hop retrieval
 - **Prerequisites:** [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)
 - **Related:** [Synthetic datasets](../01-datasets/03-synthetic-datasets.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Retrieval and context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md)
 
@@ -88,7 +90,7 @@ We will compute every metric below using this ranked list.
 - **Worked example:** `precision@1 = 0`, `precision@3 = 2/3 ≈ 0.67`, and `precision@5 = 3/5 = 0.60`.
 - **Pitfalls and gotchas:** Precision@k ignores chunk order inside the top `k` and penalizes queries with few relevant items. Never compare `precision@k` across datasets with different `|R|` distributions.
 - **When to use it:** Use it to choose prompt cutoff `k` and control context noise. Pair it with `recall@k` to check evidence coverage.
-- **Implemented in:** `ranx`, `pytrec_eval`, LlamaIndex, RAGAS (non-LLM context precision).
+- **Implemented in:** `ranx`, `pytrec_eval`, LlamaIndex, RAGAS `IDBasedContextPrecision` (exact ID match). RAGAS `NonLLMContextPrecisionWithReference` is a different metric: it matches chunks by string similarity and weights by rank, like average precision.
 
 ### Recall@k
 
@@ -104,7 +106,7 @@ We will compute every metric below using this ranked list.
 - **Worked example:** `recall@1 = 0/4 = 0`, `recall@3 = 2/4 = 0.50`, and `recall@5 = 3/4 = 0.75` (`d5` is missing).
 - **Pitfalls and gotchas:** Recall accuracy depends on the completeness of `R`. If labelers mark only one relevant chunk when three exist, your evaluation penalizes retrievers that find the other valid chunks.
 - **When to use it:** Report `recall@k` at your prompt cutoff `k` and at your pre-rerank candidate cutoff (such as `recall@50`, which caps reranker performance).
-- **Implemented in:** `ranx`, `pytrec_eval`, LlamaIndex, RAGAS (non-LLM context recall), DeepEval (contextual recall).
+- **Implemented in:** `ranx`, `pytrec_eval`, LlamaIndex, RAGAS `IDBasedContextRecall` (exact ID match). RAGAS `NonLLMContextRecall` (string similarity) and DeepEval `ContextualRecallMetric` (LLM judge on reference-answer statements) are analogs, not exact `recall@k`.
 
 ### F1@k
 
@@ -130,7 +132,7 @@ We will compute every metric below using this ranked list.
     MRR@k  = mean over queries of RR(q)
     ```
 
-- **Score range & interpretation:** 0 to 1. An MRR of `0.50` means the first relevant result typically appears around rank 2.
+- **Score range & interpretation:** 0 to 1. `1 / MRR` is the harmonic-mean rank of the first hit, so an MRR of `0.50` corresponds to a harmonic-mean rank of 2. It does not mean a typical rank of 2: a mix of rank-1 hits and zero-hit queries can also average 0.50. Always inspect the RR distribution and the zero-hit rate.
 - **Worked example:** The first relevant chunk is `d3` at rank 2, so `RR = 0.50`. Across three queries with `RR` values of `0.50`, `1.0`, and `0`, `MRR = 0.50`.
 - **Pitfalls and gotchas:** MRR ignores every relevant chunk after the first hit.
 - **When to use it:** Use MRR for single-fact lookups, navigational queries, and top-1 citation checks. Do not use it as the sole metric for multi-chunk questions.
@@ -164,26 +166,31 @@ We will compute every metric below using this ranked list.
     ```text
     DCG@k  = Σ_{i=1..k} gain(rel_i) / log2(i + 1)
 
-    gain(rel) = 2^rel − 1      # "exponential" gain: emphasises highly relevant items (common default)
-    gain(rel) = rel            # "linear" gain: also common
+    gain(rel) = rel            # "linear" gain: default in trec_eval, pytrec_eval, BEIR/MTEB, scikit-learn, ranx "ndcg"
+    gain(rel) = 2^rel − 1      # "exponential" gain (Burges et al. 2005): emphasises highly relevant items; ranx "ndcg_burges"
 
     IDCG@k = DCG@k of the ideal ordering (all labeled items sorted by rel, descending)
     nDCG@k = DCG@k / IDCG@k     (define as 0 if IDCG@k = 0)
     ```
 
 - **Score range & interpretation:** 0 to 1, where 1.0 indicates a perfect ranking of all labeled relevant items.
-- **Worked example (exponential gain):**
-    - Grades by rank: `[0, 2, 3, 0, 1]` → gains `[0, 3, 7, 0, 1]`
+- **Worked example (linear gain, the library default):**
+    - Grades by rank: `[0, 2, 3, 0, 1]` → gains `[0, 2, 3, 0, 1]`
     - Discounts `log2(i+1)`: `[1, 1.585, 2, 2.322, 2.585]`
-    - `DCG@5 = 0 + 3/1.585 + 7/2 + 0 + 1/2.585 = 1.893 + 3.5 + 0.387 =` **5.780**
-    - Ideal grades `[3, 2, 2, 1, 0]` → gains `[7, 3, 3, 1, 0]` → `IDCG@5 = 7 + 1.893 + 1.5 + 0.431 =` **10.823**
-    - `nDCG@5 = 5.780 / 10.823 ≈` **0.53** (or **0.55** with linear gain)
+    - `DCG@5 = 0 + 2/1.585 + 3/2 + 0 + 1/2.585 = 1.262 + 1.5 + 0.387 =` **3.149**
+    - Ideal grades `[3, 2, 2, 1, 0]` → `IDCG@5 = 3 + 2/1.585 + 2/2 + 1/2.322 = 3 + 1.262 + 1 + 0.431 =` **5.693**
+    - `nDCG@5 = 3.149 / 5.693 ≈` **0.55**
+- **Worked example (exponential gain):**
+    - Gains `[0, 3, 7, 0, 1]` → `DCG@5 = 0 + 3/1.585 + 7/2 + 0 + 1/2.585 = 1.893 + 3.5 + 0.387 =` **5.780**
+    - Ideal gains `[7, 3, 3, 1, 0]` → `IDCG@5 = 7 + 1.893 + 1.5 + 0.431 =` **10.823**
+    - `nDCG@5 = 5.780 / 10.823 ≈` **0.53**
 - **Pitfalls and gotchas:**
-    - **Exponential and linear gain produce different scores.** Document and pin your gain formula.
+    - **Exponential and linear gain produce different scores.** State and pin your gain formula in every report. Do not compare your number with a published BEIR or MTEB number unless both use the same gain.
     - **Compute IDCG over all labeled items in `R`**, not just the retrieved subset. Computing IDCG over retrieved items hides missed chunks like `d5`.
+    - **`sklearn.metrics.ndcg_score` builds IDCG from the scores you pass in.** Pass every judged document, including relevant documents that the retriever did not return (give them a score below every retrieved item). If you pass only the 5 retrieved documents, the example scores **0.66** instead of **0.55**, because `d5` disappears from the ideal ranking.
     - **Binary labels flatten nDCG's main advantage.**
 - **When to use it:** Use `nDCG@k` as your primary ranking metric when you have graded labels (`0–3` scores) or tune a reranker. BEIR and MTEB use `nDCG@10` as their headline retrieval metric.
-- **Implemented in:** `ranx`, `pytrec_eval`, `scikit-learn` (`ndcg_score`), BEIR/MTEB evaluators.
+- **Implemented in:** `ranx` (`ndcg`, `ndcg_burges`), `pytrec_eval` (`ndcg_cut_k`), `scikit-learn` (`ndcg_score`), BEIR/MTEB evaluators. Original metric: Järvelin & Kekäläinen (2002).
 
 ### R-precision
 
@@ -201,6 +208,28 @@ We will compute every metric below using this ranked list.
 - **When to use it:** Use it to compare retrievers across queries that have widely varying numbers of relevant chunks.
 - **Implemented in:** `trec_eval`, `pytrec_eval`, `ranx`.
 
+### ERR and RBP (user-model metrics)
+
+nDCG assumes that a user reads down the list regardless of what they have already found. Two metrics model the user more directly:
+
+- **ERR (Expected Reciprocal Rank)** (Chapelle et al., 2009): The user stops at the first result that satisfies them. Each result `i` satisfies with probability `R_i = (2^g_i − 1) / 2^g_max`.
+
+    ```text
+    ERR@k = Σ_{r=1..k} (1/r) · R_r · Π_{i<r} (1 − R_i)
+    ```
+
+    A highly relevant result at rank 1 makes all later results count for little. Use ERR when one good chunk is enough (single-fact lookups with graded labels).
+- **RBP (Rank-Biased Precision)** (Moffat & Zobel, 2008): The user moves from rank `i` to rank `i+1` with a fixed "persistence" probability `p`.
+
+    ```text
+    RBP = (1 − p) · Σ_{i=1..n} rel_i · p^(i−1)        # rel_i ∈ {0,1}
+    residual = p^n                                    # maximum score that unseen ranks could still add
+    ```
+
+    RBP does not need `|R|`, so it works when your relevant set is incomplete. Report the residual next to the score.
+- **Worked example:** With `g_max = 3`, `ERR@5 = 0.5 · 3/8 + (1/3) · (5/8) · (7/8) + 0.2 · (5/8) · (1/8) · (1/8) ≈` **0.37**. With binary labels and `p = 0.8`, `RBP = 0.2 · (0.8 + 0.64 + 0.4096) ≈` **0.37**, residual `0.8^5 ≈ 0.33`.
+- **Implemented in:** `ranx` (`rbp`), the TREC `gdeval` script (ERR), or custom Python.
+
 ### Summary of the worked example
 
 | Metric | Value |
@@ -211,8 +240,9 @@ We will compute every metric below using this ranked list.
 | F1@5 | 0.67 |
 | Reciprocal rank | 0.50 |
 | Average precision (÷ \|R\|) | 0.44 |
-| nDCG@5 (exp. gain / linear gain) | 0.53 / 0.55 |
+| nDCG@5 (linear gain / exp. gain) | 0.55 / 0.53 |
 | R-precision | 0.50 |
+| ERR@5 / RBP (p = 0.8) | 0.37 / 0.37 |
 
 ---
 
@@ -261,7 +291,8 @@ def dcg(gains: list[float]) -> float:
     return sum(g / math.log2(i + 2) for i, g in enumerate(gains))
 
 def ndcg_at_k(ranked: list[str], grades: dict[str, int], k: int,
-              exponential: bool = True) -> float:
+              exponential: bool = False) -> float:
+    """Linear gain by default (matches trec_eval, BEIR/MTEB, sklearn)."""
     gain = (lambda g: 2 ** g - 1) if exponential else (lambda g: g)
     actual = [gain(grades.get(d, 0)) for d in ranked[:k]]
     ideal = [gain(g) for g in sorted(grades.values(), reverse=True)[:k]]
@@ -281,8 +312,8 @@ assert round(f1_at_k(ranked, relevant, 5), 2) == 0.67
 assert reciprocal_rank(ranked, relevant) == 0.5
 assert round(average_precision(ranked, relevant), 2) == 0.44
 assert r_precision(ranked, relevant) == 0.5
-assert round(ndcg_at_k(ranked, grades, 5), 2) == 0.53
-assert round(ndcg_at_k(ranked, grades, 5, exponential=False), 2) == 0.55
+assert round(ndcg_at_k(ranked, grades, 5), 2) == 0.55                    # linear
+assert round(ndcg_at_k(ranked, grades, 5, exponential=True), 2) == 0.53   # exponential
 
 
 def evaluate(run: dict[str, list[str]], qrels: dict[str, dict[str, int]],
@@ -304,7 +335,56 @@ def evaluate(run: dict[str, list[str]], qrels: dict[str, dict[str, int]],
     return {m: mean(r[m] for r in rows) for m in rows[0]} if rows else {}
 ```
 
-For production pipelines, use established libraries like [ranx](https://github.com/AmenRa/ranx) or [pytrec_eval](https://github.com/cvangysel/pytrec_eval), which also provide built-in statistical significance tests.
+For production pipelines, use established libraries like [ranx](https://github.com/AmenRa/ranx) or [pytrec_eval](https://github.com/cvangysel/pytrec_eval). Of these two, only ranx has built-in paired significance tests ([`ranx.compare`](https://amenra.github.io/ranx/compare/)). With pytrec_eval, export the per-query scores and run the paired test yourself (see [§3.1](#31-compare-systems-with-paired-per-query-tests)).
+
+To cross-check nDCG against scikit-learn, pass every judged document, including the missed `d5`:
+
+```python
+import numpy as np
+from sklearn.metrics import ndcg_score
+
+docs = ["d7", "d3", "d1", "d9", "d4", "d5"]          # retrieved + missed relevant
+y_true = np.asarray([[grades.get(d, 0) for d in docs]])
+y_score = np.asarray([[5, 4, 3, 2, 1, 0]])           # retriever order; d5 ranks last
+assert round(ndcg_score(y_true, y_score, k=5), 2) == 0.55       # linear gain
+
+# Wrong: only the retrieved docs. IDCG no longer contains d5.
+assert round(ndcg_score(y_true[:, :5], y_score[:, :5], k=5), 2) == 0.66
+```
+
+### 3.1 Compare systems with paired per-query tests
+
+Two retrievers are evaluated on the same queries, so compare them **per query**, not by their means alone. Smucker, Allan & Carterette (2007) compared significance tests for IR evaluation. The randomization (permutation) test, the paired bootstrap, and the paired t-test mostly agree. They recommend against the sign test and the Wilcoxon signed-rank test.
+
+```python
+import random
+
+def paired_randomization_test(a: list[float], b: list[float],
+                              n_resamples: int = 10_000, seed: int = 0) -> tuple[float, float]:
+    # a, b: per-query scores of systems A and B on the same queries, in the same order.
+    # Returns (mean difference B - A, two-sided p-value).
+    assert len(a) == len(b) and a, "need paired per-query scores"
+    diffs = [y - x for x, y in zip(a, b)]
+    observed = sum(diffs) / len(diffs)
+    rng = random.Random(seed)
+    extreme = 0
+    for _ in range(n_resamples):
+        flipped = sum(d if rng.random() < 0.5 else -d for d in diffs) / len(diffs)
+        if abs(flipped) >= abs(observed) - 1e-12:
+            extreme += 1
+    return observed, (extreme + 1) / (n_resamples + 1)
+
+
+base = [0.50, 0.75, 0.25, 1.00, 0.50, 0.00, 0.75, 0.50, 0.25, 0.50]   # recall@5 per query
+new  = [0.75, 1.00, 0.50, 1.00, 0.75, 0.25, 0.75, 0.75, 0.50, 0.75]
+delta, p = paired_randomization_test(base, new)
+assert round(delta, 3) == 0.2 and p < 0.01
+```
+
+- Keep the per-query scores from every run. Means alone cannot support a paired test.
+- When you test many slices or metrics, correct for multiple comparisons (for example Benjamini–Hochberg).
+- Report the effect size (mean difference and its interval), not only the p-value.
+- For sample sizes, confidence intervals, and release gates, see [Running offline experiments](./08-running-offline-experiments.md).
 
 ---
 
@@ -342,16 +422,28 @@ Retrieval metrics require `qrels` (a mapping from each query to its relevant chu
 | Source | How it works | Cost | Quality | Main risk |
 |---|---|---|---|---|
 | **SME labels** | Domain experts grade candidate chunks from a **pooled** list across multiple retrievers | High | Highest | Incomplete `R` if labelers inspect output from only one retriever |
-| **LLM-judged relevance** | An LLM judge grades `(query, chunk)` pairs on a 0–3 rubric, calibrated against human labels | Medium | High when calibrated | Judge bias toward keyword overlap or long chunks |
+| **LLM-judged relevance** | An LLM judge grades `(query, chunk)` pairs on a 0–3 rubric, validated against human labels | Medium | High when validated | Judge bias toward keyword overlap or long chunks |
 | **Synthetic from source chunk** | An LLM generates a question from a source chunk, making that chunk the label ([synthetic datasets](../01-datasets/03-synthetic-datasets.md)) | Low | Partial | Other valid chunks count as false misses, and verbatim phrasing inflates BM25 scores |
 
 **Recommended labeling workflow:**
 
 - [ ] Generate synthetic questions per chunk to get a fast initial `hit@k` and `MRR` baseline.
 - [ ] Pool top 20 chunks from 2–3 retrievers (BM25, dense, hybrid) per query. Grade the pool on a 0–3 scale with an LLM judge.
-- [ ] Have SMEs label 100 `(query, chunk)` pairs and compute Cohen's κ against the LLM judge ([LLM-as-a-judge](./07-llm-as-a-judge.md)). Refine the rubric until agreement is strong.
+- [ ] Validate the LLM judge before you trust it. Have SMEs label at least 100 `(query, chunk)` pairs, oversampled so that at least 30–50 pairs are not relevant. On a held-out split, require TPR ≥ 0.85, TNR ≥ 0.85, and Cohen's κ ≥ 0.60 against the SMEs (≥ 0.90 TPR/TNR for high-risk slices such as RBAC-restricted content). See [LLM-as-a-judge](./07-llm-as-a-judge.md) for the full procedure.
 - [ ] Re-pool and grade newly surfaced chunks whenever you test a new retriever. This prevents unlabeled relevant chunks from counting as misses.
 - [ ] Rewrite synthetic questions to remove verbatim source phrases so your eval does not artificially favor BM25.
+
+### 5.1 Incomplete judgments and pooling bias
+
+Pooled labels are never complete. A new retriever can return relevant chunks that nobody judged. Most metrics treat an unjudged chunk as **not relevant**, so a better retriever can score lower than the old one. Detect and limit this bias:
+
+- **Report judged@k.** This is the fraction of the top `k` results that have a label (relevant or not). If judged@10 drops for a new system, its scores are not comparable with the old system. Judge the new chunks first.
+- **Use bpref for large judgment gaps** (Buckley & Voorhees, 2004). bpref uses only judged documents: it counts how many judged non-relevant documents rank above each relevant document. Unjudged documents have no effect.
+- **Or use condensed lists** (Sakai, 2007). Remove unjudged documents from each ranked list, then compute the normal metrics (for example nDCG′ or AP′). Sakai found that condensed-list metrics are often more robust than bpref.
+- **Prefer RBP when `|R|` is unknown.** Its residual shows the maximum effect of unseen results (see [ERR and RBP](#err-and-rbp-user-model-metrics)).
+- **Re-pool after every new retriever** (see the workflow above). This is the real fix. The other methods only limit the damage.
+
+### 5.2 LLM relevance prompt
 
 LLM relevance prompt sketch:
 
@@ -382,18 +474,48 @@ When your relevance labels and your retriever use different granularities, naive
 | **Stale document versions** | An outdated policy matches the query text and inflates recall | Include version metadata in labels and grade superseded documents as `0` |
 | **Overlapping sliding-window chunks** | Adjacent overlapping chunks both match the gold span and inflate precision@k | Merge overlapping chunks or measure total character-span coverage |
 
-Span-overlap matching sketch:
+Span-overlap matching sketch. A chunk is relevant if the overlap covers at least `min_overlap` of the **shorter** of the two spans. Do not divide by the gold-span length only: a 1,000-character chunk inside a 3,000-character gold span then covers only 33% and counts as a miss. Use `span_coverage` for recall-like scoring, so that several small chunks of one long span add up and duplicate chunks do not inflate the score.
 
 ```python
-def chunk_is_relevant(chunk: dict, gold_spans: list[dict], min_overlap: float = 0.5) -> bool:
-    """chunk / gold span: {"doc_id": str, "start": int, "end": int} in character offsets."""
+Span = dict  # {"doc_id": str, "start": int, "end": int} in character offsets, end exclusive
+
+def overlap(a: Span, b: Span) -> int:
+    if a["doc_id"] != b["doc_id"]:
+        return 0
+    return max(0, min(a["end"], b["end"]) - max(a["start"], b["start"]))
+
+def chunk_is_relevant(chunk: Span, gold_spans: list[Span], min_overlap: float = 0.5) -> bool:
+    chunk_len = chunk["end"] - chunk["start"]
     for g in gold_spans:
-        if chunk["doc_id"] != g["doc_id"]:
-            continue
-        overlap = max(0, min(chunk["end"], g["end"]) - max(chunk["start"], g["start"]))
-        if overlap / (g["end"] - g["start"]) >= min_overlap:
+        ov = overlap(chunk, g)
+        # ov > 0 implies both spans have positive length, so no division by zero
+        if ov and ov / min(chunk_len, g["end"] - g["start"]) >= min_overlap:
             return True
     return False
+
+def span_coverage(chunks: list[Span], gold_spans: list[Span]) -> float:
+    """Fraction of gold characters covered by the union of retrieved chunks."""
+    total = sum(max(0, g["end"] - g["start"]) for g in gold_spans)
+    if total == 0:
+        return float("nan")  # nothing to cover; exclude the query
+    covered = 0
+    for g in gold_spans:
+        parts = sorted((max(c["start"], g["start"]), min(c["end"], g["end"]))
+                       for c in chunks if overlap(c, g))
+        end = g["start"]
+        for s, e in parts:  # merge overlapping intervals
+            covered += max(0, e - max(s, end))
+            end = max(end, e)
+    return covered / total
+
+
+gold = [{"doc_id": "it-handbook", "start": 0, "end": 3000}]
+chunks = [{"doc_id": "it-handbook", "start": i, "end": i + 1000} for i in (0, 1000, 2000)]
+assert [chunk_is_relevant(c, gold) for c in chunks] == [True, True, True]
+assert span_coverage(chunks[:2], gold) == 2 / 3
+assert span_coverage(chunks + chunks, gold) == 1.0        # duplicates do not inflate coverage
+assert not chunk_is_relevant({"doc_id": "it-handbook", "start": 2900, "end": 3900}, gold)
+assert not chunk_is_relevant(chunks[0], [{"doc_id": "it-handbook", "start": 5, "end": 5}])  # empty span
 ```
 
 ---
@@ -436,6 +558,20 @@ def stage_report(stages: dict[str, dict[str, list[str]]], qrels, ks=(5, 10, 50))
 ```
 
 **Break down results by query slice.** Hybrid search and query rewriting often produce large gains on specific slices (like acronym-heavy queries) even when the overall mean shifts by 1–2 points.
+
+### 7.1 Agentic and multi-hop retrieval
+
+In an agentic RAG app, the agent decides **whether** to search, **what** to search for, and **how many times**. One ranked list per query no longer describes retrieval. Add these checks:
+
+| Check | What to label | Metric | Notes |
+|---|---|---|---|
+| **Retrieve-or-not decision** | For each query: "needs retrieval" yes/no | Precision and recall of the decision; false-skip rate | A skipped search on a policy question forces the model to answer from memory. Self-RAG (Asai et al., 2023) and Adaptive-RAG (Jeong et al., 2024) make this decision explicit |
+| **Per-hop recall** | The evidence needed at each hop | `recall@k` for each search call, against that hop's evidence | Hop 2 depends on hop 1. Score each hop with the gold hop-1 result as well, so that one early miss does not hide a working hop 2 |
+| **Evidence-chain completeness** | All supporting facts for the final answer | Fraction of queries where the union of all searches contains **every** supporting fact | HotpotQA (Yang et al., 2018) labels supporting facts. MuSiQue (Trivedi et al., 2022) builds questions that need every hop |
+| **Redundant retrieval** | Nothing extra | Searches per query; fraction of retrieved chunks already seen in this trajectory | Repeated searches add latency and cost without new evidence |
+| **Query formulation** | Optional: a reference sub-query per hop | `recall@k` of the agent's sub-query vs the reference sub-query on the same retriever | Separates "bad query" from "bad retriever" |
+
+Score the trajectory-level behaviour (tool choice, step count, loops) with [agent and trajectory evals](./04-agent-tool-and-trajectory-evals.md). Score the evidence in each search call with the metrics on this page.
 
 ---
 
@@ -485,9 +621,12 @@ Plot `recall@k` or `nDCG@k` against p95 latency for each pipeline configuration.
 ## Key takeaways
 
 - **Prioritize recall@k.** The generator cannot use evidence that never enters the prompt. Pair `recall@k` with `nDCG@k` or `MRR` to evaluate ranking order.
-- **Build complete relevance sets.** Pool candidates across diverse retrievers, calibrate LLM relevance judges against SMEs, and re-pool when testing new retrievers.
+- **Build complete relevance sets.** Pool candidates across diverse retrievers, validate LLM relevance judges against SMEs, and re-pool when testing new retrievers.
 - **Label character spans instead of chunk IDs.** Span-based labels let you tune chunk sizes and overlap without invalidating your dataset.
 - **Measure every retrieval stage.** Compare query rewriting, BM25, dense search, fusion, filters, and reranking on the same queries.
+- **State the nDCG gain formula.** Linear gain is the default in trec_eval, BEIR/MTEB, and scikit-learn. Exponential gain gives different numbers.
+- **Test differences per query.** Use a paired randomization test or paired bootstrap on per-query scores. Watch judged@k when you add a new retriever.
+- **Evaluate agentic retrieval per hop.** Check the retrieve-or-not decision, per-hop recall, and evidence-chain completeness.
 - **Validate embeddings on your own data.** Use MTEB and BEIR only to shortlist candidates.
 - **Balance quality against latency.** Pick retrieval configurations from the quality-versus-latency Pareto frontier.
 
@@ -498,7 +637,19 @@ Plot `recall@k` or `nDCG@k` against p95 latency for each pipeline configuration.
 - Liu et al., *Lost in the Middle: How Language Models Use Long Contexts*, [arXiv:2307.03172](https://arxiv.org/abs/2307.03172)
 - Cormack, Clarke & Büttcher, *Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods* (SIGIR 2009)
 - Manning, Raghavan & Schütze, *Introduction to Information Retrieval*, ch. 8 "Evaluation in information retrieval", [online book](https://nlp.stanford.edu/IR-book/)
-- [ranx](https://github.com/AmenRa/ranx) · [pytrec_eval](https://github.com/cvangysel/pytrec_eval)
+- [ranx](https://github.com/AmenRa/ranx) · [pytrec_eval](https://github.com/cvangysel/pytrec_eval) · [trec_eval](https://github.com/usnistgov/trec_eval)
+- Järvelin & Kekäläinen, *Cumulated gain-based evaluation of IR techniques*, ACM TOIS 2002, [doi:10.1145/582415.582418](https://doi.org/10.1145/582415.582418)
+- Burges et al., *Learning to rank using gradient descent*, ICML 2005 (exponential gain), [doi:10.1145/1102351.1102363](https://doi.org/10.1145/1102351.1102363)
+- Chapelle, Metzler, Zhang & Grinspan, *Expected reciprocal rank for graded relevance*, CIKM 2009, [doi:10.1145/1645953.1646033](https://doi.org/10.1145/1645953.1646033)
+- Moffat & Zobel, *Rank-biased precision for measurement of retrieval effectiveness*, ACM TOIS 2008, [doi:10.1145/1416950.1416952](https://doi.org/10.1145/1416950.1416952)
+- Buckley & Voorhees, *Retrieval evaluation with incomplete information*, SIGIR 2004, [doi:10.1145/1008992.1009000](https://doi.org/10.1145/1008992.1009000)
+- Sakai, *Alternatives to Bpref*, SIGIR 2007, [doi:10.1145/1277741.1277756](https://doi.org/10.1145/1277741.1277756)
+- Smucker, Allan & Carterette, *A comparison of statistical significance tests for information retrieval evaluation*, CIKM 2007, [doi:10.1145/1321440.1321528](https://doi.org/10.1145/1321440.1321528)
+- Asai et al., *Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection*, [arXiv:2310.11511](https://arxiv.org/abs/2310.11511)
+- Jeong et al., *Adaptive-RAG: Learning to Adapt Retrieval-Augmented Large Language Models through Question Complexity*, [arXiv:2403.14403](https://arxiv.org/abs/2403.14403)
+- Yang et al., *HotpotQA: A Dataset for Diverse, Explainable Multi-hop Question Answering*, [arXiv:1809.09600](https://arxiv.org/abs/1809.09600)
+- Trivedi et al., *MuSiQue: Multihop Questions via Single-hop Question Composition*, [arXiv:2108.00573](https://arxiv.org/abs/2108.00573)
+- [scikit-learn `ndcg_score`](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.ndcg_score.html)
 - **Within this repo:**
     - [End-to-end RAG evals](./01-end-to-end-rag-evals.md)
     - [Synthetic datasets](../01-datasets/03-synthetic-datasets.md)

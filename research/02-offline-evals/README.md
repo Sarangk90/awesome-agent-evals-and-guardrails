@@ -4,7 +4,7 @@
 >
 > - **Run offline evals before shipping.** Test your system against a fixed dataset to verify improvements and catch regressions.
 > - **Combine end-to-end and component metrics.** Measure overall user outcomes first, then isolate failures to specific pipeline stages.
-> - **Calibrate your LLM judges.** Validate automated evaluators against human labels before you trust them for release gates.
+> - **Validate your LLM judges.** Check automated evaluators against human labels before you trust them for release gates.
 > - **Gate releases on statistical experiments.** Compare variants across slices, latency, and cost before deploying to production.
 
 - **You will learn:**
@@ -63,10 +63,10 @@ flowchart LR
 
 | File | What it covers | Read when... |
 |---|---|---|
-| [01-end-to-end-rag-evals.md](./01-end-to-end-rag-evals.md) | RAG triad, RAGAS-style metrics (answer correctness, faithfulness, answer relevancy, context precision/recall, noise sensitivity, abstention), scorecards, retrieval × generation 2×2 diagnosis | You need to verify that your RAG chatbot gives correct, grounded answers |
-| [02-retrieval-metrics.md](./02-retrieval-metrics.md) | Hit rate, precision/recall/F1@k, MRR, MAP, nDCG, R-precision with formulas, worked examples, pure-Python code, labeling, per-stage retrieval evals | You are tuning chunking, embeddings, hybrid search, or a reranker |
-| [03-generation-quality-and-safety-evals.md](./03-generation-quality-and-safety-evals.md) | Coherence, conciseness, tone, helpfulness, toxicity, profanity, bias, PII leakage, harmful advice, reference-free hallucination detection, over/under-refusal | You need to evaluate answer quality and safety beyond factual correctness |
-| [04-agent-tool-and-trajectory-evals.md](./04-agent-tool-and-trajectory-evals.md) | Tool selection and argument accuracy, tool-call F1, trajectory matching, final-state checks, efficiency, routing confusion matrices, multi-turn and simulated-user evals | Your application calls tools, routes between skills, or runs multi-step plans |
+| [01-end-to-end-rag-evals.md](./01-end-to-end-rag-evals.md) | RAG triad, RAGAS-style metrics (answer correctness, faithfulness, answer relevancy, context precision/recall, noise sensitivity, abstention), RAGAS v0.4 metric names, faithfulness over tool outputs, scorecards with confidence intervals, retrieval × generation 2×2 diagnosis | You need to verify that your RAG chatbot gives correct, grounded answers |
+| [02-retrieval-metrics.md](./02-retrieval-metrics.md) | Hit rate, precision/recall/F1@k, MRR, MAP, nDCG (linear and exponential gain), ERR, RBP, R-precision with formulas, worked examples, pure-Python code, paired significance tests, labeling and pooling bias, per-stage and agentic multi-hop retrieval evals | You are tuning chunking, embeddings, hybrid search, or a reranker |
+| [03-generation-quality-and-safety-evals.md](./03-generation-quality-and-safety-evals.md) | Coherence, conciseness, tone, helpfulness, toxicity, profanity, bias, PII leakage, harmful advice, reference-free hallucination detection, over/under-refusal, indirect prompt injection (attack success rate, utility under attack) | You need to evaluate answer quality and safety beyond factual correctness |
+| [04-agent-tool-and-trajectory-evals.md](./04-agent-tool-and-trajectory-evals.md) | Tool selection and argument accuracy, tool-call F1, trajectory matching, final-state checks, efficiency, pass@k vs pass^k, routing confusion matrices, multi-turn and simulated-user evals, agent benchmarks (τ²-bench, BFCL) | Your application calls tools, routes between skills, or runs multi-step plans |
 | [05-text-to-sql-evals.md](./05-text-to-sql-evals.md) | SQL generation evals: exact/structural match, SQL similarity, execution accuracy, result-set comparison, safety of generated SQL | Your agent queries a database or data warehouse |
 | [06-instruction-and-citation-adherence.md](./06-instruction-and-citation-adherence.md) | Instruction-following, format adherence, and citation correctness (citation precision/recall, attribution) | You enforce system-prompt rules, output formats, or source citations |
 | [07-llm-as-a-judge.md](./07-llm-as-a-judge.md) | Designing, calibrating, and validating LLM judges, handling judge biases, writing rubrics, measuring human agreement | You use or plan to use an LLM to grade outputs |
@@ -75,7 +75,7 @@ flowchart LR
 ## Suggested reading order
 
 1. **Read [01 · End-to-end RAG evals](./01-end-to-end-rag-evals.md)** to understand what good quality means for a RAG answer.
-2. **Read [07 · LLM-as-a-judge](./07-llm-as-a-judge.md)** because most E2E and quality metrics rely on LLM judges. Learn how to calibrate and validate them early.
+2. **Read [07 · LLM-as-a-judge](./07-llm-as-a-judge.md)** because most E2E and quality metrics rely on LLM judges. Learn how to validate them early.
 3. **Read [02 · Retrieval metrics](./02-retrieval-metrics.md)** to diagnose retrieval, which is the most common root cause of bad RAG answers.
 4. **Read [04 · Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md)** and **[05 · Text-to-SQL evals](./05-text-to-sql-evals.md)** if your system takes actions or queries structured data.
 5. **Read [03 · Generation quality & safety](./03-generation-quality-and-safety-evals.md)** and **[06 · Instruction & citation adherence](./06-instruction-and-citation-adherence.md)** to enforce style, policy, and source attribution.
