@@ -1,0 +1,156 @@
+.md-typeset figure.diagram {
+  position: relative;
+  display: block;
+  width: auto;
+  max-width: 100%;
+  margin: 1.75em 0;
+  padding: 1.5rem 1.25rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.75rem;
+  background: var(--md-default-bg-color);
+  cursor: zoom-in;
+  transition: border-color 150ms, box-shadow 150ms;
+}
+
+.md-typeset figure.diagram[data-state="ready"]:hover,
+.md-typeset figure.diagram:focus-visible {
+  border-color: var(--md-accent-fg-color--transparent, var(--md-default-fg-color--lighter));
+  box-shadow: var(--md-shadow-z1);
+  outline: none;
+}
+
+.md-typeset figure.diagram[data-state="ready"]::after {
+  content: "⤢ Click to expand";
+  position: absolute;
+  top: 0.6rem;
+  right: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.4rem;
+  background: var(--md-default-fg-color--lightest);
+  color: var(--md-default-fg-color--light);
+  font-size: 0.65rem;
+  opacity: 0;
+  transition: opacity 150ms;
+  pointer-events: none;
+}
+
+.md-typeset figure.diagram[data-state="ready"]:hover::after,
+.md-typeset figure.diagram:focus-visible::after {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .md-typeset figure.diagram[data-state="ready"]::after {
+    content: "⤢";
+    opacity: 1;
+  }
+}
+
+.md-typeset figure.diagram[data-state="loading"] {
+  min-height: 8rem;
+  background: linear-gradient(90deg, transparent, var(--md-default-fg-color--lightest), transparent) 0 0 / 200% 100%
+    var(--md-default-bg-color);
+  animation: diagram-loading 1.4s linear infinite;
+}
+
+@keyframes diagram-loading {
+  to { background-position: -200% 0; }
+}
+
+.md-typeset figure.diagram[data-state="error"] {
+  cursor: default;
+}
+
+.md-typeset .diagram__error {
+  margin-top: 0;
+  color: var(--md-typeset-del-color, #d32f2f);
+  font-size: 0.75rem;
+}
+
+dialog.diagram-viewer {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+}
+
+dialog.diagram-viewer::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+
+.diagram-viewer__stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.diagram-viewer__stage.is-panning {
+  cursor: grabbing;
+}
+
+.diagram-viewer__canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.diagram-viewer__bar {
+  position: absolute;
+  z-index: 1;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.3rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.7rem;
+  background: var(--md-default-bg-color);
+  box-shadow: var(--md-shadow-z2);
+}
+
+.diagram-viewer__bar button {
+  min-width: 2.4rem;
+  height: 2.4rem;
+  padding: 0 0.6rem;
+  border-radius: 0.5rem;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.diagram-viewer__bar button:hover,
+.diagram-viewer__bar button:focus-visible {
+  background: var(--md-default-fg-color--lightest);
+  outline: none;
+}
+
+.diagram-viewer__hint {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  margin: 0;
+  transform: translateX(-50%);
+  color: var(--md-default-fg-color--light);
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+
+.md-typeset figure.diagram.is-shrunk {
+  padding-top: 2.75rem;
+}
+
+.md-typeset figure.diagram.is-shrunk[data-state="ready"]::after {
+  content: "⤢ Expand to read";
+  opacity: 1;
+  background: var(--md-accent-fg-color--transparent, var(--md-default-fg-color--lightest));
+  color: var(--md-accent-fg-color, var(--md-default-fg-color--light));
+}

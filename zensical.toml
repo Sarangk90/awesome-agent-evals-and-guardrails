@@ -11,7 +11,12 @@ repo_name = "Sarangk90/awesome-agent-evals-and-guardrails"
 edit_uri = "edit/main/research/"
 docs_dir = "research"
 
+# Diagrams: every ```mermaid block is rendered by overrides/assets/diagrams.js.
+extra_css = ["assets/diagrams.css"]
+extra_javascript = ["assets/diagrams.js"]
+
 [project.theme]
+custom_dir = "overrides"
 language = "en"
 features = [
   "content.action.edit",
@@ -81,7 +86,7 @@ pymdownx.inlinehilite = {}
 pymdownx.keys = {}
 pymdownx.mark = {}
 pymdownx.superfences.custom_fences = [
-  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+  { name = "mermaid", class = "diagram", format = "pymdownx.superfences.fence_code_format" },
 ]
 pymdownx.tabbed.alternate_style = true
 pymdownx.tabbed.combine_header_slug = true
