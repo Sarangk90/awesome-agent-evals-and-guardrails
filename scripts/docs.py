@@ -23,6 +23,10 @@ def title(md: Path) -> str:
     return match.group(1) if match else md.parent.name
 
 
+def short_title(md: Path) -> str:
+    return title(md).split(":", 1)[0].strip()
+
+
 def section(folder: Path) -> list:
     entries = []
     readme = folder / "README.md"
@@ -30,9 +34,11 @@ def section(folder: Path) -> list:
         entries.append(readme.relative_to(DOCS).as_posix())
     for child in sorted(folder.iterdir()):
         if child.is_dir() and any(child.rglob("*.md")):
-            entries.append({title(child / "README.md") if (child / "README.md").exists() else child.name: section(child)})
+            sub = section(child)
+            label = title(child / "README.md") if (child / "README.md").exists() else child.name
+            entries.append({label: sub[0] if len(sub) == 1 else sub})
         elif child.suffix == ".md" and child.name != "README.md":
-            entries.append(child.relative_to(DOCS).as_posix())
+            entries.append({short_title(child): child.relative_to(DOCS).as_posix()})
     return entries
 
 
