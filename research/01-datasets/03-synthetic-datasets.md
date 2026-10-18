@@ -209,6 +209,7 @@ RAGAS provides built-in synthesizers for different hop counts and specificity le
 | **Multi-hop specific** | *"Do both the London hotel cap and the client-dinner limit require director approval for exceptions?"* | `MultiHopSpecificQuerySynthesizer` |
 | **Multi-hop abstract** | *"How do travel expense rules differ between EMEA and the US?"* | `MultiHopAbstractQuerySynthesizer` |
 
+<!-- snippet: skip: calls RAGAS and an LLM provider (needs API keys) -->
 ```python
 # Illustrative: check current RAGAS API for your installed version
 from ragas.testset import TestsetGenerator
@@ -266,6 +267,7 @@ First-pass synthetic questions are often too simple. Use **query evolution** (in
 
 [DeepEval's `Synthesizer`](https://deepeval.com/docs/golden-synthesizer) automates query evolution and quality filtering. To keep evolved questions strictly answerable from your documents, use `MULTICONTEXT`, `CONCRETIZING`, `CONSTRAINED`, and `COMPARATIVE` evolutions:
 
+<!-- snippet: skip: calls the DeepEval Synthesizer and an LLM provider (needs API keys) -->
 ```python
 # Illustrative: check current DeepEval API
 from deepeval.synthesizer import Synthesizer, Evolution

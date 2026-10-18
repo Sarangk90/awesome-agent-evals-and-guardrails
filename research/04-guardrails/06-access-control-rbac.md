@@ -290,6 +290,7 @@ The column grant includes `tenant_id` because PostgreSQL checks column privilege
 
 **Why revoke `set_config`?** The policy reads `current_setting('app.tenant_id')`. Any role can call `set_config('app.tenant_id', '7', true)` inside its own query, so agent-written SQL could switch to another tenant. Revoking `EXECUTE` from `PUBLIC` blocks this for non-superusers. Grant it back to roles that need it (for example, a backup role, because `pg_dump` calls `set_config`).
 
+<!-- snippet: skip: needs a live PostgreSQL connection -->
 ```python
 from psycopg import sql
 

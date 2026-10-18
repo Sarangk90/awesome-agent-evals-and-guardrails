@@ -548,6 +548,7 @@ Tools like promptfoo also provide pre-built GitHub Actions ([promptfoo-action](h
 
 Use `pytest` to structure your evaluation suite. Parametrize **critical items** as individual test cases. Run the floor and paired non-regression checks over cached per-item results. This example reads `EVAL_REPEATS` and `EVAL_MAX_COST_USD`, caches one run per (item, repeat), compares per item with a baseline from the same dataset and judge version, and fails closed if they differ:
 
+<!-- snippet: skip: a pytest suite that imports your application (my_app, evals.checks) -->
 ```python
 # evals/test_agent_evals.py: illustrative; `my_app.run_agent`, `evals.checks`, and the file formats are yours.
 import hashlib

@@ -539,6 +539,7 @@ DIMENSIONS = {
 
 **Step 2: Generate tuples, filter out invalid combinations, and sample:**
 
+<!-- snippet: continue -->
 ```python
 import itertools, random
 

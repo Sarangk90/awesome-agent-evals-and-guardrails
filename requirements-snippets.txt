@@ -1,0 +1,15 @@
+# Libraries imported by the ```python blocks in research/ (checked by scripts/check_snippets.py).
+# Keep this list light: no model downloads, API keys, or databases. Mark blocks that need those as skip.
+email-validator==2.3.0
+jsonschema==4.26.0
+krippendorff==0.9.0
+markdown-it-py==4.2.0
+numpy==2.4.6
+opentelemetry-sdk==1.45.1
+pydantic==2.14.1
+pytest==9.1.1
+regex==2026.9.29
+scikit-learn==1.9.1
+scipy==1.17.1
+sqlglot==30.23.0
+statsmodels==0.15.0

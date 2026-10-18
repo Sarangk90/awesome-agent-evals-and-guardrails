@@ -66,3 +66,15 @@ Every content page in `research/` follows a predictable flow:
 |---|---|---|
 | **One idea per sentence + active voice** | *A single check—say, "does this text contain a Social Security Number?" or "is every claim in the answer supported by the retrieved passages?"—can be used in three different places, and confusing those places is the #1 source of wasted engineering effort.* (43 words) | *Consider one check: "Does every claim in the answer come from the retrieved passages?" You can run this single check in three different places. Confusing these three places is the #1 cause of wasted engineering effort.* (36 words across 3 sentences) |
 | **Imperative procedure** | *It is recommended that teams begin by sampling approximately 100 production traces and categorizing the observed failure modes prior to selecting automated LLM judges.* (24 words, passive) | *1. **Collect** 100 real traces from your system.<br/>2. **Label** the first step where each failed trace broke.<br/>3. **Pick** automated checks only for your top failure modes.* |
+
+---
+
+## 5. Code Snippets
+
+`scripts/check_snippets.py` runs every `python` block in `research/` in CI.
+
+1. **Make each block run on its own.** Define the data the block needs. Readers copy single blocks.
+2. **End with `assert`s, not `print`s.** Pin the edge case that the block exists to teach, such as a missing score or an overlap.
+3. **Mark dependent blocks.** Put `<!-- snippet: continue -->` on the line above the fence. The block then runs after the earlier passing blocks on the page.
+4. **Mark blocks that cannot run in CI.** Use `<!-- snippet: skip: <reason> -->` for API keys, model downloads, databases, or application imports. The reason is required.
+5. **Keep dependencies light.** Add a library to `requirements-snippets.txt` only if it installs without downloads or credentials.

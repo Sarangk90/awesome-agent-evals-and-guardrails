@@ -171,6 +171,7 @@ Text-to-SQL is a **tool call with side effects on shared infrastructure**. Evalu
 | No PII columns selected for role | Static (column tags) | Yes / mask | % selecting tagged columns |
 | Cost ceiling | Runtime (`EXPLAIN` / dry run) | Yes | % over budget |
 
+<!-- snippet: continue -->
 ```python
 # Illustrative static safety checker (defence in depth). Continues from the §3.2 block
 # (reuses real_tables and table_name). It is NOT a substitute for the database controls in §3.4.
@@ -281,6 +282,7 @@ Similarity metrics compare predicted SQL to gold SQL *as text or syntax trees*. 
 
 **Normalization with `sqlglot`.** The `sqlglot.optimizer.optimize` function qualifies columns, quotes identifiers, canonicalizes expressions, and expands positional `GROUP BY` clauses. Add table-alias canonicalization on top of the optimizer:
 
+<!-- snippet: continue -->
 ```python
 # Requires: pip install sqlglot. Optimizer rules change between versions; pin and snapshot-test.
 import sqlglot
@@ -644,6 +646,7 @@ Enterprise warehouse schemas rarely fit in a single prompt. Most agents first **
 - **When to use / when not to:** Always evaluate schema linking when your pipeline retrieves schema subsets. Run sweeps across `k` when tuning your retriever (see [Running offline experiments](./08-running-offline-experiments.md)).
 - **Implemented in:** Custom scripts or standard retrieval metric libraries.
 
+<!-- snippet: continue -->
 ```python
 # Continues from the §3.2 block: reuses real_tables() and table_name() so CTE names are resolved per scope.
 import sqlglot

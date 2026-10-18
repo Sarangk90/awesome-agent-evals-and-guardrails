@@ -303,6 +303,7 @@ Choose which fields to freeze based on the component you want to test:
 | A specific agent step | Conversation + tool results up to that step | Next decision |
 | SQL | Question + DB snapshot ID + gold SQL/result | SQL generation |
 
+<!-- snippet: skip: uses RowScrubber from §7.2, which needs Presidio and spaCy models -->
 ```python
 from scrub import RowScrubber
 
@@ -436,6 +437,7 @@ Presidio's default anonymizer replaces every name with the same generic tag (`<P
 - **A secrets recognizer:** Regex patterns catch common key formats and "password: …" phrases.
 - **More than one language:** English and German spaCy models. Rows in other languages go to manual review.
 
+<!-- snippet: skip: needs Presidio and downloaded spaCy models -->
 ```python
 # Illustrative: one layer of defense; detection is never complete. Check the current Presidio API.
 from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
