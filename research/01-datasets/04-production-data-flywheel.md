@@ -111,7 +111,9 @@ For an annotation budget of ~200 traces per week (heuristic split; tune to your 
 
 These are **human-annotation** budgets. Automated checks run on far more traffic: deterministic checks and the injection classifier on 100% of traces, and online LLM judges on 1–5% of traces plus 100% of flagged traces (see [Online eval pipelines](../03-online-evals-and-observability/01-online-evals.md)).
 
-The sampler below keeps the two measurement pools usable for estimates. It excludes opted-out users, caps the stratified pool at its quota, and stores the inclusion probability of every measurement trace. Discovery pools are labelled as such.
+The sampler below keeps the two measurement pools usable for estimates. It excludes opted-out users, fills each measurement pool to its exact quota, and stores the inclusion probability of every measurement trace. Discovery pools are labelled as such.
+
+The two measurement pools are drawn independently, so one trace can land in both. Review that trace once, but keep both selection records. Each estimate then uses every member of its own pool. If you drop the overlap from one pool instead, its stored probabilities no longer describe how its rows were chosen.
 
 ```python
 import math
@@ -131,11 +133,11 @@ def allocate(sizes: dict, quota: int) -> dict:
 def weekly_sample(traces, budget=200, seed=None, random_share=0.30, strat_share=0.20):
     rng = random.Random(seed)
     eligible = [t for t in traces if not t.opted_out]             # consent: exclude at sampling time
-    picked, seen = [], set()
+    queue = {}   # trace id -> one review row; a trace picked by two pools is labelled once
 
     def add(t, pool, reason, **weights):
-        seen.add(t.id)
-        picked.append({"trace": t, "pool": pool, "reason": reason, **weights})
+        row = queue.setdefault(t.id, {"trace": t, "selections": []})
+        row["selections"].append({"pool": pool, "reason": reason, **weights})
 
     # 1. Measurement pool A: simple random sample. Every eligible trace has the same inclusion probability.
     n_rand = min(int(random_share * budget), len(eligible))
@@ -148,14 +150,13 @@ def weekly_sample(traces, budget=200, seed=None, random_share=0.30, strat_share=
         by_stratum[(t.pipeline, t.language, t.user_role)].append(t)
     sizes = {k: len(v) for k, v in by_stratum.items()}
     for key, k in allocate(sizes, int(strat_share * budget)).items():
-        for t in rng.sample(by_stratum[key], k):
-            if t.id not in seen:      # rare overlap with pool A: the trace is already in the queue
-                add(t, "measurement", f"stratified:{key}", stratum=key,
-                    stratum_size=sizes[key], inclusion_prob=k / sizes[key])
+        for t in rng.sample(by_stratum[key], k):   # keep overlaps with pool A: both records stay valid
+            add(t, "measurement", f"stratified:{key}", stratum=key,
+                stratum_size=sizes[key], inclusion_prob=k / sizes[key])
 
     # 3. Discovery pools: targeted. Never use these labels to estimate rates.
     def take(pool, k, reason):
-        pool = [t for t in pool if t.id not in seen]
+        pool = [t for t in pool if t.id not in queue]
         for t in rng.sample(pool, min(k, len(pool))):
             add(t, "discovery", reason)
 
@@ -163,7 +164,7 @@ def weekly_sample(traces, budget=200, seed=None, random_share=0.30, strat_share=
     take([t for t in eligible if t.online_score is not None and t.online_score < 0.5], int(0.15 * budget), "low_score")
     take([t for t in eligible if t.guardrail_events], int(0.10 * budget), "guardrail")
     take([t for t in eligible if t.tool_errors or t.sql_error or t.hit_max_steps], int(0.05 * budget), "error")
-    return picked   # store `pool`, `reason`, and the weights with every label
+    return list(queue.values())   # store every selection record with the label
 
 def stratified_rate(labels, stratum_sizes):
     """Population failure rate from stratified labels: sum over strata of W_h * p_h.
@@ -182,9 +183,22 @@ def stratified_rate(labels, stratum_sizes):
         rate += w * p
         var += w**2 * p * (1 - p) / len(ys)    # ignores finite-population correction (conservative)
     return rate, math.sqrt(var)
+
+
+# Small traffic: 10 traces, one stratum, so the two measurement pools overlap.
+from types import SimpleNamespace
+traces = [SimpleNamespace(id=i, opted_out=False, pipeline="rag", language="en", user_role="employee",
+                          feedback=None, escalated=False, online_score=None, guardrail_events=[],
+                          tool_errors=[], sql_error=None, hit_max_steps=False) for i in range(10)]
+rows = weekly_sample(traces, budget=10, seed=1)
+picks = [s for r in rows for s in r["selections"]]
+assert sum(s["reason"] == "random" for s in picks) == 3                     # pool A quota: 30% of 10
+strat = [s for s in picks if s["reason"].startswith("stratified")]
+assert len(strat) == 2 and all(s["inclusion_prob"] == 0.2 for s in strat)    # pool B quota and k / N_h
+assert len({r["trace"].id for r in rows}) == len(rows)                     # each trace is reviewed once
 ```
 
-*Tested with 20,000 synthetic traces in 60 strata (3 pipelines × 4 languages × 5 roles): the sampler returned 200 traces, with exactly 60 random and 40 stratified picks and no opted-out users.*
+*Tested with 20,000 synthetic traces in 60 strata (3 pipelines × 4 languages × 5 roles): the sampler returned exactly 60 random and 40 stratified picks and no opted-out users. The assertions above cover small traffic, where the two pools overlap. The review queue then holds fewer rows than the budget.*
 
 #### 2.2.1 Estimating rates from the measurement pools
 
@@ -197,7 +211,8 @@ def stratified_rate(labels, stratum_sizes):
 
 - **Sample full sessions, not single turns.** Multi-turn issues like context loss or repeated clarifications only appear across a full session.
 - **Sample whole trajectories for agents.** Annotators need every step (tool calls and intermediate results) to find the first point of failure.
-- **Deduplicate near-identical queries before sampling.** Otherwise, popular questions dominate random samples. Keep query frequency as metadata so you can prioritize high-volume issues.
+- **Do not deduplicate before measurement sampling.** Popular questions are part of real traffic. If you drop repeats, the rate describes distinct queries, not what users experience.
+- **Group near-identical queries in discovery pools.** Reviewers then do not read the same question many times. Keep query frequency as metadata so you can prioritize high-volume issues.
 
 ---
 
@@ -222,8 +237,7 @@ An **annotation queue** routes sampled traces to the right reviewers with a cons
 {
   "trace_id": "tr_9f2c...",
   "queue": "general_quality",
-  "pool": "measurement",
-  "sample_reason": "random",
+  "selections": [{"pool": "measurement", "reason": "random", "inclusion_prob": 0.003}],
   "labels": {
     "overall": "fail",
     "criteria": {"correct": "fail", "grounded": "pass", "complete": "fail", "cited": "pass", "policy": "pass"},

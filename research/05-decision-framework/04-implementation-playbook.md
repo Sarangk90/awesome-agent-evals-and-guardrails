@@ -216,7 +216,7 @@ Follow the workflow in [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md
 - [ ] Build one binary pass/fail judge per failure mode with written criteria and few-shot examples.
 - [ ] Require the judge to output a brief critique *before* its pass/fail verdict.
 - [ ] Label at least 100 examples manually with your SME, including 30–50 FAILs. Oversample likely failures; do not force a 50/50 balance.
-- [ ] Split human labels into a development set (for prompt tuning) and a held-out test set.
+- [ ] Split human labels into a development set (for prompt, example, and model choices) and a held-out test set. Freeze the judge before you score it on the test set.
 - [ ] On the held-out test set, require TPR ≥ 0.85, TNR ≥ 0.85, and Cohen's κ ≥ 0.60 before the judge gates releases. Require ≥ 0.90 on high-risk slices (such as HR/finance and SQL equivalence). See the [canonical bar](../02-offline-evals/07-llm-as-a-judge.md#74-how-many-labels).
 - [ ] Apply the Rogan–Gladen correction (or prediction-powered inference) if you report absolute pass rates from an imperfect judge ([LLM-as-a-judge §8](../02-offline-evals/07-llm-as-a-judge.md#8-correcting-pass-rate-estimates-for-judge-error)).
 - [ ] Pin the judge model snapshot and prompt version and log them with every evaluation run. Use the lowest temperature that the model supports; for reasoning models, fix the reasoning effort instead.
