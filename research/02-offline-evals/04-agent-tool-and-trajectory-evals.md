@@ -358,6 +358,7 @@ assert trajectory_match(pred2, exp2, "unordered", matchers=contains)
 
 Validate tool arguments against the same JSON Schema you pass to the model:
 
+<!-- snippet: continue -->
 ```python
 from jsonschema import Draft202012Validator  # pip install jsonschema
 

@@ -40,3 +40,10 @@ The docs site is built from `research/` with [Zensical](https://zensical.org) an
 pip install -r requirements-docs.txt
 python scripts/docs.py serve   # http://localhost:8000
 ```
+
+Every `python` code block runs in CI. Each block runs on its own, so readers can copy it. End examples with `assert`s that pin the edge cases. If a block needs an earlier block on the same page, put `<!-- snippet: continue -->` on the line above its fence. If it needs an API key, a model download, a database, or your own application code, use `<!-- snippet: skip: <reason> -->`. To check locally:
+
+```bash
+pip install -r requirements-snippets.txt
+python scripts/check_snippets.py                 # or pass one page: research/02-offline-evals/07-llm-as-a-judge.md
+```

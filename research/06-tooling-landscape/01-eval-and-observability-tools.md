@@ -79,7 +79,7 @@ These changes affect procurement, long-term maintenance risk, and data-residency
 | **Patronus AI** | The homepage now highlights RL environments, benchmarks, and research over the eval platform ([site](https://www.patronus.ai/)). | Open models (Lynx, Glider) remain on Hugging Face under **CC-BY-NC-4.0 (non-commercial)**. Verify commercial platform availability before adopting it. |
 | **Giskard** | Giskard v3 is a fresh agent-focused rewrite (`giskard-checks`, `giskard-scan`), while **v2 is unmaintained** ([repo](https://github.com/Giskard-AI/giskard-oss)). | Older tutorials that use v2 APIs (RAGET or `giskard.scan` on LLMs) are outdated. |
 | **RAGAS** | The repository moved from `explodinggradients/ragas` to `vibrantlabsai/ragas`. The latest release is v0.4.3 (January 2026), and the last commit to `main` was in February 2026. Community pull requests from October 2026 are still open. | RAGAS remains widely used, but maintenance has slowed. Pin the version, wrap metrics behind your own interface, and check release notes carefully because metric names and APIs changed from v0.1 to v0.2+. |
-| **OpenAI Evals** | The `openai/evals` README directs users to run evaluations in the OpenAI dashboard and Evals API. | Use the hosted Evals product if you standardize on OpenAI. Treat the OSS repo as a historical benchmark registry. |
+| **OpenAI Evals** | OpenAI is **retiring** the hosted Evals platform, including its graders. Existing evals become read-only on October 31, 2026. The dashboard and API shut down on November 30, 2026 ([deprecations](https://developers.openai.com/api/docs/deprecations#2026-06-03-evals-platform), checked October 18, 2026). | Do not start new projects on hosted Evals. Export and migrate existing evals. OpenAI points to promptfoo ([migration guide](https://developers.openai.com/cookbook/examples/evaluation/moving-from-openai-evals-to-promptfoo)). Treat the `openai/evals` repo as a historical benchmark registry. |
 | **TruLens** | Snowflake acquired TruEra and continues to maintain TruLens as open source ([site](https://www.trulens.org/)). | TruLens remains active with 2.x releases in 2026. |
 | **WhyLabs** | [WhyLabs, Inc. is discontinuing operations](https://whylabs.ai) and open-sourced its platform. [whylogs](https://github.com/whylabs/whylogs) and [LangKit](https://github.com/whylabs/langkit) have had no pushes since early 2025 and late 2024. | Do not start new monitoring work on WhyLabs. Treat whylogs and LangKit as unmaintained. |
 | **UpTrain** | The [UpTrain repo](https://github.com/uptrain-ai/uptrain) has had no pushes since August 2024. | Treat it as dormant. Migrate to a maintained library. |
@@ -139,11 +139,12 @@ Each card covers six fields: **Link · Type/License · Strengths · Notable metr
 | Field | Details |
 |---|---|
 | **Link** | [GitHub](https://github.com/openai/evals) · [Evals guide](https://developers.openai.com/api/docs/guides/evals) · [Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices) |
-| **Type / License** | OSS framework and registry (repo). GitHub reports the repo license as NOASSERTION (no standard license detected), so review the LICENSE file before you reuse code or data. Hosted Evals API in the commercial OpenAI platform. |
-| **Strengths** | Created an early, influential registry of model benchmarks and model-graded evaluation templates. The hosted API lets you define graders over datasets and compare runs across OpenAI models and prompts. Read the best-practices guide regardless of which tool you choose. |
-| **Notable metrics** | Hosted: string-check, text-similarity, model-graded score or label graders, and Python graders. Repo: exact/fuzzy match and model-graded templates. |
-| **Best for** | Teams standardized on OpenAI models that run prompt and model migration checks. |
-| **Watch-outs** | Hosted Evals lock you into OpenAI models and infrastructure. The open-source repo receives light maintenance compared to the hosted API. |
+| **Status** | **Hosted platform retiring** ([deprecations](https://developers.openai.com/api/docs/deprecations#2026-06-03-evals-platform), checked October 18, 2026). Read-only from October 31, 2026. Dashboard and API shut down November 30, 2026. |
+| **Type / License** | OSS framework and registry (repo). GitHub reports the repo license as NOASSERTION (no standard license detected), so review the LICENSE file before you reuse code or data. Hosted Evals API in the commercial OpenAI platform (retiring). |
+| **Strengths** | Created an early, influential registry of model benchmarks and model-graded evaluation templates. The best-practices guide stays useful regardless of which tool you choose. |
+| **Notable metrics** | Hosted (retiring): string-check, text-similarity, model-graded score or label graders, and Python graders. Repo: exact/fuzzy match and model-graded templates. |
+| **Best for** | Historical reference only. Existing hosted users should migrate. OpenAI recommends promptfoo ([migration guide](https://developers.openai.com/cookbook/examples/evaluation/moving-from-openai-evals-to-promptfoo)). |
+| **Watch-outs** | The shutdown affects the hosted product only. It does not retire the `openai/evals` repo or the evaluation practices in the best-practices guide. The repo receives light maintenance. |
 
 ### Inspect (UK AI Security Institute)
 
@@ -389,7 +390,7 @@ For libraries, "Self-host" means the library runs entirely in your environment, 
 | **DeepEval** | ✅ | ✅ | ✅ | 🟡 (synthesizer, store via Confident AI) | 🟡 | 🟡 (via Confident AI) | ✅ | ✅ |
 | **TruLens** | ✅ | 🟡 | ✅ | 🟡 | ✅ | 🟡 | 🟡 | ✅ |
 | **promptfoo** | 🟡 | ✅ (trajectory assertions, `agent-rubric`) | ✅ | 🟡 (YAML/CSV) | 🟡 (OTLP receiver for eval runs) | ❌ | ✅ | ✅ |
-| **OpenAI Evals** | ❌ | 🟡 | ✅ | 🟡 (hosted) | 🟡 (hosted) | ❌ | 🟡 | 🟡 (repo only) |
+| **OpenAI Evals** | ❌ | 🟡 | ✅ | 🟡 (hosted, retiring) | 🟡 (hosted, retiring) | ❌ | 🟡 | 🟡 (repo only) |
 | **Inspect** | 🟡 (build your own) | ✅ | ✅ | 🟡 | 🟡 (eval logs) | ❌ | 🟡 | ✅ |
 | **Giskard v3** | ✅ | ✅ | ✅ | 🟡 | ❌ | ❌ | 🟡 | ✅ |
 | **lm-eval-harness** | ❌ | ❌ | ❌ | 🟡 (benchmarks) | ❌ | ❌ | 🟡 | ✅ |
@@ -546,7 +547,7 @@ flowchart LR
 - **Never equate metrics by name alone:** Calibrate every judge on your domain data and never compare raw scores across tools or versions.
 - **Filter by data residency first:** Self-host Langfuse, Opik, or MLflow (OSI licenses) or Phoenix (ELv2) when data cannot leave your network.
 - **Write domain checks in code:** Implement SQL execution accuracy, RBAC leakage, and citation checks as deterministic code.
-- **Re-verify tool status yearly:** The market consolidates quickly (Humanloop sunset, promptfoo → OpenAI, Langfuse → ClickHouse, Galileo → Cisco/Splunk, WhyLabs discontinued).
+- **Re-verify tool status yearly:** The market consolidates quickly (Humanloop sunset, OpenAI hosted Evals retiring, promptfoo → OpenAI, Langfuse → ClickHouse, Galileo → Cisco/Splunk, WhyLabs discontinued).
 
 ## Further reading
 

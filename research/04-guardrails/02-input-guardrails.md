@@ -277,6 +277,7 @@ def injection_heuristic(text: str) -> list[str]:
     return [m.group(0) for m in INJECTION_RE.finditer(text)]
 ```
 
+<!-- snippet: skip: downloads a gated Hugging Face model -->
 ```python
 # Classifier rail: illustrative. The Prompt Guard 2 repos are gated (accept the license on
 # Hugging Face first); check the model card for current labels and limits.
@@ -388,6 +389,7 @@ def scope_check(query_vec: np.ndarray, intent_vecs: dict[str, np.ndarray],
 
 **Use per-entity thresholds.** Presidio recognizers return different base scores. The phone recognizer returns 0.4. The SSN recognizer returns at most 0.5, and context words such as "phone" or "SSN" near the match raise the score. With one global `score_threshold=0.5`, "Reach Priya at 415-555-0132" passes through unredacted. Analyze at a low threshold, then filter per entity type. Pass `context=` with words from the surrounding conversation to help context enhancement.
 
+<!-- snippet: skip: needs Presidio and a downloaded spaCy model (~560 MB) -->
 ```python
 from presidio_analyzer import AnalyzerEngine
 from presidio_analyzer.nlp_engine import NlpEngineProvider

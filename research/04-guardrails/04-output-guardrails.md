@@ -114,6 +114,7 @@ def groundedness_gate(
     return {"action": action, "unsupported": unsupported, "min_score": min(scores, default=0.0)}
 ```
 
+<!-- snippet: skip: downloads the HHEM model from Hugging Face -->
 ```python
 # HHEM as the `entail` function (per the model card; verify the current API).
 from transformers import AutoModelForSequenceClassification

@@ -384,6 +384,7 @@ Common outbound channels in an agentic RAG system include:
 
 Use **taint tracking** to block exfiltration dynamically. Mark a run as *tainted* when untrusted content enters the context (web pages, external emails, user uploads, third-party tool outputs). Mark the run as *sensitive* when confidential data enters the context. When both flags are set, disable or require approval for every T2 and T3 tool. Shared T1 writes such as `create_ticket` are also sinks; the one-click confirmation in §14 covers them. Research systems such as CaMeL formalize this separation ([Debenedetti et al., 2025](https://arxiv.org/abs/2503.18813), [Simon Willison's summary](https://simonwillison.net/2025/Apr/11/camel/)). For broader rules (Meta's Agents Rule of Two) and the six prompt-injection design patterns, see [the lethal trifecta in Threat model & OWASP](./07-threat-model-owasp.md#5-the-lethal-trifecta).
 
+<!-- snippet: continue -->
 ```python
 def allowed_given_taint(tool: ToolSpec, run_state) -> bool:
     if tool.tier in (Tier.READ, Tier.WRITE):
@@ -615,11 +616,12 @@ Cover four remaining gaps outside the parser:
 
 Enforce row-level security in the database first. As a second layer, rewrite every reference to a tenant-scoped table into a filtered subquery using the tenant ID from the **authenticated session**. The subquery projects only the columns in the role's allowlist, so it works with column-level grants. PostgreSQL checks column privileges on `WHERE` columns too, so the agent role needs `SELECT` on `tenant_id` ([Access control & RBAC §7](./06-access-control-rbac.md) grants it).
 
+<!-- snippet: continue -->
 ```python
 import sqlglot
 from sqlglot import exp
 
-from guard import ROLE_SCHEMAS   # the guard_sql module above
+# ROLE_SCHEMAS comes from the guard_sql module above (in your code: from guard import ROLE_SCHEMAS)
 
 TENANT_SCOPED = {("sales", "orders")}
 

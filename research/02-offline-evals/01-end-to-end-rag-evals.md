@@ -109,17 +109,19 @@ Start with the RAG triad because it requires no ground-truth labels. Add referen
     - Result: **faithfulness = 2/3 ≈ 0.67**.
 - **Pitfalls and gotchas:**
     - **Grounded does not mean correct.** If the retriever returns a superseded 2021 policy, a faithful answer is still factually wrong.
-    - **Claim decomposition quality drives the score.** Long answers generate more claims and increase judge variance. Very short answers like "Yes." may produce zero claims. Track zero-claim answers separately as `None` rather than inflating your mean score.
+    - **Claim decomposition quality drives the score.** Long answers generate more claims and increase judge variance. Very short answers like "Yes." may produce zero claims. Mark zero-claim answers as `N/A` rather than inflating your mean score. Keep `N/A` (the check does not apply) separate from a missing score (the check did not run).
     - **Common-knowledge claims may fail verification.** A strict judge marks "Paris is in France" as unsupported if the context omits it. Decide upfront whether your enterprise assistant may use parametric knowledge.
     - **Paraphrases and rounding confuse judges.** Expressions like "~26 weeks" or "six months" can trigger false negatives under strict entailment. Spot-check judge disagreements regularly.
 - **When to use it:** Run faithfulness on every RAG answer as your primary reference-free hallucination check. In an agentic app, the answer can also use tool outputs and memory, so build `C` from the whole trajectory (see [Faithfulness in agentic runs](#faithfulness-in-agentic-runs-build-c-from-the-trajectory) below).
 - **Implemented in:** RAGAS (`Faithfulness`), TruLens (groundedness), DeepEval (`FaithfulnessMetric`), Phoenix (hallucination eval), promptfoo (`context-faithfulness`).
 
 ```python
-def faithfulness(claim_verdicts: list[bool]) -> float | None:
+NA = "N/A"  # the check does not apply; never use None for this (None means "did not run")
+
+def faithfulness(claim_verdicts: list[bool]) -> float | str:
     """claim_verdicts[i] = True if claim i is entailed by the retrieved context."""
     if not claim_verdicts:
-        return None  # track "no claims" separately rather than inflating the score
+        return NA  # track "no claims" separately rather than inflating the score
     return sum(claim_verdicts) / len(claim_verdicts)
 ```
 
@@ -479,16 +481,25 @@ A fixed tolerance such as "baseline − 2 points" is only valid if you state the
 - **Report failure rates alongside means.** A mean faithfulness of 0.93 can hide 5% of answers scoring below 0.30. Track the percentage of samples that fall below an acceptable floor.
 - **Break down scores by slice.** Group results by question type (factoid, procedural, comparison, multi-hop), source system, user role, language, and answerability. Most regressions happen inside a single slice.
 - **Gate releases on per-sample pass rates.** Define a clear pass rule such as `pass = correctness >= 0.7 AND faithfulness >= 0.8 AND not hallucinated_on_unanswerable`. Stakeholders understand pass rates much better than weighted averages.
+- **Never let a missing score pass.** Give each sample one verdict: `PASS`, `FAIL`, or `ERROR`. A required score that did not run (judge timeout, parse failure) is an `ERROR`. A check that does not apply is `N/A` and needs a reason. Block the release while any `ERROR` remains, and report error counts beside the pass rate.
 - **Keep raw metrics visible** even if leadership requests a single weighted composite score.
 - **Report statistical uncertainty.** On a 200-sample dataset, a 2-point difference is often random noise. Report each pass rate with its sample size and a Wilson interval (code below). When you test many slices, correct for multiple comparisons (for example Benjamini–Hochberg). See [running offline experiments](./08-running-offline-experiments.md) for significance testing.
 
 ```python
-def per_sample_pass(s: dict) -> bool:
+NA = "N/A"  # the check does not apply (for example, a zero-claim answer)
+
+def per_sample_verdict(s: dict) -> str:
+    """PASS, FAIL, or ERROR. A required score that is missing is an ERROR, never a PASS."""
     if not s["answerable"]:
-        return s["abstained"]
-    return (not s["abstained"]
-            and s["answer_correctness"] >= 0.7
-            and (s["faithfulness"] is None or s["faithfulness"] >= 0.8))
+        return "PASS" if s["abstained"] else "FAIL"
+    if s["abstained"]:
+        return "FAIL"
+    correctness, faith = s.get("answer_correctness"), s.get("faithfulness")
+    if correctness is None or faith is None:
+        return "ERROR"                      # the check applies but did not produce a score
+    if correctness < 0.7:
+        return "FAIL"
+    return "PASS" if faith == NA or faith >= 0.8 else "FAIL"
 
 def wilson_interval(passes: int, n: int, z: float = 1.96) -> tuple[float, float]:
     """95% Wilson score interval for a pass rate (better than p ± z·SE at small n or p near 0/1)."""
@@ -500,21 +511,32 @@ def wilson_interval(passes: int, n: int, z: float = 1.96) -> tuple[float, float]
     return (max(0.0, centre - half), min(1.0, centre + half))
 
 def pass_rate(samples: list[dict], slice_key: str | None = None) -> dict:
-    groups: dict[str, list[bool]] = {}
+    groups: dict[str, list[str]] = {}
     for s in samples:
         key = s.get(slice_key, "all") if slice_key else "all"
-        groups.setdefault(key, []).append(per_sample_pass(s))
-    return {k: {"rate": sum(v) / len(v), "n": len(v), "ci95": wilson_interval(sum(v), len(v))}
-            for k, v in groups.items()}
+        groups.setdefault(key, []).append(per_sample_verdict(s))
+    report = {}
+    for k, verdicts in groups.items():
+        passes, errors = verdicts.count("PASS"), verdicts.count("ERROR")
+        n = len(verdicts) - errors          # rate over completed samples only
+        report[k] = {"rate": passes / n if n else None, "n": n, "errors": errors,
+                     "complete": errors == 0, "ci95": wilson_interval(passes, n)}
+    return report
 
 
 samples = [
     {"answerable": True, "abstained": False, "answer_correctness": 0.9, "faithfulness": 0.95, "type": "policy"},
     {"answerable": True, "abstained": False, "answer_correctness": 0.5, "faithfulness": 1.0, "type": "policy"},
+    {"answerable": True, "abstained": False, "answer_correctness": 0.9, "faithfulness": NA, "type": "yes_no"},
+    {"answerable": True, "abstained": False, "answer_correctness": 0.9, "faithfulness": None, "type": "yes_no"},
     {"answerable": False, "abstained": True, "type": "out_of_scope"},
 ]
 report = pass_rate(samples, slice_key="type")
 assert report["policy"]["rate"] == 0.5 and report["out_of_scope"]["rate"] == 1.0
+assert per_sample_verdict(samples[3]) == "ERROR"            # judge did not run: never a silent PASS
+yes_no = report["yes_no"]                                   # N/A passes; the missing score is counted apart
+assert (yes_no["rate"], yes_no["n"], yes_no["errors"]) == (1.0, 1, 1)
+assert not all(r["complete"] for r in report.values())     # the release gate stays closed
 lo, hi = wilson_interval(160, 200)
 assert (round(lo, 2), round(hi, 2)) == (0.74, 0.85)   # 0.80 on n = 200
 ```

@@ -256,7 +256,7 @@ Follow this workflow from [Hamel Husain's LLM-as-a-Judge guide](https://hamel.de
 3. **Have the expert grade each item as PASS or FAIL** and write a clear critique for few-shot examples.
 4. **Fix obvious system bugs** discovered during trace review before spending time on judge tuning.
 5. **Build a binary judge** using the expert's critiques as few-shot examples.
-6. **Measure judge-expert agreement** on a held-out split and iterate on the rubric until agreement meets your target.
+6. **Measure judge-expert agreement** on a `dev` split and iterate on the rubric until agreement meets your target. Then freeze the judge and score it once on a held-out `test` split.
 7. **Re-sample and re-verify periodically** as user traffic and expert standards evolve.
 
 ### 7.2 Criteria drift (EvalGen, Shankar et al.)
@@ -285,7 +285,13 @@ Cohen's κ         = (p_o − p_e) / (1 − p_e)                    # agreement 
 
 **Other agreement statistics:** Cohen's κ compares two raters on nominal labels. For three or more raters, missing labels, or ordinal scales, use Fleiss' κ or Krippendorff's α (α ≥ 0.80 is reliable; 0.667 is the lowest value for tentative conclusions). When most labels are PASS, κ can be low even when raw agreement is high (the *prevalence paradox*). In that case, also report Gwet's AC1 or PABAK, and always report TPR and TNR. See [SME golden datasets](../01-datasets/02-sme-golden-datasets.md) (§7, inter-annotator agreement) for formulas and code.
 
-**Prevent judge overfitting:** Split calibration data into a **dev split** (for prompt tuning) and a **held-out test split** (for final metrics). Never include few-shot examples in your test split.
+**Prevent judge overfitting:** Split calibration data into three groups with separate jobs:
+
+1. **Few-shot pool:** Examples that you put in the judge prompt.
+2. **`dev` split:** Use it for every choice: prompt wording, few-shot selection, model, and reasoning settings.
+3. **`test` split:** Score the frozen judge once and report that number.
+
+Keep related items (paraphrases, items from one source case) in the same group. If a `test` result makes you change the judge, the `test` split is now development data. Say so in your report and label a fresh `test` split.
 
 ```python
 def judge_agreement(human: list[bool], judge: list[bool]) -> dict:
@@ -421,7 +427,7 @@ ppi_pass_rate([True] * 800 + [False] * 200, human, judge)
 
 ### 9.1 Model choice and cost
 
-- **Start with a frontier model, then downsize:** Validate your rubric on a top-tier reasoning model, then benchmark smaller models against your held-out calibration set.
+- **Start with a frontier model, then downsize:** Validate your rubric on a top-tier reasoning model, then compare smaller models on the `dev` split. Pick one, freeze it, and confirm it once on `test`.
 - **Pick a different model family than your generator** whenever possible to avoid self-preference bias.
 - **Pin exact model snapshots** (a dated snapshot ID, not a floating alias such as `-latest`) so silent provider updates do not shift your metrics. Providers retire snapshots, so plan to re-validate the judge on a replacement snapshot before the retirement date.
 - **Reasoning models as judges:** Reasoning models may check math, SQL, and multi-step logic better than standard models; confirm this on your calibration set. They cost more and are slower, and you control them with reasoning effort or a thinking budget instead of temperature. Validate each reasoning-effort setting as a separate judge version, and measure CI latency and cost before you make them the default.
@@ -472,12 +478,12 @@ An LLM judge is a combination of prompt code, few-shot data, and model weights. 
 - [ ] **Run error analysis first:** Read 50–100 production traces, cluster the failures, and select 1–3 priority failure modes.
 - [ ] **Write an operational rubric** for each failure mode with explicit PASS/FAIL rules agreed upon by your domain expert.
 - [ ] **Label a calibration dataset** of 100+ items (including 30–50 FAILs) with expert critiques, and check inter-human agreement.
-- [ ] **Split the labelled items** into a `dev` set (for prompt tuning and few-shot selection) and a held-out `test` set.
+- [ ] **Split the labelled items** into a few-shot pool, a `dev` split, and a held-out `test` split. Keep related items in one group.
 - [ ] **Build a binary judge** with one criterion, reasoning-before-verdict, expert few-shot examples, an `N/A` option, and strict JSON output.
-- [ ] **Evaluate the judge on `test`:** Compute TPR, TNR, precision, and Cohen's κ, and inspect false positives and negatives.
 - [ ] **Iterate on `dev`** until the judge meets your TPR and TNR targets, updating definitions if criteria drift occurs.
 - [ ] **Test for biases:** Run position-swap checks, length-padded variants, and prompt-injection strings against the judge.
-- [ ] **Benchmark cheaper models** against the `test` split, select the most cost-effective model that meets your bar, and pin its snapshot.
+- [ ] **Compare cheaper models on `dev`,** select the most cost-effective model that meets your bar, and pin its snapshot.
+- [ ] **Freeze the judge, then evaluate it once on `test`:** Compute TPR, TNR, precision, and Cohen's κ, and inspect false positives and negatives. If you change the judge after this step, label a fresh `test` split.
 - [ ] **Version the judge** and add its calibration test suite to CI.
 - [ ] **Report bias-corrected pass rates** (§8) with bootstrap confidence intervals.
 - [ ] **Audit continuously** by grading a small weekly sample of production traces with human reviewers.

@@ -339,6 +339,7 @@ For production pipelines, use established libraries like [ranx](https://github.c
 
 To cross-check nDCG against scikit-learn, pass every judged document, including the missed `d5`:
 
+<!-- snippet: continue -->
 ```python
 import numpy as np
 from sklearn.metrics import ndcg_score
