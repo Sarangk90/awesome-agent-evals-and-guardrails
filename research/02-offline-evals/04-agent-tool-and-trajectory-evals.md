@@ -12,6 +12,7 @@
     - Trajectory matching and judge rubrics
     - Sandboxed final-state checks, pass^k, and the unbiased pass@k estimator
     - Routing confusion matrices and simulated users
+    - How to evaluate a handoff to a human, through to final resolution
 - **Prerequisites:** [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)
 - **Related:** [Agent eval environments & graders](./09-agent-eval-environments-and-graders.md), [Text-to-SQL evals](./05-text-to-sql-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Tool and action guardrails](../04-guardrails/05-tool-and-action-guardrails.md), [Tracing & OpenTelemetry](../03-online-evals-and-observability/02-observability-and-tracing.md)
 
@@ -665,6 +666,126 @@ Scenario specification:
 
 **Pitfalls and gotchas:** LLM user simulators are often more polite and articulate than real users, and they sometimes leak `hidden_facts` unprompted. Run multiple random seeds per scenario, inspect a sample of transcripts manually, and seed user personas from real production logs ([production data flywheel](../01-datasets/04-production-data-flywheel.md)). Both τ-bench and DeepEval (`ConversationSimulator`) support simulated-user evaluations.
 
+### 7.2 Human handoff
+
+An employee tells Acme Assistant that last month's payroll is wrong. The assistant cannot change payroll, so it hands off to HR with the summary "user has a payroll question". The HR partner asks the employee to explain everything again. HR fixes the issue three days later.
+
+Your logs record one word for this session: "escalated".
+
+That word hides four questions:
+
+- Was the handoff needed?
+- Did it happen at the right time?
+- Did the human get enough context?
+- Did anyone finally resolve the issue?
+
+Husain and Shankar state the rule plainly. "The trace continues until the user's need is resolved or the session ends, not when AI hands off to a human" ([Evals FAQ](https://hamel.dev/blog/posts/evals-faq/how-do-i-evaluate-sessions-with-human-handoffs.html)).
+
+```mermaid
+flowchart LR
+    A["Agent turn"] --> D{"Hand off?"}
+    D -- No --> R1["Agent resolves or the user leaves"]
+    D -- Yes --> P["Handoff packet: reason, summary, fields"]
+    P --> Q["Queue: wait until a human accepts"]
+    Q --> H["Human works the issue"]
+    H --> O{"Final outcome"}
+    O --> OK["Resolved, no repeat contact in the window"]
+    O --> NO["Unresolved or reopened"]
+    O --> PD["Pending: no evidence yet"]
+```
+
+1. **Score the decision at `Hand off?`.** Compare it with what the policy required.
+2. **Score the packet and the wait.** These decide whether the human can act without asking again.
+3. **Score the final outcome last.** It often arrives days after the session closes.
+
+**Log these fields for every handoff.** The FAQ lists the decision and its reason, the context transferred, wait time, human actions, final resolution, and whether the human had enough context.
+
+| Field | Example | Why you need it |
+|---|---|---|
+| `reason` | `user_requested`, `policy_required`, `agent_stuck` | Separates correct handoffs from failures |
+| `packet` | Summary, employee ID, pay period, amount in dispute | Lets you score context completeness |
+| `requested_at`, `accepted_at` | Timestamps | Gives wait time, and finds handoffs nobody accepted |
+| `human_actions` | Edited the summary, or asked the user to repeat details | Shows where the packet fell short |
+| `resolved_at`, `reopened_at` | Timestamps, or `null` | Gives the final outcome after the handoff |
+
+Microsoft Copilot Studio uses a similar reason split: "system intended", "system unintended", and "user requested" ([analytics docs](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-improve-agent-effectiveness)). An intended handoff follows a business rule. An unintended one usually means the user is stuck.
+
+**Report four results separately.** Do not merge them into one score.
+
+| Result | How to compute it | Notes |
+|---|---|---|
+| **Handoff decision** | Confusion matrix of *should hand off* vs *did hand off* | Report missed handoffs and unnecessary handoffs as two rates. "User asked for a human" is a hard rule. |
+| **Timing** | Turn of the handoff vs the earliest turn where policy required it | Allow a tolerance window. [Liu et al., 2021](https://arxiv.org/abs/2012.07610) score transfers "within tolerance" of the ideal turn. |
+| **Packet quality** | Required fields present, and summary claims supported by the trace | Use a faithfulness-style judge on the summary. Edits to the summary by the receiving person are a useful signal. Airbnb found this for human agents' case notes ([Wu et al., 2025](https://arxiv.org/abs/2510.06677)). |
+| **Final outcome** | Resolved, unresolved, or pending after the handoff | Count a reopen inside the window as unresolved. Keep the label `pending` until evidence arrives. |
+
+The description of τ-bench's `transfer_to_human_agents` tool gives a good default rule ([tool source](https://github.com/sierra-research/tau-bench/blob/main/tau_bench/envs/airline/tools/transfer_to_human_agents.py)). It says: "Only transfer if the user explicitly asks for a human agent". The second condition is when the issue "cannot be resolved by the agent with the available tools". Write your own rule per issue type, then label `should_hand_off` for every test case.
+
+The snippet below scores the decision, the packet, and the outcome. A handoff request alone never counts as resolution. A missing resolution stays `pending`.
+
+```python
+from datetime import datetime, timedelta
+
+REOPEN_WINDOW = {"payroll": timedelta(days=30), "it_access": timedelta(days=5)}  # set per issue type
+DEFAULT_WINDOW = timedelta(days=30)
+ACCEPT_DEADLINE = timedelta(hours=4)       # after this, an unaccepted handoff has failed
+REQUIRED_FIELDS = {"payroll": {"employee_id", "pay_period", "amount_in_dispute"}}
+
+def handoff_decision(should: bool, did: bool) -> str:
+    if should == did:
+        return "correct"
+    return "missed" if should else "unnecessary"
+
+def missing_fields(packet: dict, issue_type: str) -> set[str]:
+    return {f for f in REQUIRED_FIELDS.get(issue_type, set()) if not packet.get(f)}
+
+def outcome_after_handoff(h: dict, issue_type: str, now: datetime) -> str:
+    """Final outcome of a handed-off session. Never infer resolution from the handoff itself."""
+    if h.get("accepted_at") is None:
+        if now - h["requested_at"] < ACCEPT_DEADLINE:
+            return "pending"                      # still inside the acceptance deadline
+        return "not_accepted"                     # requested, but no human picked it up in time
+    if h.get("resolved_at") is None:
+        return "pending"                          # no evidence yet
+    window = REOPEN_WINDOW.get(issue_type, DEFAULT_WINDOW)
+    reopened = h.get("reopened_at")
+    if reopened and reopened - h["resolved_at"] <= window:
+        return "unresolved"                       # the user came back with the same issue
+    if now - h["resolved_at"] < window:
+        return "resolved_provisional"             # the reopen window is still open
+    return "resolved"
+
+
+now = datetime(2026, 10, 19)
+day = timedelta(days=1)
+assert handoff_decision(should=True, did=False) == "missed"
+assert handoff_decision(should=False, did=True) == "unnecessary"
+assert missing_fields({"employee_id": "E123", "pay_period": "2026-09"}, "payroll") == {"amount_in_dispute"}
+assert outcome_after_handoff({"requested_at": now - day, "accepted_at": None}, "payroll", now) == "not_accepted"
+assert outcome_after_handoff({"requested_at": now, "accepted_at": None}, "payroll", now) == "pending"
+assert outcome_after_handoff({"accepted_at": now - 3 * day}, "payroll", now) == "pending"
+assert outcome_after_handoff({"accepted_at": now - 3 * day, "resolved_at": now - 2 * day},
+                             "payroll", now) == "resolved_provisional"
+assert outcome_after_handoff({"accepted_at": now - 50 * day, "resolved_at": now - 40 * day,
+                              "reopened_at": now - 35 * day}, "payroll", now) == "unresolved"
+assert outcome_after_handoff({"accepted_at": now - 50 * day, "resolved_at": now - 40 * day},
+                             "payroll", now) == "resolved"
+```
+
+Choose the reopen window per issue type. SQM Group's example uses 5 days for a status inquiry and 30 days for an issue that needs investigation ([SQM Group](https://www.sqmgroup.com/resources/library/blog/calculate-first-call-resolution-rate)).
+
+**Avoid these traps.**
+
+| Trap | What goes wrong | Instead |
+|---|---|---|
+| **Measurement stops at the transfer** | Copilot Studio ends the analytics session at the handoff, "whether the conversation transfers to a live agent or not" | Join the agent trace to the ticket or CRM record |
+| **Silence counts as resolution** | Intercom counts an exit "without requesting further assistance" as an assumed resolution ([Fin outcomes](https://www.intercom.com/help/en/articles/8205718-fin-ai-agent-outcomes)) | Keep the label provisional until the reopen window closes |
+| **Containment alone rewards trapping users** | Users get stuck in "doom loops" without an offramp to a human ([CFPB, 2023](https://www.consumerfinance.gov/data-research/research-reports/chatbots-in-consumer-finance/chatbots-in-consumer-finance/)) | Pair containment with abandonment, repeat contact, and missed handoffs |
+| **A benchmark pass proves nothing about handoffs** | A τ²-bench issue reports 23 airline refusal or handoff tasks scored on inaction only. In some retail tasks, declining to help scores the same as a correct handoff ([#384](https://github.com/sierra-research/tau2-bench/issues/384), open as of October 2026) | Assert that the transfer happened when the policy required it |
+| **One rate mixes good and bad handoffs** | Intended handoffs and stuck users raise the same escalation rate | Report the rate per `reason` |
+
+Vendor definitions of "resolved" differ, and some drive billing. Do not compare resolution rates across products. Sometimes the best fix removes the handoff: the FAQ notes that "the best improvement reduces handoffs entirely rather than improving handoff execution".
+
 ---
 
 ## 8. Public benchmarks (context only)
@@ -695,6 +816,7 @@ Adopt four habits from these benchmarks. Verify **outcomes** via state or execut
 | Fault injection | 30–100 cases across error types (≥ 300 to support a < 1% claim) | Every PR | False-success rate = 0 (zero in `n` gives a 95% upper bound of about `3/n`) |
 | Outcome (sandboxed final state) | 50–200 tasks × 3–5 trials | Nightly and pre-release | Task success rate and `pass^k` no regression |
 | Multi-turn simulated users | 30–100 scenarios × multiple seeds | Nightly and pre-release | Goal completion, knowledge retention, and role adherence |
+| Human handoff | Cases labeled `should_hand_off`, including user requests for a human | Every PR for decisions, weekly for outcomes | Zero missed handoffs on policy-required cases (zero in `n` bounds the rate at about `3/n`) |
 | Step efficiency | Computed from all suite traces above | Every run | Tokens and dollar cost per successful task ≤ baseline + 25% |
 
 ### 9.2 Checklist
@@ -707,6 +829,7 @@ Adopt four habits from these benchmarks. Verify **outcomes** via state or execut
 - [ ] Run outcome suites across 3–5 trials per task and report `pass^k` with a confidence interval over tasks.
 - [ ] Evaluate intent routing with a confusion matrix and weight misroutes by business risk.
 - [ ] Test multi-turn conversations with simulated users seeded from real production personas.
+- [ ] Trace every handoff to its final outcome, and report decision, timing, packet quality, and resolution separately.
 - [ ] Compute token and step efficiency only over successful runs, and monitor p99 step counts for infinite loops.
 - [ ] Re-run tool-selection evals whenever you edit a tool description or add a new tool.
 - [ ] Verify that forbidden actions are also blocked at runtime by [tool guardrails](../04-guardrails/05-tool-and-action-guardrails.md) and [RBAC](../04-guardrails/06-access-control-rbac.md).
@@ -722,6 +845,7 @@ Adopt four habits from these benchmarks. Verify **outcomes** via state or execut
 - **Measure reliability across trials with `pass^k`.** Single-run pass rates hide stochastic flakiness on action-taking agents. If you report `pass@k`, use the unbiased estimator.
 - **Check what a framework's match mode really means.** "Any order" in one tool can mean "superset" in another, and RAGAS `ToolCallAccuracy` fails runs with extra optional calls.
 - **Evaluate routing with confusion matrices and multi-turn flows with simulated users.**
+- **Trace a handoff to the final outcome.** A handoff request is not a resolution. Keep the outcome `pending` until evidence arrives.
 
 ## Further reading
 
@@ -732,6 +856,11 @@ Adopt four habits from these benchmarks. Verify **outcomes** via state or execut
 - Liu et al., *AgentBench: Evaluating LLMs as Agents*, [arXiv:2308.03688](https://arxiv.org/abs/2308.03688)
 - Mialon et al., *GAIA: a benchmark for General AI Assistants*, [arXiv:2311.12983](https://arxiv.org/abs/2311.12983)
 - Jimenez et al., *SWE-bench: Can Language Models Resolve Real-World GitHub Issues?*, [arXiv:2310.06770](https://arxiv.org/abs/2310.06770)
+- Hamel Husain & Shreya Shankar, [How do I evaluate sessions with human handoffs?](https://hamel.dev/blog/posts/evals-faq/how-do-i-evaluate-sessions-with-human-handoffs.html) (Evals FAQ)
+- Liu et al., *Time to Transfer: Predicting and Evaluating Machine-Human Chatting Handoff*, AAAI 2021, [arXiv:2012.07610](https://arxiv.org/abs/2012.07610)
+- Wu et al. (Airbnb), *Incremental Summarization for Customer Support via Progressive Note-Taking and Agent Feedback*, EMNLP 2025 Industry, [arXiv:2510.06677](https://arxiv.org/abs/2510.06677)
+- Microsoft, [Copilot Studio: analyze agent effectiveness](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-improve-agent-effectiveness) (session outcomes and escalation reasons)
+- CFPB, [Chatbots in consumer finance](https://www.consumerfinance.gov/data-research/research-reports/chatbots-in-consumer-finance/chatbots-in-consumer-finance/) (2023, "doom loops")
 - RAGAS, [Agent / tool-use metrics](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/agents/)
 - LangChain, [agentevals](https://github.com/langchain-ai/agentevals)
 - Google Cloud, [Evaluate Gen AI agents (Vertex AI)](https://cloud.google.com/vertex-ai/generative-ai/docs/models/evaluation-agents)

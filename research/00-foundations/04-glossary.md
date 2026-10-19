@@ -72,13 +72,19 @@
 
 **bpref:** A retrieval metric that uses only judged documents. It stays stable when many documents have no relevance label. → [Retrieval Metrics](../02-offline-evals/02-retrieval-metrics.md)
 
+**Brier score:** The mean squared difference between a predicted probability and the 0/1 outcome. Lower is better. It rewards both accuracy and honest probabilities. → [Decision Model Evals](../02-offline-evals/10-decision-model-evals.md#3-what-to-measure)
+
 **Burn rate:** How fast a service spends its error budget. A burn rate of 1 spends exactly the whole budget over the SLO window. A burn rate of 14.4 spends a 30-day budget in about 2 days. → [Monitoring, Alerting & Drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
 
 ## C
 
+**Calibration:** How well stated probabilities match observed frequencies. When a calibrated model says 0.8, the event happens about 80% of the time. → [Decision Model Evals](../02-offline-evals/10-decision-model-evals.md)
+
 **Canary deployment:** Rolling out a new change to a small percentage of live users first and checking online evals before releasing to everyone. → [Online Evals](../03-online-evals-and-observability/01-online-evals.md)
 
 **Canary token:** A unique secret string placed inside a system prompt or restricted document. If that string appears in an output, a deterministic check blocks the leak immediately. → [Output Guardrails](../04-guardrails/04-output-guardrails.md)
+
+**Check register:** A list of every active check with its failure mode, owner, cadence, pass-rate trend, false-failure rate, and cost assumptions. Review it to retire or fix checks. → [Eval Selection §9.5](../05-decision-framework/01-eval-selection-decision-tree.md#95-which-checks-deserve-ongoing-effort)
 
 **Chunking:** Splitting long documents into smaller passages before indexing them for search. → [Failure Modes](./03-agentic-rag-failure-modes.md#33-retrieval-and-chunking)
 
@@ -101,6 +107,10 @@
 **Confidence interval (CI):** A range that likely contains the true value of a metric. For example, a 95% CI of 72–87% around an 81% pass rate on 100 rows. For pass rates, use the **Wilson score interval**. → [Why Evals and Guardrails](./01-why-evals-and-guardrails.md#54-is-the-change-real-statistics-in-one-page)
 
 **Confident learning:** A method that uses a model's predicted probabilities to rank labels that are likely wrong (for example with cleanlab). Send those labels to human review. → [SME Golden Datasets](../01-datasets/02-sme-golden-datasets.md)
+
+**Construct validity:** Whether an eval measures the property it claims to measure, and only that property. → [Running Offline Experiments §12.1](../02-offline-evals/08-running-offline-experiments.md#121-is-this-eval-valid)
+
+**Containment rate:** The share of sessions that end without a handoff to a human. Never report it alone: it rises when users give up or get stuck. → [Agent Tool & Trajectory Evals §7.2](../02-offline-evals/04-agent-tool-and-trajectory-evals.md#72-human-handoff)
 
 **Content Security Policy (CSP):** A browser header that limits the origins a page can load images or scripts from. It is a backstop against data exfiltration through markdown images. → [Output Guardrails](../04-guardrails/04-output-guardrails.md)
 
@@ -125,6 +135,8 @@
 ## D
 
 **Data flywheel:** The continuous loop where failed production traces, user thumbs-downs, and guardrail blocks are labeled and added to your offline datasets. → [Production Data Flywheel](../01-datasets/04-production-data-flywheel.md)
+
+**Decision model:** A model that returns typed answers with probabilities (a choice, a yes/no probability, or a level) instead of generated text. Evals focus on calibration and thresholds. → [Decision Model Evals](../02-offline-evals/10-decision-model-evals.md)
 
 **Delta method:** A way to estimate the variance of a ratio metric (such as thumbs-down per session) when the analysis unit differs from the randomization unit. → [Online Evals](../03-online-evals-and-observability/01-online-evals.md)
 
@@ -169,6 +181,8 @@
 **Execution accuracy (EX):** The primary Text-to-SQL metric: it checks whether running the generated SQL returns the exact same table rows as running the reference SQL. On a single database snapshot, a wrong query can match by chance; see **test-suite accuracy**. → [Text-to-SQL Evals](../02-offline-evals/05-text-to-sql-evals.md)
 
 **Exact match (EM):** A binary check that passes only when the output string matches the reference string character-for-character (after basic cleanup). → [Generation Quality & Safety](../02-offline-evals/03-generation-quality-and-safety-evals.md)
+
+**Expected calibration error (ECE):** The weighted average gap between predicted probability and observed accuracy across bins. It depends on the binning, so prefer equal-count bins and report a CI. → [Decision Model Evals](../02-offline-evals/10-decision-model-evals.md#3-what-to-measure)
 
 ## F
 
@@ -222,6 +236,8 @@
 
 **Horvitz–Thompson (stratified) estimator:** Re-weights each sampled label by `1 / inclusion probability` (or by stratum size). It gives an unbiased population rate from a non-uniform sample. → [Production Data Flywheel](../01-datasets/04-production-data-flywheel.md)
 
+**Human handoff:** Transferring a session from the agent to a human. Evaluate the decision, the timing, the context packet, and the final resolution separately. → [Agent Tool & Trajectory Evals §7.2](../02-offline-evals/04-agent-tool-and-trajectory-evals.md#72-human-handoff)
+
 **Human-in-the-loop (HITL):** Pausing an agent so a human can approve or reject a high-stakes action before it runs, or having humans review sampled production traces. → [Tool & Action Guardrails](../04-guardrails/05-tool-and-action-guardrails.md)
 
 **Hybrid search:** Running both keyword search (BM25) and vector search (embeddings) and merging their ranked results. → [Retrieval Metrics](../02-offline-evals/02-retrieval-metrics.md)
@@ -243,6 +259,8 @@
 **Inter-annotator agreement (IAA):** A measure of how often two human reviewers give the same Pass/Fail label to the same examples. Low agreement means your grading rubric is unclear. Common scores are Cohen's κ (two raters), Fleiss' κ, and Krippendorff's α (many raters). → [SME Golden Datasets](../01-datasets/02-sme-golden-datasets.md)
 
 **IORails:** An experimental NeMo Guardrails engine for input and output rails. The built-in tool-call validation needs it. → [Guardrail Tools](../06-tooling-landscape/02-guardrail-tools.md)
+
+**Item-level recall:** The share of reference items that the output contains, matched one-to-one. The success metric for "list every item" tasks. → [Retrieval Metrics §7.2](../02-offline-evals/02-retrieval-metrics.md#72-whole-document-tasks-when-success-means-every-item)
 
 ## J
 
@@ -276,6 +294,8 @@
 
 **LLM-as-a-judge:** Using an LLM with a rubric prompt to grade outputs, either one at a time (**pointwise**) or two side by side (**pairwise**). This guide recommends binary Pass/Fail, one criterion per judge. Validate it against human labels on a held-out split before you trust its scores. → [LLM-as-a-Judge](../02-offline-evals/07-llm-as-a-judge.md)
 
+**Locale:** A language plus regional conventions, written as a BCP 47 tag such as `de-DE`. Store it separately from the policy jurisdiction. → [Generation Quality & Safety §3.7](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review)
+
 **Long-horizon task:** A task that takes many steps or a long time, such as hundreds of tool calls over hours. Small per-step errors compound, so grade milestones as well as the end state. → [Agent Eval Environments & Graders](../02-offline-evals/09-agent-eval-environments-and-graders.md#9-long-horizon-tasks), [Failure Modes](./03-agentic-rag-failure-modes.md#311-long-horizon-autonomy-and-multi-agent)
 
 ## M
@@ -301,6 +321,8 @@
 **Minimum detectable effect (MDE):** The smallest true change that a test detects with the chosen power (usually 80%) at the chosen significance level. → [Running Offline Experiments](../02-offline-evals/08-running-offline-experiments.md), [Online Evals](../03-online-evals-and-observability/01-online-evals.md)
 
 **MMD (Maximum Mean Discrepancy):** A kernel-based two-sample test statistic. Teams use it to detect drift in embeddings. → [Monitoring, Alerting & Drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
+
+**MQM (Multidimensional Quality Metrics):** An error typology for human review of translation and language quality. Each error gets a severity level, such as Major or Minor. → [Generation Quality & Safety §3.7](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review)
 
 **MRR (Mean Reciprocal Rank):** A retrieval metric equal to the average of `1 / rank` of the *first* relevant chunk found. Best when the user only needs one good hit. → [Retrieval Metrics](../02-offline-evals/02-retrieval-metrics.md)
 
@@ -390,6 +412,8 @@
 
 **Regression suite:** A dataset of past bugs and critical test cases run on every pull request in CI so fixed bugs never come back. → [Running Offline Experiments](../02-offline-evals/08-running-offline-experiments.md)
 
+**Reliability diagram:** A plot of observed accuracy against predicted probability, per bin. Points below the diagonal show overconfidence. → [Decision Model Evals](../02-offline-evals/10-decision-model-evals.md#3-what-to-measure)
+
 **Reranker:** A second-stage model (usually a cross-encoder) that takes the top 20–50 search hits and re-sorts them so the most relevant chunks sit in the top 5. → [Retrieval Metrics](../02-offline-evals/02-retrieval-metrics.md)
 
 **Retrieve-or-not decision:** An agent's choice of whether to retrieve at all on a turn. Score it as a binary classification. → [Retrieval Metrics](../02-offline-evals/02-retrieval-metrics.md)
@@ -421,6 +445,8 @@
 **Sampling (online eval):** Running heavier checks (such as LLM judges) on a share of live traffic to control cost. A common rule of thumb: run deterministic checks and the injection classifier on 100% of traffic, and LLM judges on 1–5% of traces (or about 500 per day) plus 100% of flagged and thumbs-down traces. → [Online Evals](../03-online-evals-and-observability/01-online-evals.md)
 
 **`security_invoker` view:** A PostgreSQL 15+ view option that runs the view with the caller's privileges, so RLS applies to the caller and not to the view owner. → [Access Control & RBAC](../04-guardrails/06-access-control-rbac.md)
+
+**Selective prediction:** Answering only when confidence is high enough and deferring the rest. Evaluate accuracy on kept cases together with the deferral rate. → [Decision Model Evals](../02-offline-evals/10-decision-model-evals.md)
 
 **Self-preference bias:** The tendency of an LLM judge to rate outputs from its own model (or model family) higher than equally good outputs from other models (Panickssery et al., 2024). → [LLM-as-a-Judge](../02-offline-evals/07-llm-as-a-judge.md)
 

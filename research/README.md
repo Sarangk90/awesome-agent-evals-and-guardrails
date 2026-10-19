@@ -89,6 +89,7 @@ Every eval and guardrail in this repository is defined by six choices:
 | [07 · LLM-as-a-Judge](./02-offline-evals/07-llm-as-a-judge.md) | Binary Pass/Fail rubrics, validating judges against human labels (TPR/TNR ≥ 0.85, κ ≥ 0.60), bias and injection tests, and correcting pass rates (Rogan–Gladen, PPI) |
 | [08 · Running Offline Experiments](./02-offline-evals/08-running-offline-experiments.md) | Paired comparisons (McNemar, paired bootstrap), power and sample size, slice gates, ablations, and staged CI gates |
 | [09 · Agent Eval Environments & Graders](./02-offline-evals/09-agent-eval-environments-and-graders.md) | Resettable environments and outcome graders for agent evals, task validity checks, grader hacking, and long-horizon milestones |
+| [10 · Decision Model Evals](./02-offline-evals/10-decision-model-evals.md) *(experimental)* | Calibration, cost-based thresholds, and escalation paths for models that return typed answers with probabilities |
 
 ### [03 · Online Evals & Observability](./03-online-evals-and-observability/README.md)
 | Guide | What you will learn |

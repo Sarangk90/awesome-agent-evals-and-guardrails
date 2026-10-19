@@ -276,7 +276,7 @@ When you run guardrails sequentially, order them by cost and trigger frequency:
 2. **Run small ML classifiers second:** models that take tens of milliseconds per call (for example, Meta reports about 19–92 ms per 512-token Prompt Guard 2 call on an A100 GPU). Benchmark on your own hardware; CPU latency is usually higher.
 3. **Run LLM-based rails last:** invoke them only for remaining ambiguous cases.
 
-A **cascade** uses a cheap detector's confidence score to decide whether to invoke an expensive detector. Resolve high-confidence allows and blocks with the cheap classifier, and route only the gray zone to the LLM judge. This pattern cuts LLM-rail volume sharply while preserving accuracy (validate the threshold on your dataset).
+A **cascade** uses a cheap detector's confidence score to decide whether to invoke an expensive detector. If you read the score as a probability, check its calibration first. Otherwise, set thresholds on labeled data ([decision model evals](../02-offline-evals/10-decision-model-evals.md)). Resolve high-confidence allows and blocks with the cheap classifier, and route only the gray zone to the LLM judge. This pattern cuts LLM-rail volume sharply while preserving accuracy (validate the threshold on your dataset).
 
 ### 5.4 Streaming output and chunk-level checking
 

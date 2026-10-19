@@ -14,6 +14,7 @@
     - Relevance labeling, pooling, and incomplete judgments (judged@k, bpref)
     - Chunk vs document matching and span coverage
     - Per-stage retrieval evals, including agentic and multi-hop retrieval
+    - Whole-document tasks scored by item-level recall, not top-k ranks
 - **Prerequisites:** [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)
 - **Related:** [Synthetic datasets](../01-datasets/03-synthetic-datasets.md), [LLM-as-a-judge](./07-llm-as-a-judge.md), [Retrieval and context guardrails](../04-guardrails/03-retrieval-and-context-guardrails.md)
 
@@ -574,6 +575,66 @@ In an agentic RAG app, the agent decides **whether** to search, **what** to sear
 
 Score the trajectory-level behaviour (tool choice, step count, loops) with [agent and trajectory evals](./04-agent-tool-and-trajectory-evals.md). Score the evidence in each search call with the metrics on this page.
 
+### 7.2 Whole-document tasks: when success means every item
+
+An employee asks Acme Assistant for "every country where we pay a daily travel allowance, with the rate". The travel policy is 40 pages long and names 23 countries. The retriever returns five chunks, and each one is relevant, so precision@5 is 1.0. The answer lists 9 countries.
+
+Top-k metrics ask whether you found supporting evidence. This task asks whether you found **every** item.
+
+Husain and Shankar draw the same line. "Unlike RAG, where chunks are optimized for retrieval, document processing assumes the model will see every chunk" ([Evals FAQ](https://hamel.dev/blog/posts/evals-faq/how-do-i-choose-the-right-chunk-size-for-my-document-processing-tasks.html)). For tasks such as "List all customer complaints", they recommend smaller chunks and a map-reduce pattern to preserve "output completeness".
+
+| Task shape | Example | Success metric |
+|---|---|---|
+| **Find support** | "What is the daily rate for Japan?" | `recall@k`, MRR (sections 2–3) |
+| **Extract every item** | "List every country and its rate" | Item-level recall and precision over a reference item list |
+| **Cover every point** | "Summarize every change in the 2026 policy" | Key-fact recall ([end-to-end RAG evals](./01-end-to-end-rag-evals.md#310-response-completeness)) |
+
+Do not infer coverage from a single-needle test. On RULER, models reach "nearly perfect accuracy in the vanilla NIAH test". They still drop sharply on harder long-context tasks, such as aggregation ([Hsieh et al., 2024](https://arxiv.org/abs/2404.06654)). On the Oolong benchmark, GPT-5, Claude Sonnet 4, and Gemini 2.5 Pro all scored "less than 50% accuracy" at 128K tokens ([Bertsch et al., 2025](https://arxiv.org/abs/2511.02817)).
+
+**Score every-item tasks with these rules.**
+
+1. **Build a reference item list.** Store one row per item, with its character span ([section 6](#6-chunk-level-vs-document-level-matching-pitfalls)) and its page.
+2. **Match items one-to-one.** A duplicate in the output must not earn credit twice. Report the duplicate count separately.
+3. **State a normalization rule per field.** Fold case and whitespace in names. Convert numbers to a canonical form yourself, and do not rely on tool defaults. Google Document AI never fuzzy-matches numbers: "1 and 1.00 don't match" ([docs](https://docs.cloud.google.com/document-ai/docs/evaluate)).
+4. **Score records, not only fields.** The right rate under the wrong country is a wrong record.
+5. **Seed boundary cases.** Put some items across a chunk boundary or a page break, and some in long tables. Report recall on these cases separately.
+6. **Report recall by position.** Models use information at the start and end of a long context better than information in the middle ([Liu et al., 2023](https://arxiv.org/abs/2307.03172)). Page position is only a proxy for context position. Measure context position directly when the whole document goes into the prompt.
+7. **Score map and reduce separately.** For a map-reduce pipeline, measure per-chunk recall after the map step. Then measure what the reduce step lost, merged, or duplicated.
+
+```python
+from decimal import Decimal
+
+def key(item: dict) -> tuple[str, Decimal]:
+    """Normalize one record: folded country name plus the rate in canonical form."""
+    return item["country"].strip().casefold(), Decimal(str(item["daily_rate"])).normalize()
+
+def item_scores(predicted: list[dict], reference: list[dict], pages: int) -> dict:
+    gold = {key(r): r for r in reference}
+    pred = {key(p) for p in predicted}                # one-to-one: a duplicate counts once
+    hits = gold.keys() & pred                         # country and rate must both match
+    by_position: dict[str, list[bool]] = {}
+    for k, r in gold.items():
+        third = ("start", "middle", "end")[min(2, 3 * (r["page"] - 1) // pages)]
+        by_position.setdefault(third, []).append(k in hits)
+    return {"recall": len(hits) / len(gold),
+            "precision": len(hits) / len(pred) if pred else 0.0,
+            "duplicates": len(predicted) - len(pred),
+            "recall_by_position": {t: sum(v) / len(v) for t, v in by_position.items()}}
+
+
+reference = [{"country": "Germany", "daily_rate": "28.00", "page": 2},
+             {"country": "Japan", "daily_rate": "6200", "page": 18},
+             {"country": "India", "daily_rate": "2500", "page": 21},
+             {"country": "Brazil", "daily_rate": "180", "page": 39}]
+predicted = [{"country": "germany ", "daily_rate": "28"},      # normalizes to the reference record
+             {"country": "Germany", "daily_rate": "28.0"},     # duplicate: no extra credit
+             {"country": "Japan", "daily_rate": "6000"},       # wrong rate: a wrong record
+             {"country": "Brazil", "daily_rate": "180"}]
+s = item_scores(predicted, reference, pages=40)
+assert (s["recall"], s["precision"], s["duplicates"]) == (0.5, 2 / 3, 1)
+assert s["recall_by_position"] == {"start": 1.0, "middle": 0.0, "end": 1.0}   # the middle is missed
+```
+
 ---
 
 ## 8. Embedding model choice: MTEB and BEIR as references
@@ -615,6 +676,7 @@ Plot `recall@k` or `nDCG@k` against p95 latency for each pipeline configuration.
 - [ ] Evaluate every stage on the same queries to measure hybrid lift and reranker lift per slice.
 - [ ] Verify RBAC filters across roles to ensure zero leakage of restricted chunks.
 - [ ] Track p95 retrieval latency alongside retrieval quality metrics.
+- [ ] Score "list every item" tasks with item-level recall and precision, one-to-one matching, and recall by document position.
 - [ ] Re-run your retrieval suite whenever you change chunking, embeddings, index parameters, or corpus documents.
 
 ---
@@ -629,6 +691,7 @@ Plot `recall@k` or `nDCG@k` against p95 latency for each pipeline configuration.
 - **Test differences per query.** Use a paired randomization test or paired bootstrap on per-query scores. Watch judged@k when you add a new retriever.
 - **Evaluate agentic retrieval per hop.** Check the retrieve-or-not decision, per-hop recall, and evidence-chain completeness.
 - **Validate embeddings on your own data.** Use MTEB and BEIR only to shortlist candidates.
+- **Score every-item tasks by items, not ranks.** A perfect top-k list can still miss most of the items a whole-document task needs.
 - **Balance quality against latency.** Pick retrieval configurations from the quality-versus-latency Pareto frontier.
 
 ## Further reading
@@ -636,6 +699,10 @@ Plot `recall@k` or `nDCG@k` against p95 latency for each pipeline configuration.
 - Thakur et al., *BEIR: A Heterogenous Benchmark for Zero-shot Evaluation of Information Retrieval Models*, [arXiv:2104.08663](https://arxiv.org/abs/2104.08663)
 - Muennighoff et al., *MTEB: Massive Text Embedding Benchmark*, [arXiv:2210.07316](https://arxiv.org/abs/2210.07316) · [Leaderboard](https://huggingface.co/spaces/mteb/leaderboard)
 - Liu et al., *Lost in the Middle: How Language Models Use Long Contexts*, [arXiv:2307.03172](https://arxiv.org/abs/2307.03172)
+- Hsieh et al., *RULER: What's the Real Context Size of Your Long-Context Language Models?*, [arXiv:2404.06654](https://arxiv.org/abs/2404.06654)
+- Bertsch et al., *Oolong: Evaluating Long Context Reasoning and Aggregation Capabilities*, [arXiv:2511.02817](https://arxiv.org/abs/2511.02817)
+- Hamel Husain & Shreya Shankar, [How do I choose the right chunk size for my document processing tasks?](https://hamel.dev/blog/posts/evals-faq/how-do-i-choose-the-right-chunk-size-for-my-document-processing-tasks.html) (Evals FAQ)
+- Google Cloud, [Evaluate performance (Document AI)](https://docs.cloud.google.com/document-ai/docs/evaluate) (entity-level precision, recall, and matching rules)
 - Cormack, Clarke & Büttcher, *Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods* (SIGIR 2009)
 - Manning, Raghavan & Schütze, *Introduction to Information Retrieval*, ch. 8 "Evaluation in information retrieval", [online book](https://nlp.stanford.edu/IR-book/)
 - [ranx](https://github.com/AmenRa/ranx) · [pytrec_eval](https://github.com/cvangysel/pytrec_eval) · [trec_eval](https://github.com/usnistgov/trec_eval)

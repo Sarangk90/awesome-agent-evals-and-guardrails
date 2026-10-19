@@ -102,6 +102,10 @@
 | Raina et al. (2024), [Is LLM-as-a-Judge Robust? Investigating Universal Adversarial Attacks on Zero-shot LLM Assessment](https://arxiv.org/abs/2402.14016) | 2402.14016 | Shows that short universal phrases appended to answers inflate judge scores. Absolute scoring is more vulnerable than comparative scoring. |
 | Shi et al. (2024), [Optimization-based Prompt Injection Attack to LLM-as-a-Judge (JudgeDeceiver)](https://arxiv.org/abs/2403.17710) | 2403.17710 | Optimizes injected text so that a judge picks the attacker's response. Known detection defenses are insufficient. |
 | Zhao et al. (2025), [One Token to Fool LLM-as-a-Judge](https://arxiv.org/abs/2507.08794) | 2507.08794 | Shows that tokens such as ":" or "Thought process:" make reference-based judges and reward models give false positives. |
+| Hada et al. (2024), [Are Large Language Model-based Evaluators the Solution to Scaling Up Multilingual Evaluation?](https://arxiv.org/abs/2309.07462) | 2309.07462 | GPT-4 judges lean toward higher scores. Calibrate with native speakers, especially for low-resource and non-Latin-script languages. See [Locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review). |
+| Hada et al. (2024), [METAL: Towards Multilingual Meta-Evaluation](https://arxiv.org/abs/2404.01667) | 2404.01667 | Judge reasoning often differs from native-speaker reasoning, even when verdicts agree. See [Locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review). |
+| Watts et al. (2024), [PARIKSHA: Human-LLM Evaluator Agreement on Multilingual and Multi-Cultural Data](https://arxiv.org/abs/2406.15053) | 2406.15053 | Human–LLM agreement holds for pairwise judgments but drops for direct scores in languages such as Bengali and Odia. See [Locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review). |
+| Shankar et al. (2024), [SPADE: Synthesizing Data Quality Assertions for Large Language Model Pipelines](https://arxiv.org/abs/2401.03038) | 2401.03038 | Selects a small assertion set that covers known failures under a set-level false-failure cap. Used 14% fewer assertions and 21% fewer false failures than simpler baselines. See [Check register](../05-decision-framework/01-eval-selection-decision-tree.md#95-which-checks-deserve-ongoing-effort). |
 
 ## 4. Hallucination, attribution, bias and instruction following
 
@@ -160,6 +164,10 @@
 | Rebedea et al. (2023), [NeMo Guardrails: A Toolkit for Controllable and Safe LLM Applications with Programmable Rails](https://arxiv.org/abs/2310.10501) | 2310.10501 | Introduces programmable rails and the Colang modeling language behind NeMo Guardrails. |
 | Mazeika et al. (2024), [HarmBench: A Standardized Evaluation Framework for Automated Red Teaming and Robust Refusal](https://arxiv.org/abs/2402.04249) | 2402.04249 | Standardizes automated red-teaming evaluation for attacks and refusal defenses. |
 | Chao et al. (2024), [JailbreakBench: An Open Robustness Benchmark for Jailbreaking Large Language Models](https://arxiv.org/abs/2404.01318) · [site](https://jailbreakbench.github.io/) | 2404.01318 | Provides a jailbreak dataset, a standard scoring setup, and a leaderboard of attacks and defenses. |
+| Liu et al. (2024), [On Calibration of LLM-based Guard Models for Reliable Content Moderation](https://arxiv.org/abs/2410.10414) | 2410.10414 | Guard models are overconfident and miscalibrated under jailbreaks (ICLR 2025). See [Decision model evals](../02-offline-evals/10-decision-model-evals.md). |
+| Hong et al. (2026), [Guard Models Are Overconfident Where Base Models Are Uncertain](https://arxiv.org/abs/2609.36477) | 2609.36477 | Several of five guards look calibrated on clean inputs, but attacks degrade calibration by an order of magnitude. See [Decision model evals](../02-offline-evals/10-decision-model-evals.md). |
+| Yong et al. (2023), [Low-Resource Languages Jailbreak GPT-4](https://arxiv.org/abs/2310.02446) | 2310.02446 | Translating harmful prompts into four low-resource languages bypassed GPT-4 safeguards 79% of the time, counting any language (2023 models). See [Locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review). |
+| Aakanksha et al. (2024), [The Multilingual Alignment Prism: Aligning Global and Local Preferences to Reduce Harm](https://arxiv.org/abs/2406.18682) | 2406.18682 | Separates global from local harms in multilingual red-teaming. Safety data often overfits to Western-centric harms. See [Locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review). |
 
 ## 6. Adaptive attacks, MCP and agent security
 
@@ -217,6 +225,9 @@
 | Kapoor et al. (2025), [Holistic Agent Leaderboard: The Missing Infrastructure for AI Agent Evaluation (HAL)](https://arxiv.org/abs/2510.11977) · [site](https://hal.cs.princeton.edu/) | 2510.11977 | Runs a standard harness across models, scaffolds, and benchmarks and reports cost with accuracy. Log review finds shortcut behaviors. |
 | Kwa et al. (2025), [Measuring AI Ability to Complete Long Software Tasks](https://arxiv.org/abs/2503.14499) | 2503.14499 | Defines the 50% task-completion time horizon: the human task length at which an agent succeeds half the time. Reports that this horizon doubled about every seven months since 2019. |
 | Yehudai et al. (2025), [Survey on Evaluation of LLM-based Agents](https://arxiv.org/abs/2503.16416) | 2503.16416 | Surveys agent capabilities, task benchmarks, and evaluation frameworks. |
+| Liu et al. (2021), [Time to Transfer: Predicting and Evaluating Machine-Human Chatting Handoff](https://arxiv.org/abs/2012.07610) | 2012.07610 | Defines machine-human handoff and scores transfers within a tolerance of the ideal turn (AAAI 2021). See [Human handoff](../02-offline-evals/04-agent-tool-and-trajectory-evals.md#72-human-handoff). |
+| Wu et al. (2025), [Incremental Summarization for Customer Support via Progressive Note-Taking and Agent Feedback](https://arxiv.org/abs/2510.06677) | 2510.06677 | Human support agents' case notes scored for completeness, truthfulness, and conciseness. Agent edits act as feedback (EMNLP 2025 Industry). See [Human handoff](../02-offline-evals/04-agent-tool-and-trajectory-evals.md#72-human-handoff). |
+| Kirgis et al. (2026), [Log analysis is necessary for credible evaluation of AI agents](https://arxiv.org/abs/2605.08545) | 2605.08545 | Log analysis showed τ-Bench Airline pass^5 under-elicited by nearly 50%. Outcome scores can hide dangerous actions. See [Validity checklist](../02-offline-evals/08-running-offline-experiments.md#121-is-this-eval-valid). |
 
 ## 9. Evaluation statistics and experiment design
 
@@ -229,6 +240,14 @@
 | Johari et al. (2015), [Always Valid Inference: Bringing Sequential Analysis to A/B Testing](https://arxiv.org/abs/1512.04922) | 1512.04922 | Gives p-values and intervals that stay valid when you monitor an A/B test continuously. |
 | Deng et al. (2018), [Applying the Delta method in metric analytics: A practical guide with novel ideas](https://arxiv.org/abs/1803.06336) | 1803.06336 | Explains the delta method for ratio metrics in online experiments, such as per-session rates. |
 | Manheim & Garrabrant (2018), [Categorizing Variants of Goodhart's Law](https://arxiv.org/abs/1803.04585) | 1803.04585 | Names four ways a metric fails under optimization pressure. Read it before you set eval targets. |
+| Bean et al. (2025), [Measuring what Matters: Construct Validity in Large Language Model Benchmarks](https://arxiv.org/abs/2511.04703) | 2511.04703 | Reviews 445 benchmarks. Only 16.0% use uncertainty estimates or statistical tests. Gives eight recommendations. See [Validity checklist](../02-offline-evals/08-running-offline-experiments.md#121-is-this-eval-valid). |
+| Guo et al. (2017), [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599) | 1706.04599 | Modern networks are poorly calibrated. Temperature scaling is a strong simple fix. See [Decision model evals](../02-offline-evals/10-decision-model-evals.md). |
+| Nixon et al. (2019), [Measuring Calibration in Deep Learning](https://arxiv.org/abs/1904.01685) | 1904.01685 | Lists the flaws of ECE and recommends adaptive bins and class-wise measures. See [Decision model evals](../02-offline-evals/10-decision-model-evals.md). |
+| Kumar, Liang & Ma (2019), [Verified Uncertainty Calibration](https://arxiv.org/abs/1909.10155) | 1909.10155 | Platt and temperature scaling are less calibrated than reported. Plug-in ECE estimates are biased. See [Decision model evals](../02-offline-evals/10-decision-model-evals.md). |
+| Geifman & El-Yaniv (2017), [Selective Classification for Deep Neural Networks](https://arxiv.org/abs/1705.08500) | 1705.08500 | Rejects inputs to meet a target risk level. This is the basis of risk–coverage evaluation. See [Decision model evals](../02-offline-evals/10-decision-model-evals.md). |
+| Ovadia et al. (2019), [Can You Trust Your Model's Uncertainty? Evaluating Predictive Uncertainty Under Dataset Shift](https://arxiv.org/abs/1906.02530) | 1906.02530 | Calibration measured in-domain degrades under dataset shift. See [Decision model evals](../02-offline-evals/10-decision-model-evals.md). |
+| Ong et al. (2024), [RouteLLM: Learning to Route LLMs with Preference Data](https://arxiv.org/abs/2406.18665) | 2406.18665 | Routes each query to a strong or a weak model. Evaluates the cost–quality trade-off of that routing. See [Decision model evals](../02-offline-evals/10-decision-model-evals.md). |
+| Rafe & Das (2026), [Calibrated Decisions at Scale: Converting Police Crash Narratives into Probabilistic Crash Variables with a System One Model (Jev)](https://arxiv.org/abs/2609.24052) | 2609.24052 | Academic audit of a decision model against 2,416 blinded human judgments. One frontier LLM scored higher. Calibration varies by model, and recalibration cut error 3.3× (preprint). See [Decision model evals](../02-offline-evals/10-decision-model-evals.md). |
 
 ### Classic statistics and IR references (non-arXiv)
 
@@ -270,6 +289,9 @@
 | Lopez-Paz & Oquab (2016), [Revisiting Classifier Two-Sample Tests](https://arxiv.org/abs/1610.06545) | 1610.06545 | Uses a classifier to test whether two samples come from the same distribution. Use it to compare synthetic and real queries. |
 | Rabanser et al. (2018), [Failing Loudly: An Empirical Study of Methods for Detecting Dataset Shift](https://arxiv.org/abs/1810.11953) | 1810.11953 | Compares shift detectors. Two-sample tests on reduced representations work best. |
 | Chen et al. (2023), [How is ChatGPT's behavior changing over time?](https://arxiv.org/abs/2307.09009) | 2307.09009 | Shows large behavior changes between versions of the same hosted model. Monitor continuously and pin versions. |
+| Singh et al. (2024), [Global MMLU: Understanding and Addressing Cultural and Linguistic Biases in Multilingual Evaluation](https://arxiv.org/abs/2412.03304) | 2412.03304 | 28% of MMLU needs culturally sensitive knowledge. Translation adds artifacts. Ships sensitive and agnostic subsets. See [Locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review). |
+| Romanou et al. (2024), [INCLUDE: Evaluating Multilingual Language Understanding with Regional Knowledge](https://arxiv.org/abs/2411.19799) | 2411.19799 | Builds tests from local exams instead of translating English resources (ICLR 2025). See [Locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review). |
+| Myung et al. (2024), [BLEnD: A Benchmark for LLMs on Everyday Knowledge in Diverse Cultures and Languages](https://arxiv.org/abs/2406.09948) | 2406.09948 | LLMs do better on cultures that are well represented online. GPT-4's gap reached 57.34% on short answers. See [Locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review). |
 
 ## 11. Benchmarks and leaderboards
 
@@ -294,6 +316,9 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 | **BrowseComp** | [arXiv 2504.12516](https://arxiv.org/abs/2504.12516) | Hard-to-find facts with short answers that are easy to check | Check deep research and browsing agents. |
 | **AgentBench** | [arXiv 2308.03688](https://arxiv.org/abs/2308.03688) | Agent performance across 8 interactive environments | Check broad agent capability across diverse environments. |
 | **HELM** | [crfm.stanford.edu/helm](https://crfm.stanford.edu/helm/) · [arXiv 2211.09110](https://arxiv.org/abs/2211.09110) | Holistic model evaluation across scenarios and metrics | Select base models and design multi-metric scorecards. |
+| **RULER** | [arXiv:2404.06654](https://arxiv.org/abs/2404.06654) | Long-context retrieval, multi-hop tracing, and aggregation beyond single-needle tests | Shows why a perfect needle test does not prove every-item coverage ([§7.2](../02-offline-evals/02-retrieval-metrics.md#72-whole-document-tasks-when-success-means-every-item)) |
+| **Oolong** | [arXiv:2511.02817](https://arxiv.org/abs/2511.02817) | Long-context aggregation. Frontier models score under 50% at 128K | Models for "list every item" tasks ([§7.2](../02-offline-evals/02-retrieval-metrics.md#72-whole-document-tasks-when-success-means-every-item)) |
+| **Artificial Analysis Decision Index** | [artificialanalysis.ai](https://artificialanalysis.ai/articles/artificial-analysis-decision-index) | Decision models on knowledge, reasoning, tool calling, and safety, with calibration plots (October 2026) | Found decision models overconfident ([decision model evals](../02-offline-evals/10-decision-model-evals.md)) |
 
 ## 12. Practitioner blogs and essays
 
@@ -330,6 +355,9 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 | OpenAI | [Cookbook](https://developers.openai.com/cookbook) | Provides runnable code examples for evaluations, RAG pipelines, and runtime guardrails. |
 | OpenAI | [Model Spec](https://model-spec.openai.com/) | Defines the chain of command between platform, developer, and user instructions and how models treat tool output. Useful for writing judge rubrics. |
 | Google | [Site Reliability Engineering](https://sre.google/sre-book/embracing-risk/) and [SRE Workbook: Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/) | Explains error budgets and multi-window burn-rate alerts. Apply them to online eval scores. |
+| TypeSafe | [System One](https://docs.typesafe.ai/concepts/system-one.md) · [Confidence](https://docs.typesafe.ai/confidence.md) | Defines typed decisions with probabilities and documents known weaknesses per model version. See [decision model evals](../02-offline-evals/10-decision-model-evals.md). |
+| OpenAI | [Decisions API](https://developers.openai.com/api/docs/guides/decisions) | Typed predicate, choice, and score answers (public beta). Advises setting thresholds from labeled examples and error costs. |
+| Microsoft | [Copilot Studio: agent effectiveness](https://learn.microsoft.com/en-us/microsoft-copilot-studio/analytics-improve-agent-effectiveness) | Defines resolved, escalated, and abandoned session outcomes and escalation reasons. See [human handoff](../02-offline-evals/04-agent-tool-and-trajectory-evals.md#72-human-handoff). |
 
 ## 14. Standards, frameworks and regulation
 
@@ -352,6 +380,9 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 | **ISO/IEC 42001:2023** | [iso.org](https://www.iso.org/standard/42001) | Defines a certifiable AI management system standard where your evals and guardrails serve as control evidence. |
 | **EU AI Act (Regulation (EU) 2024/1689)** | [eur-lex.europa.eu](https://eur-lex.europa.eu/eli/reg/2024/1689/oj) | Sets risk-based obligations. High-risk systems need risk management, logging, accuracy, robustness, and cybersecurity evidence. Employment uses are high-risk. |
 | **EU General-Purpose AI Code of Practice** | [digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/policies/contents-code-gpai) | Gives a voluntary way for GPAI model providers to show AI Act compliance on transparency, copyright, and safety. Relevant when you assess model vendors. |
+| **MQM (Multidimensional Quality Metrics)** | [themqm.org](https://themqm.org/the-mqm-full-typology/) | Error typology for professional translation quality review. See [locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review). |
+| **Unicode CLDR** and **W3C language tags** | [cldr.unicode.org](https://cldr.unicode.org/) · [W3C](https://www.w3.org/International/articles/language-tags/) | Reference data for locale formats and rules for BCP 47 tags. |
+| **CFPB, Chatbots in consumer finance (2023)** | [consumerfinance.gov](https://www.consumerfinance.gov/data-research/research-reports/chatbots-in-consumer-finance/chatbots-in-consumer-finance/) | US regulator report on chatbot "doom loops" without an offramp to a human. See [human handoff](../02-offline-evals/04-agent-tool-and-trajectory-evals.md#72-human-handoff). |
 
 ### Protocol, identity and telemetry specifications
 
@@ -385,14 +416,15 @@ Public benchmarks help you **shortlist models and embeddings**. They never repla
 | [Agent archetypes](../00-foundations/05-agent-archetypes.md) | Anthropic agent evals, SWE-bench, WebArena, OSWorld, BrowseComp, τ-bench, MAST, METR time horizon |
 | [Datasets](../01-datasets/README.md) | Hamel's field guide, Jason Liu on synthetic questions, label errors, Datasheets, Data Cards, Evol-Instruct, classifier two-sample tests, agreement statistics |
 | [End-to-end RAG evals](../02-offline-evals/01-end-to-end-rag-evals.md) | RAGAS, ARES, RAGChecker, Seven Failure Points, CRAG, FRAMES, RAGTruth |
-| [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md) | BEIR, MTEB, Lost in the Middle, HotpotQA, MuSiQue, nDCG/ERR/RBP classics |
-| [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) | FActScore, SelfCheckGPT, BERTScore, Llama Guard, XSTest, BBQ, BIPIA |
-| [Agent tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) | τ-bench, τ²-bench, Gorilla, BFCL, Codex `pass@k`, Anthropic agent evals |
+| [Retrieval metrics](../02-offline-evals/02-retrieval-metrics.md) | BEIR, MTEB, Lost in the Middle, HotpotQA, MuSiQue, nDCG/ERR/RBP classics, RULER, Oolong |
+| [Generation quality & safety](../02-offline-evals/03-generation-quality-and-safety-evals.md) | FActScore, SelfCheckGPT, BERTScore, Llama Guard, XSTest, BBQ, BIPIA, Hada (multilingual judges), PARIKSHA, Global-MMLU, INCLUDE, BLEnD, Multilingual Alignment Prism, MQM |
+| [Agent tool & trajectory evals](../02-offline-evals/04-agent-tool-and-trajectory-evals.md) | τ-bench, τ²-bench, Gorilla, BFCL, Codex `pass@k`, Anthropic agent evals, Time to Transfer, incremental handoff notes, CFPB doom loops |
 | [Agent eval environments & graders](../02-offline-evals/09-agent-eval-environments-and-graders.md) | Anthropic agent evals, SWE-bench, Terminal-Bench, WebArena, OSWorld, τ-bench, AgentDojo, METR reward hacking, METR time horizon, Weng on reward hacking |
 | [Text-to-SQL evals](../02-offline-evals/05-text-to-sql-evals.md) | Spider, test-suite accuracy, BIRD, Spider 2.0, AmbiQT, AMBROSIA, BIRD-Interact |
 | [Instruction & citation adherence](../02-offline-evals/06-instruction-and-citation-adherence.md) | IFEval, IFBench, InFoBench, FollowBench, Multi-IF, ALCE, AIS, AttributionBench, LongCite, L-CiteEval |
 | [LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md) | MT-Bench judging, G-Eval, Who Validates the Validators, PoLL, Prometheus, CALM, JudgeDeceiver, PPI, Hamel's judge guide |
-| [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md) | Miller error bars, Codex `pass@k`, classic statistics |
+| [Running offline experiments](../02-offline-evals/08-running-offline-experiments.md) | Miller error bars, Codex `pass@k`, classic statistics, Agentic Benchmark Checklist, construct validity (Bean), HAL, log analysis (Kirgis) |
+| [Decision model evals](../02-offline-evals/10-decision-model-evals.md) *(experimental)* | Decision Index, guard-model calibration, Guo/Nixon/Kumar calibration, selective classification, RouteLLM, Rafe & Das |
 | [Online evals & observability](../03-online-evals-and-observability/README.md) | PPI, always-valid inference, delta method, non-determinism, Failing Loudly, ChatGPT drift, SRE burn-rate alerts, OTel GenAI |
 | [Guardrails](../04-guardrails/README.md) | Greshake, Spotlighting, StruQ, SecAlign, PoisonedRAG, LlamaFirewall, Attacker Moves Second, Design Patterns, CaMeL, lethal trifecta, OWASP |
 | [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md) | Agents Rule of Two, ASB, MCP spec and security best practices, OWASP MCP cheat sheet, RFC 8707, A2A spec |

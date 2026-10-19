@@ -72,6 +72,7 @@ flowchart LR
 | [07-llm-as-a-judge.md](./07-llm-as-a-judge.md) | Designing LLM judges and validating them against human labels, handling judge biases, writing rubrics, measuring human agreement | You use or plan to use an LLM to grade outputs |
 | [08-running-offline-experiments.md](./08-running-offline-experiments.md) | Experiment design, baselines, sample sizes, variance, CI integration, regression gates, reporting | You are ready to compare variants and gate releases on eval results |
 | [09-agent-eval-environments-and-graders.md](./09-agent-eval-environments-and-graders.md) | Resettable eval environments, outcome graders per agent archetype, task validity checks (reference solution passes, do-nothing agent fails), grader hacking, long-horizon milestones, and a minimal harness | You evaluate an agent that changes state, or you build your own agent benchmark |
+| [10-decision-model-evals.md](./10-decision-model-evals.md) | **Experimental.** Evaluating decision models that return typed answers with probabilities: calibration, thresholds from costs, escalation paths | You use a decision model, guard classifier, or router and act on its probabilities |
 
 ## Suggested reading order
 
@@ -82,6 +83,7 @@ flowchart LR
 5. **Read [03 · Generation quality & safety](./03-generation-quality-and-safety-evals.md)** and **[06 · Instruction & citation adherence](./06-instruction-and-citation-adherence.md)** to enforce style, policy, and source attribution.
 6. **Read [08 · Running offline experiments](./08-running-offline-experiments.md)** to turn these metrics into a repeatable release process.
 7. **Read [09 · Agent eval environments & graders](./09-agent-eval-environments-and-graders.md)** if your agent changes state in other systems and you need a resettable environment and outcome graders.
+8. **Read [10 · Decision model evals](./10-decision-model-evals.md)** *(experimental)* if you use a model that returns typed answers with probabilities.
 
 **Prerequisites:** Prepare a dataset that matches the shape of your target evaluation. See [Datasets](../01-datasets/README.md) and [dataset strategy](../01-datasets/01-dataset-strategy.md).
 

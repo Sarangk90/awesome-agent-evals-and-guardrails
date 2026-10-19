@@ -55,6 +55,7 @@ Costs are relative per evaluated item. When a Judge metric runs online ("On"), y
 | Index freshness / stale-chunk rate | ops | share of retrieved chunks older than their source document's latest version | No | Code | On | $0 | [Monitoring & drift §5.2](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md#52-corpus--knowledge-drift-and-schema-drift) |
 | Retrieval latency / empty-result rate | ops | speed, and queries returning nothing above threshold | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
 | Retrieval score drift | ops | shift in similarity-score or query-embedding distributions | No | Stat | On | $ | [Monitoring & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
+| Item-level recall / precision (every-item tasks) | retrieval | share of reference items found, and share of output items that are correct, with one-to-one matching and duplicates counted once | Yes (reference item list) | Code | Off | $0 | [Retrieval metrics §7.2](../02-offline-evals/02-retrieval-metrics.md#72-whole-document-tasks-when-success-means-every-item) |
 
 ### 2.2 Generation and end-to-end RAG
 
@@ -118,6 +119,7 @@ Costs are relative per evaluated item. When a Judge metric runs online ("On"), y
 | Milestone completion | agent | milestones reached / milestones defined, for long tasks. Diagnostic only. Gate on full task success | Yes (milestones) | Code | Off | $0 | [Environments & graders §9](../02-offline-evals/09-agent-eval-environments-and-graders.md#9-long-horizon-tasks) |
 | Task validity (oracle pass, null-agent fail) | agent | share of tasks where the reference solution passes and a do-nothing agent fails. Target 1.0 | Yes (reference solution) | Code | Off | $ | [Environments & graders §8](../02-offline-evals/09-agent-eval-environments-and-graders.md#8-validate-every-task-before-you-trust-it) |
 | Grader-tamper rate ↓ | agent | trials that change tests, graders, or scoring files / trials. Target 0. Fail those trials | No | Code (file diff) | Off | $0 | [Environments & graders §7](../02-offline-evals/09-agent-eval-environments-and-graders.md#7-grader-hacking-and-how-to-stop-it) |
+| Human handoff decision and outcome | agent | missed and unnecessary handoffs (should vs did), packet completeness, and final resolution after the handoff. Keep `pending` until evidence arrives | Yes (`should_hand_off` labels) | Code / Judge | Off/On | $–$$ | [Agent & trajectory §7.2](../02-offline-evals/04-agent-tool-and-trajectory-evals.md#72-human-handoff) |
 | Tool error rate ↓ | ops | tool calls returning errors or timeouts | No | Code | On | $0 | [Monitoring](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md) |
 | Cost & latency per task | ops | tokens, dollars, and wall-clock time per run; cost per successful task = total cost / successful tasks | No | Code | Off/On | $0 | [Agent & trajectory §5.1](../02-offline-evals/04-agent-tool-and-trajectory-evals.md#51-step-efficiency) |
 
@@ -206,6 +208,7 @@ Costs are relative per evaluated item. When a Judge metric runs online ("On"), y
 | A/A noise band | stats | spread of a metric when you re-run the same system 3–5×; any fixed threshold must exceed it | — | Stat | Off | $$ | [Running experiments §10.2](../02-offline-evals/08-running-offline-experiments.md#102-designing-gates) |
 | Judge validation bar | stats | ≥100 labels with 30–50 FAILs; TPR ≥0.85, TNR ≥0.85, κ ≥0.60 on a held-out split; ≥0.90 on high-risk slices. Human-vs-human gold agreement is a separate bar (κ/α ≥0.80) | Yes | Stat | Off | $$$ | [LLM-as-a-judge §7.4](../02-offline-evals/07-llm-as-a-judge.md#74-how-many-labels) |
 | Judge-corrected pass rate | stats | Rogan–Gladen: (observed + TNR − 1) / (TPR + TNR − 1); or prediction-powered inference (arXiv:2301.09633) | Yes (validation labels) | Stat | Off/On | $0 | [LLM-as-a-judge §8](../02-offline-evals/07-llm-as-a-judge.md#8-correcting-pass-rate-estimates-for-judge-error) |
+| Calibration of stated probabilities | stats | Brier score or log loss, plus a reliability diagram. Use ECE only with equal-count bins and a CI | Yes (outcome labels) | Stat | Off/On | $0 | [Decision model evals §3](../02-offline-evals/10-decision-model-evals.md#3-what-to-measure) |
 | Online two-proportion / sequential test | stats | canary or A/B arm vs concurrent control; use a sequential test (such as mSPRT) if you peek; check sample-ratio mismatch | — | Stat | On | $0 | [Online evals §5.3](../03-online-evals-and-observability/01-online-evals.md#53-ab-tests-with-online-metrics) |
 
 ### 2.10 Online, feedback, and operational signals
@@ -253,7 +256,7 @@ Start with the **bold** metric. Add the secondary metrics only when you need fin
 | …if it follows my system-prompt rules | **Instruction adherence** (one binary check per rule) | Instruction persistence | Rule list |
 | …if output is well-formed | **Schema/format validity** | Length bounds | Schema |
 | …if my LLM judge can be trusted | **Judge–human agreement (TPR/TNR)** | Cohen's κ | ≥100 human labels with 30–50 FAILs ([bar](#29-statistics-for-release-gates)) |
-| …if it works in every language I support | **Language match** + per-language slices of the core metrics | Native-speaker spot checks | Multilingual golden set |
+| …if it works in every language I support | **Language match** + per-language slices of the core metrics | [Native-speaker locale review](../02-offline-evals/03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review) and per-language judge validation | Native seed cases per locale |
 
 ### 3.3 Citations
 
@@ -275,6 +278,7 @@ Start with the **bold** metric. Add the secondary metrics only when you need fin
 | …if it does anything it shouldn't | **Unsafe action execution rate** (target 0) | Attempt rate, indirect-injection ASR with benign success | Policy + adversarial set |
 | …if it can be steered across sessions | **Memory poisoning resistance** | Taint-tracking coverage | Two-session scenarios |
 | …if it can run up the bill | **Budget breach rate + cost per successful task** | Loop rate | Budgets, traces |
+| …if handoffs to humans work | **Missed and unnecessary handoffs** | Packet completeness, and resolution after the handoff | `should_hand_off` labels, ticket outcomes |
 
 ### 3.5 Text-to-SQL
 

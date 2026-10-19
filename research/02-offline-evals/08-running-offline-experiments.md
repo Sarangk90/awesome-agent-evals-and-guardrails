@@ -17,6 +17,7 @@
     - Multiple-comparison control for slice tables
     - Slice analysis, cost/latency budgets, and RAG ablations
     - Preventing eval-set overfitting
+    - A validity checklist that links task, grader, data, and statistical checks
     - Staged CI/CD gates with GitHub Actions and `pytest`
 - **Prerequisites:** [Dataset strategy](../01-datasets/01-dataset-strategy.md), [End-to-end RAG evals](./01-end-to-end-rag-evals.md), [LLM-as-a-judge](./07-llm-as-a-judge.md)
 - **Related:** [Retrieval metrics](./02-retrieval-metrics.md), [Text-to-SQL evals](./05-text-to-sql-evals.md), [Agent tool & trajectory evals](./04-agent-tool-and-trajectory-evals.md), [Implementation playbook](../05-decision-framework/04-implementation-playbook.md), [Monitoring, alerting & drift](../03-online-evals-and-observability/04-monitoring-alerting-and-drift.md)
@@ -675,6 +676,52 @@ Include five essential views in your evaluation dashboard:
 - [ ] **Iterate on the `dev` split and validate once on the held-out `test` split** before release.
 - [ ] **Record the shipping decision, update the baseline artifact, and feed new production failures into the next dataset version.**
 
+### 12.1 Is this eval valid?
+
+A tight confidence interval on a broken eval is still a broken eval. Published benchmarks show how often this happens.
+
+In τ-bench, an agent that returns empty responses scored 38% and beat a GPT-4o agent. Impossible tasks counted an unchanged database as success. Weak unit tests let agents pass about 5% of SWE-bench Verified tasks without fixing the issue. Incomplete fuzzing made KernelBench overstate correctness by 31 points ([Zhu et al., 2025](https://arxiv.org/abs/2507.02825)).
+
+Errors also run the other way. A 2026 log analysis found that τ-Bench Airline `pass^5` performance "was under-elicited by nearly 50%" ([Kirgis et al., 2026](https://arxiv.org/abs/2605.08545)). Statistics alone do not catch either problem. In a review of 445 LLM benchmarks, only 16.0% used uncertainty estimates or statistical tests ([Bean et al., 2025](https://arxiv.org/abs/2511.04703)).
+
+Run this checklist before you trust a new eval, and again when you change its tasks, data, or graders. Each item links to the page that covers it.
+
+**Construct and task validity**
+
+- [ ] **Define the property in one sentence**, and name what the eval does not measure ([Bean et al.](https://arxiv.org/abs/2511.04703), recommendation 1).
+- [ ] **Remove confounds.** A task must fail only when the target capability is missing, not because of formatting or missing knowledge.
+- [ ] **Prove that every task is solvable** with a reference solution or oracle agent ([task validation](./09-agent-eval-environments-and-graders.md#8-validate-every-task-before-you-trust-it)).
+- [ ] **Run a null agent.** An empty or "list everything" answer must score near zero.
+- [ ] **Investigate 0% tasks.** Anthropic notes that, with frontier models, 0% across many trials "is most often a signal of a broken task, not an incapable agent" ([Demystifying evals](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)).
+- [ ] **Pin the environment**, and check it for drift and leaks ([trustworthy environments](./09-agent-eval-environments-and-graders.md#5-requirements-for-a-trustworthy-environment)).
+
+**Grader and outcome validity**
+
+- [ ] **Check that a pass really means success.** Look for loose substring matches, weak tests, and empty answers that pass ([grader hacking](./09-agent-eval-environments-and-graders.md#7-grader-hacking-and-how-to-stop-it)).
+- [ ] **Validate every LLM judge** against human labels on a held-out split ([judge validation](./07-llm-as-a-judge.md#11-judge-validation-workflow-checklist)), and per language if needed ([§3.7](./03-generation-quality-and-safety-evals.md#37-language-locale-and-cultural-review)).
+- [ ] **Treat a missing score as an ERROR**, never as a pass ([aggregation rules](./01-end-to-end-rag-evals.md#52-aggregation-rules)).
+- [ ] **Grade the outcome, not one fixed path** ([trajectory match modes](./04-agent-tool-and-trajectory-evals.md#31-match-modes)).
+- [ ] **Read transcripts every release.** Log inspection in HAL found agents "searching for the benchmark on HuggingFace instead of solving a task" ([Kapoor et al., 2025](https://arxiv.org/abs/2510.11977)).
+
+**Data validity**
+
+- [ ] **Sample cases that match real traffic**, and record how you sampled them ([coverage design](../01-datasets/01-dataset-strategy.md#4-coverage-design), [sampling](../01-datasets/04-production-data-flywheel.md#2-sampling-strategies)).
+- [ ] **Document reused datasets** and their known label errors.
+- [ ] **Check for contamination and overfitting** ([flywheel §9](../01-datasets/04-production-data-flywheel.md#9-contamination-and-overfitting-to-the-eval-set), [§9 above](#9-avoiding-overfitting-to-the-eval-set)).
+
+**Statistical validity**
+
+- [ ] **Report every score with its `n` and a confidence interval** ([§5](#5-statistical-significance)).
+- [ ] **Cluster related items** such as paraphrases, sessions, or repeated trials ([dataset sizing](../01-datasets/01-dataset-strategy.md#5-sizing-and-statistics)).
+- [ ] **Compare systems with paired, per-item tests**, and check power before you claim a difference ([§5.1](#51-how-big-must-the-eval-set-be)).
+- [ ] **Run repeated trials** for stochastic agents, and report `pass^k` ([pass^k](./04-agent-tool-and-trajectory-evals.md#43-reliability-across-trials-passk)).
+
+**Reporting**
+
+- [ ] **Report baselines:** a null agent, the previous version, and a human or reference score where possible.
+- [ ] **Disclose known flaws** and estimate how much they move the score.
+- [ ] **Store the harness version, logs, and seeds** so others can reproduce the run.
+
 ---
 
 ## Key takeaways
@@ -686,11 +733,15 @@ Include five essential views in your evaluation dashboard:
 - **Use Wilson intervals and the rule of three for small or perfect slices:** 0 failures in 40 cases only bounds the failure rate below about 7.5%.
 - **Break results down by slice** and enforce zero-tolerance gates on critical security and safety slices.
 - **Ablate one knob at a time**, filter sweeps with fast component metrics first, and choose configurations on the quality–cost–latency Pareto frontier.
+- **Check validity before precision.** A tight interval on a broken task or a weak grader still misleads. Run the §12.1 checklist on every new eval.
 - **Protect a held-out test split** and continuously refresh datasets from production traces to prevent overfitting.
 - **Automate staged CI/CD gates:** Run unit checks on every commit, smoke suites on pull requests, full suites nightly, and sampled judges online. Gate on new critical failures plus a paired test against a fresh per-item baseline from the same dataset and judge version.
 
 ## Further reading
 
+- Zhu et al., 2025, [Establishing Best Practices for Building Rigorous Agentic Benchmarks](https://arxiv.org/abs/2507.02825) (Agentic Benchmark Checklist)
+- Bean et al., 2025, [Measuring what Matters: Construct Validity in Large Language Model Benchmarks](https://arxiv.org/abs/2511.04703) (NeurIPS 2025 Datasets and Benchmarks)
+- Kapoor et al., 2025, [Holistic Agent Leaderboard](https://arxiv.org/abs/2510.11977) · Kirgis et al., 2026, [Log analysis is necessary for credible evaluation of AI agents](https://arxiv.org/abs/2605.08545)
 - Evan Miller, 2024, [Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations](https://arxiv.org/abs/2411.00640)
 - Chen et al., 2021, [Evaluating Large Language Models Trained on Code (pass@k)](https://arxiv.org/abs/2107.03374)
 - Yao et al., 2024, [τ-bench: A Benchmark for Tool-Agent-User Interaction in Real-World Domains (pass^k)](https://arxiv.org/abs/2406.12045)

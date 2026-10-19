@@ -12,6 +12,7 @@
     - When to use code checks, LLM judges, or humans
     - How to balance end-to-end and component metrics
     - Minimum viable evaluation stacks for five archetypes
+    - Which checks deserve ongoing effort, and when to retire them
 - **Prerequisites:** [The evals & guardrails map](../00-foundations/02-the-evals-and-guardrails-map.md), [Agentic RAG failure modes](../00-foundations/03-agentic-rag-failure-modes.md)
 - **Related:** [Guardrail selection](./02-guardrail-selection-decision-tree.md), [Metric cheatsheet](./03-metric-cheatsheet.md), [Implementation playbook](./04-implementation-playbook.md), [Dataset strategy](../01-datasets/01-dataset-strategy.md)
 
@@ -530,6 +531,97 @@ for n in (50, 100, 200, 400):
 
 Run non-blocking online evaluations **asynchronously** so they add zero user-facing latency. Any check that blocks the response is a runtime *guardrail*, not an evaluation (see [guardrail selection](./02-guardrail-selection-decision-tree.md) for latency budgets).
 
+### 9.5 Which checks deserve ongoing effort
+
+After a year, the Acme team runs 41 checks every night. Three LLM judges have passed every item for six months. One judge fails good answers so often that engineers ignore it. Nobody owns nine of the checks.
+
+The suite costs money and attention, and it catches less each month.
+
+Every check costs something to build, run, and maintain. Add a check only when it earns that cost, and review the portfolio on a schedule.
+
+Husain and Shankar give the core rule: "Focus automated evaluators on failures that persist after fixing your prompts" ([Evals FAQ](https://hamel.dev/blog/posts/evals-faq/should-i-build-automated-evaluators-for-every-failure-mode-i-find.html)). They also say: "There are no bright-line rules" ([Evals FAQ](https://hamel.dev/blog/posts/evals-faq/how-often-should-i-run-my-evals.html)). Use the steps below as a decision aid, not a formula.
+
+**Decide what to do with a new failure mode.**
+
+1. **Reproduce it.** Trigger the failure at least once, for example by red-teaming. Do not build checks for errors you only imagine.
+2. **Fix the application first.** Many failures are unstated requirements or plain bugs. A prompt fix or code fix needs no new check.
+3. **Write a code check** if the failure persists and code can decide it. Push each check to the cheapest level that catches it, as with the [test pyramid](https://martinfowler.com/articles/practical-test-pyramid.html).
+4. **Build an LLM judge** only if the failure is subjective, recurs, and you will iterate on it. A judge needs labeled data, validation, and ongoing maintenance ([LLM-as-a-judge](../02-offline-evals/07-llm-as-a-judge.md)).
+5. **Keep it in human review** if it is rare or high-stakes and hard to define. Sample it in your regular error analysis.
+
+**Keep a check register.** Record these fields for every active check.
+
+| Field | Example | Why it matters |
+|---|---|---|
+| **Failure mode and trigger trace** | Wrong-region policy, trace `tr_9f2c` | Proves the failure is real |
+| **Severity and owner** | Critical, owned by the HR eval lead | Every active check needs a person and an action on failure |
+| **Type and suite** | Code, judge, or human, in the capability or regression suite | Sets cost and expected pass rate |
+| **Cadence** | Every PR, nightly, or pre-release | Controls run cost |
+| **Pass-rate trend** | 100% for 6 months | Shows saturation |
+| **False-failure rate vs human labels** | 12% on 50 re-labeled items | Shows noise that erodes trust |
+| **Overlap** | Subsumed by `citation_ids_valid` | Finds redundant checks |
+| **Versions** | Rubric v3, prompt v12, last human re-grade date | Criteria drift makes old checks stale |
+| **Cost assumptions** | Judge calls per run, reviewer minutes per item | Exposes cost without inventing prices |
+
+Shankar et al.'s SPADE method makes the overlap and noise fields concrete. It picks the smallest set of assertions that still covers known failures, with a cap on the false-failure rate of the whole set. Across nine pipelines, it used 14% fewer assertions and 21% fewer false failures than simpler baselines ([arXiv:2401.03038](https://arxiv.org/abs/2401.03038)).
+
+**Choose a lifecycle action at each review.**
+
+| Action | When | Source |
+|---|---|---|
+| **Graduate** | A capability check reaches a high pass rate: move it to the regression suite | [Anthropic](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) |
+| **Harden** | A check is saturated, but the capability still matters: add harder items first | [Evals FAQ](https://hamel.dev/blog/posts/evals-faq/how-often-should-i-run-my-evals.html) |
+| **Run less often** | Saturated, expensive, and not critical: move from every PR to nightly or pre-release | Evals FAQ |
+| **Quarantine** | False failures exceed your judge bar: stop gating on it and fix it. For a critical check, keep gating and add human review while you fix it | [Google Testing Blog](https://testing.googleblog.com/2016/05/flaky-tests-at-google-and-how-we.html) |
+| **Replace** | A code check agrees with human labels as well as the judge does | Evals FAQ |
+| **Retire** | Another check covers the same failures, or the feature is gone | [Test pyramid](https://martinfowler.com/articles/practical-test-pyramid.html) |
+
+Quarantine noisy checks quickly. Google's testing team warns: "It is human nature to ignore alarms when there is a history of false signals". Retire expensive checks more readily than cheap ones. The FAQ advises phasing out LLM judges faster than cheaper checks ([Evals FAQ](https://hamel.dev/blog/posts/evals-faq/what-should-i-do-when-my-gold-eval-dataset-becomes-stale.html)).
+
+**Never retire a critical check on pass rate alone.** A check that guards a severe failure, such as a confidential-data leak, can pass for months and still earn its place. Keep it in the every-PR critical gate ([CI stages](../02-offline-evals/08-running-offline-experiments.md#101-stages)). Lower the cadence only for checks that are expensive and not critical.
+
+The register review below applies these rules. Its thresholds are examples. Set your own.
+
+```python
+def review(check: dict) -> str:
+    """Suggest one lifecycle action for a check-register row."""
+    if not check["owner"]:
+        return "assign_owner"                       # an unowned check cannot act on failure
+    if check["false_failure_rate"] > 0.15:              # 1 − TPR above the 0.85 judge bar
+        if check["severity"] == "critical":
+            return "fix_now_keep_gating"            # never drop a critical gate; add human review meanwhile
+        return "quarantine"                         # noisy checks teach people to ignore alarms
+    if check["subsumed_by"]:
+        return "retire"                             # another check covers the same failures
+    if check["pass_rate_90d"] >= 0.99:
+        if check["severity"] == "critical":
+            return "keep_in_pr_gate"                # saturated, but the failure is too costly to miss
+        return "harden_or_run_less_often"
+    return "keep"
+
+
+register = [
+    {"id": "no_confidential_leak", "owner": "security", "severity": "critical",
+     "false_failure_rate": 0.0, "subsumed_by": None, "pass_rate_90d": 1.0},
+    {"id": "tone_judge", "owner": "product", "severity": "minor",
+     "false_failure_rate": 0.02, "subsumed_by": None, "pass_rate_90d": 1.0},
+    {"id": "conciseness_judge", "owner": "product", "severity": "minor",
+     "false_failure_rate": 0.18, "subsumed_by": None, "pass_rate_90d": 0.81},
+    {"id": "cites_any_doc", "owner": "rag", "severity": "major",
+     "false_failure_rate": 0.0, "subsumed_by": "citation_ids_valid", "pass_rate_90d": 0.97},
+    {"id": "sql_row_cap", "owner": "", "severity": "major",
+     "false_failure_rate": 0.0, "subsumed_by": None, "pass_rate_90d": 0.95},
+]
+actions = {c["id"]: review(c) for c in register}
+assert actions == {"no_confidential_leak": "keep_in_pr_gate", "tone_judge": "harden_or_run_less_often",
+                   "conciseness_judge": "quarantine", "cites_any_doc": "retire",
+                   "sql_row_cap": "assign_owner"}
+```
+
+**Review the register when something changes.** Re-run error analysis and the register review after a change. Triggers include a new feature, a prompt change, a model switch, an incident, or a complaint spike ([Evals FAQ](https://hamel.dev/blog/posts/evals-faq/how-often-should-i-re-run-error-analysis-on-my-production-system.html)). Read transcripts before you trust or retire any check.
+
+Expect score breaks when the dataset changes. Track long-term progress with product metrics alongside your evals ([Evals FAQ](https://hamel.dev/blog/posts/evals-faq/what-should-i-do-when-my-gold-eval-dataset-becomes-stale.html)).
+
 ---
 
 ## 10. Stage-by-stage summary
@@ -580,6 +672,7 @@ See the [implementation playbook](./04-implementation-playbook.md) for detailed 
 - Do not rely on faithfulness alone. Collect reference answers for your highest-risk user intents.
 - Start with the must-have evaluations for your archetype and expand based on error analysis.
 - Gate with paired tests and "no new critical failures", and size zero-tolerance sets with the rule of three.
+- Add a check only for a real failure that persists after a fix. Give it an owner, and review the register for saturated, noisy, and redundant checks.
 - Match your dataset schema to your metrics: collect chunk IDs for `recall@k` and freeze a database snapshot for SQL execution accuracy.
 
 ## Further reading
@@ -588,6 +681,9 @@ See the [implementation playbook](./04-implementation-playbook.md) for detailed 
 - Eugene Yan, [Task-Specific LLM Evals that Do & Don't Work](https://eugeneyan.com/writing/evals/)
 - Anthropic, [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), [Define success criteria and build evaluations](https://platform.claude.com/docs/en/test-and-evaluate/develop-tests)
 - Shankar et al., [Who Validates the Validators? (arXiv:2404.12272)](https://arxiv.org/abs/2404.12272)
+- Shankar et al., [SPADE: Synthesizing Data Quality Assertions for Large Language Model Pipelines (arXiv:2401.03038)](https://arxiv.org/abs/2401.03038)
+- Hamel Husain & Shreya Shankar, Evals FAQ on evaluator upkeep: [building evaluators](https://hamel.dev/blog/posts/evals-faq/should-i-build-automated-evaluators-for-every-failure-mode-i-find.html) · [run frequency](https://hamel.dev/blog/posts/evals-faq/how-often-should-i-run-my-evals.html) · [stale datasets](https://hamel.dev/blog/posts/evals-faq/what-should-i-do-when-my-gold-eval-dataset-becomes-stale.html)
+- Ham Vocke, [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html) · Google Testing Blog, [Flaky Tests at Google and How We Mitigate Them](https://testing.googleblog.com/2016/05/flaky-tests-at-google-and-how-we.html)
 - Es et al., [RAGAS: Automated Evaluation of Retrieval Augmented Generation (arXiv:2309.15217)](https://arxiv.org/abs/2309.15217)
 - **In this repo:**
     - [Metric cheatsheet](./03-metric-cheatsheet.md)

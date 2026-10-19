@@ -11,6 +11,7 @@
 - **You will learn:**
     - Quality and safety evaluation methods
     - Counterfactual bias testing
+    - Language, locale, and cultural review with native reviewers
     - Reference-free hallucination checks
     - Indirect prompt injection evals for retrieved content and tool outputs
     - Why BLEU/ROUGE/BERTScore fail on Q&A
@@ -82,7 +83,7 @@ Control judge variance and cost:
 - **What it measures:** Grammatical correctness and natural phrasing.
 - **How to compute it:** Measure grammar error rates per 100 words or run an LLM judge. For multilingual applications, run a fast language-identification model to verify **language match** (`language(a) == language(q)`).
 - **Pitfalls and gotchas:** Fluency is saturated for frontier models in high-resource languages, but degrades in low-resource languages and code-switched prompts.
-- **When to use it:** Run fluency and language-match checks on multilingual deployments. Skip dedicated fluency judges for English-only frontier models.
+- **When to use it:** Run fluency and language-match checks on multilingual deployments. Skip dedicated fluency judges for English-only frontier models. Language match is necessary but not sufficient: see [§3.7](#37-language-locale-and-cultural-review) for locale and cultural review.
 - **Implemented in:** DeepEval (`GEval`), promptfoo (`llm-rubric`), custom language-ID checks.
 
 ### 3.3 Conciseness / verbosity
@@ -127,6 +128,98 @@ Control judge variance and cost:
 ### 3.6 Completeness
 
 We cover reference-based completeness in [01 · Response completeness](./01-end-to-end-rag-evals.md#310-response-completeness) using SME key-point recall. When you lack reference answers, prompt an LLM judge to list all sub-questions in `q` and check whether `a` answers each one (`answered_subquestions / total_subquestions`). This reference-free check works well on multi-part prompts like "What is the contractor travel policy and how do I book a flight?"
+
+### 3.7 Language, locale, and cultural review
+
+An employee in Munich asks Acme Assistant, in German, about the home-office allowance. The answer is fluent German and passes the language-match check. It also quotes the US policy, addresses the employee as "du", and writes the amount as "$1,200.00".
+
+A German reviewer who knows the German policy catches all three errors. Your English checks catch none of them.
+
+Language match tells you that the answer uses the right language. It does not tell you that the answer is right for the user's locale. Husain and Shankar warn that translation "often loses meaning", so do not rely on machine translation to review outputs ([Evals FAQ](https://hamel.dev/blog/posts/evals-faq/how-do-i-evaluate-outputs-in-a-language-i-dont-speak.html)).
+
+**Store locale metadata on every case.** Keep language, locale, and jurisdiction as separate fields. An English-speaking employee in Germany still falls under the German policy.
+
+```json
+{"id": "hr-de-017",
+ "language": "de", "locale": "de-DE", "jurisdiction": "DE",
+ "formality": "formal (Sie)", "origin": "native",
+ "reviewer": "rev-de-02", "reviewer_qualification": "native speaker, HR policy owner for DE"}
+```
+
+Use short [BCP 47](https://www.w3.org/International/articles/language-tags/) tags. Add a region subtag (`de-DE`, `de-CH`) only when it changes the expected answer. Record `origin` as `native` or `translated`, because the two give different results (see below).
+
+**Check more than language.** Adapt the error categories of [MQM](https://themqm.org/the-mqm-full-typology/) (Multidimensional Quality Metrics), the framework that WMT uses for professional human evaluation. Add jurisdiction, because a policy assistant can be fluent and still apply the wrong country's rules.
+
+| Category | Acme failure example | Default severity |
+|---|---|---|
+| **Jurisdiction** | Quotes the US allowance to a German employee | Major |
+| **Accuracy** | Meaning differs from the source policy text | Major |
+| **Terminology** | Uses the US term "PTO" for "Urlaub" | Minor |
+| **Register / formality** | Uses "du" where Acme writes "Sie" | Minor |
+| **Locale conventions** | Writes `$1,200.00` or `10/03/2026` for `de-DE` | Minor (Major for money or deadlines) |
+| **Audience appropriateness** | Uses an idiom or example that does not fit the culture | Minor |
+| **Names** | Requires a family name, or reverses name order | Minor |
+
+Check date, number, and currency formats against [Unicode CLDR](https://cldr.unicode.org/), not against reviewer memory. For names, follow the [W3C guidance on personal names](https://www.w3.org/International/questions/qa-personal-names).
+
+If you need one number per answer, weight Major errors above Minor ones. Google's WMT MQM data uses Major = 5 and Minor = 1 ([wmt-mqm-human-evaluation](https://github.com/google/wmt-mqm-human-evaluation)).
+
+**Choose the reviewers.**
+
+1. **Name one reviewer per locale** who understands both the language and the culture. Husain and Shankar say this reviewer "should set the standard for error analysis".
+2. **Pair that reviewer with the policy owner** for the jurisdiction. Correct German does not prove that the assistant applied the German policy.
+3. **Prefer professional or native-speaker raters** for language quality. Professional translators with full document context ranked translation systems "substantially different" from crowd workers ([Freitag et al., 2021](https://aclanthology.org/2021.tacl-1.87/)).
+4. **State the limit** when you cannot find such a reviewer. The FAQ warns that your review is then limited. Report that locale as unreviewed rather than as passing.
+
+**Build per-locale datasets.**
+
+- [ ] **Write native seed cases per locale** from real employee questions. Translated test sets carry artifacts and miss local knowledge. In MMLU, 28% of questions need culturally sensitive knowledge ([Global-MMLU](https://arxiv.org/abs/2412.03304)). On BLEnD, GPT-4's short-answer accuracy differed by up to 57.34% between cultures that are well or poorly represented online ([BLEnD](https://arxiv.org/abs/2406.09948)).
+- [ ] **Review every translated case with a native speaker.** Tag it `culturally_sensitive` or `culturally_agnostic`, and report the two groups separately. Global-MMLU shows that model rankings change between them.
+- [ ] **Add local-harm safety cases,** not only translations of English attacks. Safety training "often overfit[s] to harms common in Western-centric datasets" ([Aakanksha et al., 2024](https://arxiv.org/abs/2406.18682)).
+- [ ] **Add attacks in lower-resource languages and code-switched prompts.** In 2023, harmful prompts translated into low-resource languages bypassed GPT-4 safeguards 79% of the time. That rate counts a success if any of four languages worked ([Yong et al.](https://arxiv.org/abs/2310.02446)). Treat that rate as a failure mode to test, not as a current number.
+
+**Validate the judge per language.** A judge that you validated in English is not validated in German or Hindi.
+
+- [ ] **Measure judge–human agreement separately for each language** (TPR, TNR, κ on that language's labels). GPT-4 judges showed "a bias towards higher scores", especially in low-resource and non-Latin-script languages ([Hada et al., 2024](https://arxiv.org/abs/2309.07462)).
+- [ ] **Prefer binary or pairwise verdicts over direct scores.** Human–LLM agreement was fair for pairwise comparisons but dropped for direct assessment in languages such as Bengali and Odia ([Pariksha](https://arxiv.org/abs/2406.15053)).
+- [ ] **Read the judge's reasoning, not only its verdict.** Judge reasoning "often does not match" the reasoning of native-speaker judges ([METAL](https://arxiv.org/abs/2404.01667)).
+- [ ] **Route a language without a validated judge to human review.** Do not report a judge-scored rate for it.
+
+The report below follows these rules. It keeps native and translated cases apart, and it refuses judge verdicts for languages without a validated judge.
+
+```python
+from collections import defaultdict
+
+def locale_report(results: list[dict], judge_validated: set[str]) -> dict:
+    """Pass rate per (locale, origin). Judge verdicts count only for validated languages."""
+    groups = defaultdict(list)
+    needs_review = set()
+    for r in results:
+        language = r["locale"].split("-")[0]
+        if r["grader"] == "judge" and language not in judge_validated:
+            needs_review.add(r["locale"])          # send to a native reviewer instead
+            continue
+        groups[(r["locale"], r["origin"])].append(r["verdict"] == "PASS")
+    rates = {key: (sum(v) / len(v), len(v)) for key, v in groups.items()}
+    return {"rates": rates, "needs_human_review": sorted(needs_review)}
+
+
+results = [
+    {"locale": "de-DE", "origin": "translated", "grader": "judge", "verdict": "PASS"},
+    {"locale": "de-DE", "origin": "translated", "grader": "judge", "verdict": "PASS"},
+    {"locale": "de-DE", "origin": "native", "grader": "judge", "verdict": "PASS"},
+    {"locale": "de-DE", "origin": "native", "grader": "judge", "verdict": "FAIL"},
+    {"locale": "hi-IN", "origin": "native", "grader": "judge", "verdict": "PASS"},
+    {"locale": "hi-IN", "origin": "native", "grader": "human", "verdict": "FAIL"},
+]
+report = locale_report(results, judge_validated={"de", "en"})
+assert report["rates"][("de-DE", "translated")] == (1.0, 2)   # translated cases look better...
+assert report["rates"][("de-DE", "native")] == (0.5, 2)       # ...than native ones
+assert report["rates"][("hi-IN", "native")] == (0.0, 1)       # only the human verdict counts
+assert report["needs_human_review"] == ["hi-IN"]
+```
+
+**Re-validate when the mix changes.** Re-run per-language judge validation when you change the judge model, add a language, or see a locale's traffic grow. The cited studies tested specific models, so measure your own judge on your own labels.
 
 ---
 
@@ -464,6 +557,7 @@ A gate of "0" or "≈ 0" is a statement about your sample, not the true rate. Wi
 
 - **Evaluate quality and safety as distinct dimensions.** A factually correct answer can still fail on verbosity, brand tone, toxicity, bias, or PII leakage.
 - **Layer your detectors from cheapest to strongest.** Combine deterministic regexes, specialized classifiers, validated LLM judges, and targeted human review.
+- **Validate per locale, not only per language.** Use native reviewers, native seed cases, and a judge validated in each language.
 - **Always pair under-refusal with over-refusal.** Optimizing safety refusal alone creates an overly cautious assistant that rejects benign user work.
 - **Test bias with end-to-end counterfactual swaps.** Measure decision flips and quality gaps across demographic groups relative to normal sampling variance.
 - **Use SelfCheckGPT only when context is unavailable.** When retrieved context exists, claim-level faithfulness is faster and more accurate.
@@ -476,6 +570,13 @@ A gate of "0" or "≈ 0" is a statement about your sample, not the true rate. Wi
 - Liu et al., *G-Eval: NLG Evaluation using GPT-4 with Better Human Alignment*, [arXiv:2303.16634](https://arxiv.org/abs/2303.16634)
 - Manakul et al., *SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for Generative Large Language Models*, [arXiv:2303.08896](https://arxiv.org/abs/2303.08896) · [code](https://github.com/potsawee/selfcheckgpt)
 - Min et al., *FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation*, [arXiv:2305.14251](https://arxiv.org/abs/2305.14251)
+- Hamel Husain & Shreya Shankar, [How do I evaluate outputs in a language I don't speak?](https://hamel.dev/blog/posts/evals-faq/how-do-i-evaluate-outputs-in-a-language-i-dont-speak.html) (Evals FAQ)
+- Hada et al., *Are Large Language Model-based Evaluators the Solution to Scaling Up Multilingual Evaluation?*, EACL 2024 Findings, [arXiv:2309.07462](https://arxiv.org/abs/2309.07462) · METAL, [arXiv:2404.01667](https://arxiv.org/abs/2404.01667)
+- Watts et al., *PARIKSHA: A Large-Scale Investigation of Human-LLM Evaluator Agreement on Multilingual and Multi-Cultural Data*, EMNLP 2024, [arXiv:2406.15053](https://arxiv.org/abs/2406.15053)
+- Singh et al., *Global MMLU*, [arXiv:2412.03304](https://arxiv.org/abs/2412.03304) · Romanou et al., *INCLUDE*, [arXiv:2411.19799](https://arxiv.org/abs/2411.19799) · Myung et al., *BLEnD*, [arXiv:2406.09948](https://arxiv.org/abs/2406.09948)
+- Aakanksha et al., *The Multilingual Alignment Prism*, [arXiv:2406.18682](https://arxiv.org/abs/2406.18682) · Yong et al., *Low-Resource Languages Jailbreak GPT-4*, [arXiv:2310.02446](https://arxiv.org/abs/2310.02446)
+- Freitag et al., *Experts, Errors, and Context: A Large-Scale Study of Human Evaluation for Machine Translation*, TACL 2021, [ACL Anthology](https://aclanthology.org/2021.tacl-1.87/) · [MQM typology](https://themqm.org/the-mqm-full-typology/)
+- W3C, [Language tags in HTML and XML](https://www.w3.org/International/articles/language-tags/) · [Personal names around the world](https://www.w3.org/International/questions/qa-personal-names) · [Unicode CLDR](https://cldr.unicode.org/)
 - Inan et al., *Llama Guard: LLM-based Input-Output Safeguard for Human-AI Conversations*, [arXiv:2312.06674](https://arxiv.org/abs/2312.06674) · [PurpleLlama repo](https://github.com/meta-llama/PurpleLlama)
 - Röttger et al., *XSTest: A Test Suite for Identifying Exaggerated Safety Behaviours in Large Language Models*, [arXiv:2308.01263](https://arxiv.org/abs/2308.01263)
 - Parrish et al., *BBQ: A Hand-Built Bias Benchmark for Question Answering*, [arXiv:2110.08193](https://arxiv.org/abs/2110.08193) · [BOLD dataset](https://github.com/amazon-science/bold)
