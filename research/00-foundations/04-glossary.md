@@ -90,6 +90,8 @@
 
 **Citation adherence:** Checks that verify whether every factual claim cites a source, and whether the cited source actually supports the claim. → [Instruction & Citation Adherence](../02-offline-evals/06-instruction-and-citation-adherence.md)
 
+**Citation audit:** Sorting each citation into supported, unsupported, dead, not fetched, or fabricated. Join the citations to the agent's fetch log to do it. → [Long-Horizon & Research Agent Evals §2.2](../02-offline-evals/11-long-horizon-and-research-agent-evals.md#22-check-every-citation-against-the-trace)
+
 **Citation precision:** The share of citations that support (or are needed for) the statement they are attached to (ALCE). Citations on unsupported statements get no credit. → [Instruction & Citation Adherence](../02-offline-evals/06-instruction-and-citation-adherence.md)
 
 **Classifier two-sample test (C2ST):** Train a classifier to tell two samples apart, such as synthetic and real questions. An AUC near 0.5 means the classifier cannot tell them apart. → [Synthetic Datasets](../01-datasets/03-synthetic-datasets.md)
@@ -107,6 +109,8 @@
 **Confidence interval (CI):** A range that likely contains the true value of a metric. For example, a 95% CI of 72–87% around an 81% pass rate on 100 rows. For pass rates, use the **Wilson score interval**. → [Why Evals and Guardrails](./01-why-evals-and-guardrails.md#54-is-the-change-real-statistics-in-one-page)
 
 **Confident learning:** A method that uses a model's predicted probabilities to rank labels that are likely wrong (for example with cleanlab). Send those labels to human review. → [SME Golden Datasets](../01-datasets/02-sme-golden-datasets.md)
+
+**Constraint retention:** Whether an instruction given early in a long run still holds after compaction. Test it by injecting a constraint early and checking it late. → [Long-Horizon & Research Agent Evals §4](../02-offline-evals/11-long-horizon-and-research-agent-evals.md#4-long-running-agents)
 
 **Construct validity:** Whether an eval measures the property it claims to measure, and only that property. → [Running Offline Experiments §12.1](../02-offline-evals/08-running-offline-experiments.md#121-is-this-eval-valid)
 
@@ -359,6 +363,8 @@
 **OTLP (OpenTelemetry Protocol):** The wire protocol for exporting traces, metrics, and logs to an OpenTelemetry backend. → [Observability & Tracing](../03-online-evals-and-observability/02-observability-and-tracing.md)
 
 **Outcome:** The final state of the environment at the end of a trial, such as database rows, files, or sent messages. Grade the outcome, not what the agent says it did. → [Agent Eval Environments & Graders](../02-offline-evals/09-agent-eval-environments-and-graders.md#2-words-used-on-this-page)
+
+**Over-searching:** Searching more than a question needs. It raises cost and can hurt abstention on unanswerable questions. → [Long-Horizon & Research Agent Evals §2.3](../02-offline-evals/11-long-horizon-and-research-agent-evals.md#23-sources-balance-and-knowing-when-to-stop)
 
 **OWASP Top 10 for LLM Applications:** A widely used community list of the ten biggest security risks in LLM applications. The current edition is **2026**: for example, Prompt Injection (`LLM01:2026`), Sensitive Information Disclosure (`LLM02:2026`), and Excessive Agency (`LLM03:2026`). Always write the year, because IDs change between editions. → [Threat Model & OWASP](../04-guardrails/07-threat-model-owasp.md)
 

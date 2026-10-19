@@ -73,6 +73,7 @@ flowchart LR
 | [08-running-offline-experiments.md](./08-running-offline-experiments.md) | Experiment design, baselines, sample sizes, variance, CI integration, regression gates, reporting | You are ready to compare variants and gate releases on eval results |
 | [09-agent-eval-environments-and-graders.md](./09-agent-eval-environments-and-graders.md) | Resettable eval environments, outcome graders per agent archetype, task validity checks (reference solution passes, do-nothing agent fails), grader hacking, long-horizon milestones, and a minimal harness | You evaluate an agent that changes state, or you build your own agent benchmark |
 | [10-decision-model-evals.md](./10-decision-model-evals.md) | **Experimental.** Evaluating decision models that return typed answers with probabilities: calibration, thresholds from costs, escalation paths | You use a decision model, guard classifier, or router and act on its probabilities |
+| [11-long-horizon-and-research-agent-evals.md](./11-long-horizon-and-research-agent-evals.md) | Claim-level grading and citation audits for deep research agents, harness changes as controlled experiments, and probes for long-running agents | Your agent writes long reports, runs for hours, or you are changing its harness |
 
 ## Suggested reading order
 
@@ -84,6 +85,7 @@ flowchart LR
 6. **Read [08 · Running offline experiments](./08-running-offline-experiments.md)** to turn these metrics into a repeatable release process.
 7. **Read [09 · Agent eval environments & graders](./09-agent-eval-environments-and-graders.md)** if your agent changes state in other systems and you need a resettable environment and outcome graders.
 8. **Read [10 · Decision model evals](./10-decision-model-evals.md)** *(experimental)* if you use a model that returns typed answers with probabilities.
+9. **Read [11 · Long-horizon & research agent evals](./11-long-horizon-and-research-agent-evals.md)** if your agent writes long cited reports, runs for hours, or you are changing its harness.
 
 **Prerequisites:** Prepare a dataset that matches the shape of your target evaluation. See [Datasets](../01-datasets/README.md) and [dataset strategy](../01-datasets/01-dataset-strategy.md).
 

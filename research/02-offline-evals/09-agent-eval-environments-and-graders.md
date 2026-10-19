@@ -206,6 +206,8 @@ Long tasks fail in ways short tasks do not. Errors compound, context gets compac
 5. **Test early constraints late.** Put a rule in the first turn, such as "do not touch `billing/`". Check it at the end, after context compaction.
 6. **Measure by task length.** Group tasks by how long a human needs to do them. METR's **50% time horizon** is the human task length at which an agent succeeds half the time ([Kwa et al., 2025](https://arxiv.org/abs/2503.14499)).
 
+For compaction probes, reliability across runs, and harness changes as experiments, see [Long-horizon and research agent evals](./11-long-horizon-and-research-agent-evals.md).
+
 ```text
 milestone_completion = milestones reached / milestones defined      (diagnostic only)
 task_success         = 1 if every required grader passes, else 0    (release gate)

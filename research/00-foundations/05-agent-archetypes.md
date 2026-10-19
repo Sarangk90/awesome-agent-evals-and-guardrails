@@ -140,7 +140,7 @@ The next sections give short notes for A6–A9. For how to build the environment
 - **Treat fetched pages as untrusted.** Research agents read many pages they do not control. This makes indirect injection the main threat.
 - **Cap cost and time.** Set limits on searches, fetched pages, tokens, and wall-clock time per task.
 
-For a public benchmark of hard-to-find facts, see BrowseComp ([Wei et al., 2025](https://arxiv.org/abs/2504.12516)).
+For a public benchmark of hard-to-find facts, see BrowseComp ([Wei et al., 2025](https://arxiv.org/abs/2504.12516)). For claim-level grading, citation audits, and over-searching, see [Long-horizon and research agent evals](../02-offline-evals/11-long-horizon-and-research-agent-evals.md#2-deep-research-agents).
 
 ### 5.4 A9: Policy-bound workflow agent
 
