@@ -313,11 +313,12 @@ Follow these proven authorization patterns:
 
 ## G. Agent, MCP, and gateway security
 
-Agentic RAG apps call tools through MCP servers and AI gateways. These are good choke points for guardrails, because every tool call passes through them. Keep the tool-call gate and tool tiers from [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md) (§2 and §6). Use the tools below to enforce or audit them.
+Agentic RAG apps often call tools through MCP servers and AI gateways. These are useful guardrail choke points **only for traffic routed through them**. Local shell commands, direct APIs, and agent-specific tool paths may bypass a gateway. Map the real execution paths before you rely on a gateway policy. Keep the tool-call gate and tool tiers from [Tool & action guardrails](../04-guardrails/05-tool-and-action-guardrails.md) (§2 and §6). Use the tools below to enforce or audit them.
 
 | Tool | Type / License | What it does | Watch-outs |
 |---|---|---|---|
 | **[Snyk Agent Scan](https://github.com/snyk/agent-scan)** (formerly Invariant Labs `mcp-scan`) | OSS CLI, Apache-2.0 | Discovers agents, MCP servers, and agent skills on a machine. Scans their tool descriptions for prompt injection and other risks. | The README marks CLI output as experimental. Do not build production gates on its field names. |
+| **[HOL Guard](https://github.com/hashgraph-online/hol-guard)** | OSS CLI + local hooks, Apache-2.0 | Scans plugins and applies allow, block, or approval decisions to supported coding-agent and MCP tool events. | Coverage varies by integration. Check the [support matrix](https://github.com/hashgraph-online/hol-guard/blob/main/docs/guard/harness-support.md) and test unmediated paths; this is not a universal tool-call gate. |
 | **[AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html)** + **[Policy](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)** (AWS) | Commercial AWS service | Gateway turns APIs and Lambda functions into MCP tools behind one endpoint. Policy checks each request against **Cedar** policies before it allows tool access. | AWS-only. You still need end-user identity in every request to make the policy meaningful. |
 | **Model Armor for MCP and Agent Gateway** (Google) | Commercial Google Cloud service | Screens prompts and tool traffic for Google Cloud MCP servers and Agent Gateway ([MCP](https://docs.cloud.google.com/model-armor/model-armor-mcp-google-cloud-integration), [Agent Gateway](https://docs.cloud.google.com/model-armor/model-armor-agent-gateway-integration)). | Same detectors and limits as the [Model Armor card](#google-model-armor). |
 | **NeMo Guardrails tool rails** | OSS, Apache-2.0 | Validates tool names and arguments against JSON Schema and checks tool results ([docs](https://github.com/NVIDIA-NeMo/Guardrails/blob/develop/docs/configure-rails/guardrail-catalog/tool-calling.mdx)). | Experimental IORails engine and OpenAI Chat Completions format only (see the [NeMo card](#nvidia-nemo-guardrails-colang)). |
@@ -331,6 +332,7 @@ Follow these rules for agent traffic:
 - [ ] **Scan tool descriptions before you connect a server:** Tool descriptions are untrusted input. Re-scan when a server updates.
 - [ ] **Enforce the tool tier at the gateway:** Apply the T0–T3 tiers from [Tool & action guardrails §6](../04-guardrails/05-tool-and-action-guardrails.md). For example, `create_ticket` is T1: show an inline preview and require one-click user confirmation before submit.
 - [ ] **Fail closed on tool-enabled turns:** If a gateway guardrail times out on a tool call, block the call or route the turn to a no-tools mode.
+- [ ] **Verify the enforcement path:** Test a safe, observable action through the gateway and a direct local path. Check the destination's actual state, not only the agent's approval log.
 
 ---
 
